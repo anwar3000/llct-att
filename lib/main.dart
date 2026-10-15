@@ -77,11 +77,12 @@ class _ProfileGateState extends State<_ProfileGate> {
         }
         final user = snap.data;
         if (user == null) {
-          return const _Blocked(
+          return _Blocked(
             title: 'Profile not set up',
             message:
                 'Your login exists but has no staff profile yet. Ask your manager to add you, '
-                'or (for the first admin) follow the setup guide in the README.',
+                'or (for the first admin) create Firestore document users/<UID> with role = admin.',
+            uid: widget.uid,
           );
         }
         if (!user.active) {
@@ -108,7 +109,8 @@ class _Splash extends StatelessWidget {
 class _Blocked extends StatelessWidget {
   final String title;
   final String message;
-  const _Blocked({required this.title, required this.message});
+  final String? uid;
+  const _Blocked({required this.title, required this.message, this.uid});
 
   @override
   Widget build(BuildContext context) {
@@ -125,6 +127,15 @@ class _Blocked extends StatelessWidget {
             const SizedBox(height: 8),
             Text(message,
                 textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted)),
+            if (uid != null) ...[
+              const SizedBox(height: 16),
+              const Text('Your UID (Firestore document ID):',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              SelectableText(uid!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+            ],
             const SizedBox(height: 24),
             OutlinedButton.icon(
               onPressed: AuthService.signOut,
