@@ -48,6 +48,15 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 3. In Firebase, go to **Authentication → Settings → Authorized domains → Add domain** and add `<your-github-user>.github.io`.
 4. If login says the API key is not valid for web, register a Web app in Firebase (Project settings → Add app → Web). Copy its `firebaseConfig` into a repo secret named `FIREBASE_WEB_CONFIG`, then re-run the deploy.
 
+## Optional: Google Maps address search (web dashboard)
+By default, site address search uses free OpenStreetMap data. To use **Google Maps with Google address suggestions** instead:
+1. Go to <https://console.cloud.google.com>, pick the same project as Firebase, and open **APIs & Services → Library**. Enable **Maps JavaScript API** and **Places API (New)**. Google requires a billing account; normal use for a dashboard like this usually stays within the free monthly usage.
+2. Go to **APIs & Services → Credentials → Create credentials → API key**. Under **Website restrictions**, add `https://llct.net/*` (or your dashboard domain).
+3. In the GitHub repo, go to **Settings → Secrets and variables → Actions → New secret**. Name it `GOOGLE_MAPS_API_KEY` and paste the key.
+4. Go to **Actions → Deploy web dashboard → Run workflow**.
+
+In both modes you can also paste a Google Maps link (the long URL containing `@lat,lng`) or plain `lat, lng` into the search box.
+
 ## Fastest way to get the APK: build on GitHub (no Flutter install)
 1. Do **Setup step 1** below (create the Firebase project, enable Email/Password, create Firestore, paste the rules).
 2. In Firebase go to **Project settings → General → Add app → Android**. Package name: **`com.attendancepro.attendance_pro`**. Click *Register app*, then **download `google-services.json`**.

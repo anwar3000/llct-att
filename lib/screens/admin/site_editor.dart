@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
+import '../../services/geocode_service.dart';
 import '../../services/location_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
@@ -47,7 +48,58 @@ class _SiteEditorState extends State<SiteEditor> {
     _name.dispose();
     _address.dispose();
     _notes.dispose();
+    _search.dispose();
     super.dispose();
+  }
+
+  final _search = TextEditingController();
+  bool _searching = false;
+
+  Future<void> _searchAddress() async {
+    final q = _search.text.trim();
+    if (q.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _searching = true);
+    List<PlaceResult> results = [];
+    try {
+      results = await GeocodeService.search(q, nearLat: _lat, nearLng: _lng);
+    } catch (e) {
+      if (mounted) showSnack(context, 'Search failed — check internet connection', error: true);
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+    if (!mounted) return;
+    if (results.isEmpty) {
+      showSnack(context, 'No places found for "$q"', error: true);
+      return;
+    }
+    final picked = results.length == 1
+        ? results.first
+        : await showModalBottomSheet<PlaceResult>(
+            context: context,
+            showDragHandle: true,
+            builder: (c) => SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final r in results)
+                    ListTile(
+                      leading: const Icon(Icons.place_outlined, color: AppColors.accentDark),
+                      title: Text(r.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text(r.subtitle),
+                      onTap: () => Navigator.pop(c, r),
+                    ),
+                ],
+              ),
+            ),
+          );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _lat = picked.lat;
+      _lng = picked.lng;
+      if (_address.text.trim().isEmpty) _address.text = picked.label;
+    });
+    _picker.currentState?.moveTo(LatLng(picked.lat, picked.lng));
   }
 
   Future<void> _useMyLocation() async {
@@ -156,7 +208,23 @@ class _SiteEditorState extends State<SiteEditor> {
                 label: const Text('Use my current location'),
               ),
             ]),
-            const Text('Or tap on the map to place the site.',
+            TextField(
+              controller: _search,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _searchAddress(),
+              decoration: InputDecoration(
+                hintText: 'Search address / place, or paste a Google Maps link',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searching
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))
+                    : IconButton(icon: const Icon(Icons.arrow_forward), onPressed: _searchAddress),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text('…or tap on the map to place the site.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
             const SizedBox(height: 8),
             LocationPicker(

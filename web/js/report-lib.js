@@ -253,6 +253,46 @@ export async function projectsOverviewReport() {
   };
 }
 
+// ================================================================== keyword search
+/** "Rahul  fuel" → ['rahul', 'fuel'];  quoted phrases stay together: "marina tower" */
+export function keywordTerms(q) {
+  const out = [];
+  String(q || '').toLowerCase().replace(/"([^"]+)"|(\S+)/g, (_, a, b) => { out.push((a || b).trim()); return ''; });
+  return out.filter(Boolean);
+}
+
+/**
+ * Returns a copy of the report keeping only rows where ALL keywords appear in
+ * some column. Numeric totals are recalculated for the filtered rows.
+ */
+export function filterReport(rep, q) {
+  const terms = keywordTerms(q);
+  if (!terms.length) return rep;
+  const sheets = rep.sheets.map((sh) => {
+    const rows = sh.rows.filter((r) => {
+      const text = r.map((c) => (c == null ? '' : String(c))).join(' \u0001 ').toLowerCase();
+      return terms.every((t) => text.includes(t));
+    });
+    let totals = sh.totals;
+    if (totals) {
+      totals = totals.map((v, i) => {
+        if (i === 0) return 'TOTAL (filtered)';
+        if (typeof v !== 'number') return '';
+        const sum = rows.reduce((a, r) => a + (typeof r[i] === 'number' ? r[i] : 0), 0);
+        return Math.round(sum * 100) / 100;
+      });
+    }
+    return { ...sh, rows, totals };
+  });
+  const n = sheets.reduce((a, s) => a + s.rows.length, 0);
+  return {
+    ...rep,
+    sheets,
+    subtitle: `${rep.subtitle || ''} · filtered by “${String(q).trim()}” (${n} rows)`,
+    filename: `${rep.filename}-filtered`,
+  };
+}
+
 // ================================================================== export
 function safeSheetName(n, used) {
   let s = n.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet';

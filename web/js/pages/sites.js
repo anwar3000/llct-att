@@ -1,6 +1,7 @@
 import { store, saveSite, deleteSite, saveProject, approveSite } from '../fb.js';
 import { esc, icon, pill, cap, progressBar, toast, modal, confirmBox, friendlyError, fmtMins } from '../util.js';
-import { makeMap, siteLayer, fitTo, DEFAULT_CENTER } from '../mapkit.js';
+import { makeMap, siteLayer, fitTo } from '../mapkit.js';
+import { createPlacePicker } from '../placepicker.js';
 
 const STATUSES = ['planned', 'active', 'on hold', 'completed'];
 
@@ -67,13 +68,8 @@ export function editSite(s) {
         ${store.projects.map((p) => `<option value="${p.id}" ${s?.projectId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
       <label class="f full"><span>Address / landmark</span><input name="address" value="${esc(s?.address)}"></label>
     </div>
-    <div class="row" style="margin-bottom:8px"><b>Location</b><span class="muted small">Click the map to place the site, or search / enter coordinates.</span></div>
-    <div class="row" style="margin-bottom:8px">
-      <input id="sf-search" placeholder="Search a place (e.g. Kakkanad, Kochi)" style="flex:1;min-width:200px">
-      <button type="button" class="btn ghost sm" id="sf-go">Search</button>
-      <button type="button" class="btn ghost sm" id="sf-me">${icon('pin', 14)} My location</button>
-    </div>
-    <div id="sf-map" class="map small"></div>
+    <div class="row" style="margin-bottom:8px"><b>Location</b><span class="muted small">Search the address, paste a Google Maps link, or click the map.</span></div>
+    <div id="sf-picker"></div>
     <div class="fields" style="margin-top:10px">
       <label class="f"><span>Latitude</span><input name="lat" value="${lat ?? ''}"></label>
       <label class="f"><span>Longitude</span><input name="lng" value="${lng ?? ''}"></label>
@@ -87,45 +83,22 @@ export function editSite(s) {
       <button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>Save site</button>`,
     onMount: (m, close) => {
       const f = m.querySelector('#sf');
-      const L = window.L;
-      const map = makeMap(m.querySelector('#sf-map'), { center: lat != null ? [lat, lng] : DEFAULT_CENTER, zoom: lat != null ? 16 : 5 });
-      let marker = null, circle = null;
-      const place = (la, ln, move = false) => {
-        lat = la; lng = ln;
-        f.lat.value = la.toFixed(6); f.lng.value = ln.toFixed(6);
-        if (marker) { marker.setLatLng([la, ln]); circle.setLatLng([la, ln]); } else {
-          marker = L.marker([la, ln]).addTo(map);
-          circle = L.circle([la, ln], { radius, color: '#D98A1A', fillOpacity: 0.12 }).addTo(map);
-        }
-        if (move) map.setView([la, ln], 16);
-      };
-      if (lat != null) place(lat, lng);
-      map.on('click', (e) => place(e.latlng.lat, e.latlng.lng));
-      f.radius.oninput = () => { radius = Number(f.radius.value); m.querySelector('#sf-rv').textContent = radius; if (circle) circle.setRadius(radius); };
+      const picker = createPlacePicker(m.querySelector('#sf-picker'), {
+        lat, lng, radius,
+        onPick: (la, ln, label) => {
+          lat = la; lng = ln;
+          f.lat.value = la.toFixed(6); f.lng.value = ln.toFixed(6);
+          if (label && !f.address.value.trim()) f.address.value = label;
+        },
+      });
+      const map = { remove: () => picker.destroy() };
+      f.radius.oninput = () => { radius = Number(f.radius.value); m.querySelector('#sf-rv').textContent = radius; picker.setRadius(radius); };
       f.progress.oninput = () => { m.querySelector('#sf-pv').textContent = f.progress.value; };
       const manual = () => {
         const la = parseFloat(f.lat.value), ln = parseFloat(f.lng.value);
-        if (!Number.isNaN(la) && !Number.isNaN(ln)) place(la, ln, true);
+        if (!Number.isNaN(la) && !Number.isNaN(ln)) { lat = la; lng = ln; picker.setPoint(la, ln); }
       };
       f.lat.onchange = manual; f.lng.onchange = manual;
-      m.querySelector('#sf-me').onclick = () => {
-        if (!navigator.geolocation) return toast('Location not available in this browser', true);
-        navigator.geolocation.getCurrentPosition((p) => place(p.coords.latitude, p.coords.longitude, true),
-          () => toast('Could not get your location', true), { enableHighAccuracy: true, timeout: 15000 });
-      };
-      const search = async () => {
-        const q = m.querySelector('#sf-search').value.trim();
-        if (!q) return;
-        try {
-          const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' } });
-          const j = await r.json();
-          if (!j.length) return toast('Place not found', true);
-          place(parseFloat(j[0].lat), parseFloat(j[0].lon), true);
-          if (!f.address.value) f.address.value = j[0].display_name.split(',').slice(0, 3).join(',');
-        } catch { toast('Search failed', true); }
-      };
-      m.querySelector('#sf-go').onclick = search;
-      m.querySelector('#sf-search').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } };
       m.querySelector('[data-cancel]').onclick = () => { map.remove(); close(); };
       m.querySelector('[data-del]')?.addEventListener('click', async () => {
         if (!await confirmBox('Delete site?', `Delete ${s.name}? Past attendance is kept. Tip: untick "Active" instead to hide it.`, { ok: 'Delete', danger: true })) return;

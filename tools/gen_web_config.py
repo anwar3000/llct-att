@@ -47,4 +47,7 @@ os.makedirs(os.path.dirname(out_path), exist_ok=True)
 with open(out_path, "w", encoding="utf-8") as f:
     f.write("// Generated at deploy time by tools/gen_web_config.py\n")
     f.write(f"export const firebaseConfig = {json.dumps(cfg, indent=2)};\n")
+    # Optional: Google Maps JavaScript API key (Maps JavaScript API + Places API (New) enabled).
+    gkey = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+    f.write(f"export const googleMapsApiKey = {json.dumps(gkey)};\n")
 print(f"Wrote {out_path} for project {cfg.get('projectId')}")

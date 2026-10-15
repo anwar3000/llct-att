@@ -30,6 +30,7 @@ jobs:
         env:
           FIREBASE_WEB_CONFIG: ${{ secrets.FIREBASE_WEB_CONFIG }}
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
           if ! python3 tools/gen_web_config.py web/js/config.js > gen.txt 2>&1; then
             MSG=$(tail -5 gen.txt | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
