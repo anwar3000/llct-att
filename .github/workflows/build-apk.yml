@@ -55,10 +55,21 @@ jobs:
         run: flutter pub get || (flutter pub upgrade --major-versions && flutter pub get)
 
       - name: Analyze code
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
+        run: |
+          flutter analyze --no-fatal-infos --no-fatal-warnings > analyze.txt 2>&1 || true
+          ERR=$(grep -E "^\s*error " analyze.txt | head -60 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+          if [ -n "$ERR" ]; then echo "::error title=Analyzer errors::$ERR"; fi
 
       - name: Build APK
-        run: flutter build apk --release
+        run: |
+          set -o pipefail
+          if ! flutter build apk --release 2>&1 | tee build.log; then
+            OUT=$(grep -vE "^\s*$" build.log | grep -iE "error|exception|failed|what went wrong|\.dart:|> " | head -70 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+            echo "::error title=Build failed::$OUT"
+            TAIL=$(tail -40 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+            echo "::error title=Build log tail::$TAIL"
+            exit 1
+          fi
 
       - name: Stop if Firebase secret is missing
         if: env.PLACEHOLDER == '1'
