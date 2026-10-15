@@ -12,6 +12,7 @@ import * as updates from './pages/updates.js';
 import * as reports from './pages/reports.js';
 
 const app = document.getElementById('app');
+window.__appStarted = true;
 
 const NAV = [
   { path: '', label: 'Dashboard', icon: 'dashboard', page: dashboard },
