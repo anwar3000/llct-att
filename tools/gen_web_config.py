@@ -51,3 +51,5 @@ with open(out_path, "w", encoding="utf-8") as f:
     gkey = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
     f.write(f"export const googleMapsApiKey = {json.dumps(gkey)};\n")
 print(f"Wrote {out_path} for project {cfg.get('projectId')}")
+gk = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+print(f"::notice title=Google Maps key::{'set (' + gk[:6] + '…' + gk[-4:] + ', ' + str(len(gk)) + ' chars)' if gk else 'NOT set - free OpenStreetMap search will be used'}")

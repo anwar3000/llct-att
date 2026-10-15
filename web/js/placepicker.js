@@ -15,7 +15,34 @@ const ORANGE = '#D98A1A';
 // ------------------------------------------------------------------ Google loader
 let gPromise = null;
 let gAuthFailed = false;
-window.gm_authFailure = () => { gAuthFailed = true; console.warn('Google Maps key rejected'); };
+let gLastError = '';
+const gFailListeners = new Set();
+window.gm_authFailure = () => {
+  gAuthFailed = true;
+  console.warn('Google Maps key rejected');
+  setTimeout(() => gFailListeners.forEach((fn) => fn()), 50);
+};
+// Google prints the real reason (RefererNotAllowedMapError, ApiNotActivatedMapError, …) to the console.
+const origErr = console.error.bind(console);
+console.error = (...a) => {
+  const t = a.map((x) => String(x && x.message ? x.message : x)).join(' ');
+  const m = t.match(/Google Maps JavaScript API (?:error|warning): (\w+)/);
+  if (m) gLastError = m[1];
+  origErr(...a);
+};
+const REASONS = {
+  RefererNotAllowedMapError: 'this website address is not allowed on the key — add https://anwar3000.github.io/* under Website restrictions',
+  ApiNotActivatedMapError: 'Maps JavaScript API is not enabled for this project',
+  BillingNotEnabledMapError: 'billing is not enabled on the Google Cloud project',
+  InvalidKeyMapError: 'the key is invalid (check the GOOGLE_MAPS_API_KEY secret)',
+  ApiTargetBlockedMapError: 'the key\'s API restrictions block Maps JavaScript API',
+  MissingKeyMapError: 'no key was sent',
+};
+export function googleStatus() {
+  if (!GOOGLE_KEY) return 'No Google Maps key configured — using free OpenStreetMap search.';
+  if (gAuthFailed || gLastError) return `Google Maps rejected the key${gLastError ? ` (${gLastError}): ${REASONS[gLastError] || 'see Google Cloud console'}` : ''} — using free map instead.`;
+  return '';
+}
 
 function loadGoogle() {
   if (!GOOGLE_KEY || gAuthFailed) return Promise.resolve(null);
@@ -154,9 +181,11 @@ export function createPlacePicker(root, opts) {
     };
   }
 
-  function googleEngine(g) {
+  async function googleEngine(g) {
+    const { Map, Circle } = await g.importLibrary('maps');
+    const { Marker } = await g.importLibrary('marker');
     mapEl.innerHTML = '';
-    const map = new g.Map(mapEl, {
+    const map = new Map(mapEl, {
       center: lat != null ? { lat, lng } : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] },
       zoom: lat != null ? 17 : 5, mapTypeControl: true, streetViewControl: false, fullscreenControl: true, gestureHandling: 'greedy',
     });
@@ -164,9 +193,9 @@ export function createPlacePicker(root, opts) {
     const setPoint = (la, ln, move) => {
       const pos = { lat: la, lng: ln };
       if (!marker) {
-        marker = new g.Marker({ map, position: pos, draggable: true });
+        marker = new Marker({ map, position: pos, draggable: true });
         marker.addListener('dragend', (e) => pick(e.latLng.lat(), e.latLng.lng(), '', false));
-        circle = new g.Circle({ map, center: pos, radius, strokeColor: ORANGE, strokeWeight: 2, fillColor: ORANGE, fillOpacity: 0.12, clickable: false });
+        circle = new Circle({ map, center: pos, radius, strokeColor: ORANGE, strokeWeight: 2, fillColor: ORANGE, fillOpacity: 0.12, clickable: false });
       } else { marker.setPosition(pos); circle.setCenter(pos); }
       if (move) { map.panTo(pos); map.setZoom(17); }
     };
@@ -178,18 +207,29 @@ export function createPlacePicker(root, opts) {
     };
   }
 
+  const hint = root.querySelector('.pp-hint');
+  const useFree = (why) => {
+    gm = null;
+    engine?.destroy();
+    engine = leafletEngine();
+    if (lat != null) engine.setPoint(lat, lng, false);
+    hint.innerHTML = `<span style="color:#a8640f">⚠ ${esc(why || googleStatus())}</span><br>Click the map or drag the pin to fine-tune the exact spot.`;
+  };
+  const onFail = () => useFree(googleStatus());
+  gFailListeners.add(onFail);
   (async () => {
     gm = await loadGoogle();
     if (gm && !gAuthFailed) {
       try {
-        engine = googleEngine(gm);
+        engine = await googleEngine(gm);
         const { AutocompleteSessionToken } = await gm.importLibrary('places');
         token = new AutocompleteSessionToken();
-        root.querySelector('.pp-hint').textContent = 'Google Maps · click the map or drag the pin to fine-tune the exact spot.';
-      } catch (e) { console.warn(e); gm = null; }
+        hint.textContent = 'Google Maps · click the map or drag the pin to fine-tune the exact spot.';
+        if (lat != null) engine.setPoint(lat, lng, false);
+        return;
+      } catch (e) { console.warn(e); useFree(`Google Maps could not start: ${e.message || e}`); return; }
     }
-    if (!engine || gAuthFailed) { gm = null; engine?.destroy(); engine = leafletEngine(); }
-    if (lat != null) engine.setPoint(lat, lng, false);
+    useFree(GOOGLE_KEY ? (googleStatus() || 'Google Maps did not load (blocked or offline)') : googleStatus());
   })();
 
   // ---------- search box
@@ -227,7 +267,11 @@ export function createPlacePicker(root, opts) {
     let res = [];
     if (gm) {
       try { res = await googleSuggest(gm, q, lat != null ? { lat, lng } : near, token); }
-      catch (e) { console.warn('Google Places unavailable, using free search', e); gm = null; }
+      catch (e) {
+        console.warn('Google Places unavailable, using free search', e);
+        gm = null;
+        hint.innerHTML = `<span style="color:#a8640f">⚠ Google address search failed: ${esc((e && e.message) || e)}. Check that “Places API (New)” is enabled and allowed for this key. Using free search.</span>`;
+      }
     }
     if (!gm) res = await freeSuggest(q, lat != null ? { lat, lng } : null);
     if (my !== seq) return;
@@ -264,6 +308,6 @@ export function createPlacePicker(root, opts) {
   return {
     setRadius: (r) => { radius = r; engine?.setRadius(r); },
     setPoint: (la, ln) => { lat = la; lng = ln; engine?.setPoint(la, ln, true); },
-    destroy: () => { clearTimeout(timer); engine?.destroy(); },
+    destroy: () => { clearTimeout(timer); gFailListeners.delete(onFail); engine?.destroy(); },
   };
 }
