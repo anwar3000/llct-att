@@ -11,8 +11,14 @@ import sys
 src = sys.argv[1]
 package = sys.argv[2] if len(sys.argv) > 2 else "com.attendancepro.attendance_pro"
 
-with open(src, encoding="utf-8") as f:
-    data = json.load(f)
+try:
+    with open(src, encoding="utf-8") as f:
+        data = json.load(f)
+except json.JSONDecodeError as e:
+    sys.exit(
+        f"ERROR: google-services.json is not valid JSON ({e}). "
+        "Copy the WHOLE file contents (starting with {{ and ending with }}) into the secret."
+    )
 
 info = data["project_info"]
 clients = data.get("client", [])

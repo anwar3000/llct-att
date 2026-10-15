@@ -49,7 +49,12 @@ jobs:
           else
             printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
           fi
-          python3 tools/gen_firebase_options.py android/app/google-services.json com.attendancepro.attendance_pro
+          if ! python3 tools/gen_firebase_options.py android/app/google-services.json com.attendancepro.attendance_pro > gen.txt 2>&1; then
+            MSG=$(tail -5 gen.txt | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+            echo "::error title=Firebase config problem::$MSG"
+            exit 1
+          fi
+          cat gen.txt
 
       - name: Get packages
         run: flutter pub get || (flutter pub upgrade --major-versions && flutter pub get)
