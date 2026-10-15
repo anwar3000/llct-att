@@ -1,0 +1,146 @@
+# Attendance Pro
+
+A Flutter + Firebase Android app for field staff attendance, with a management dashboard built into the same app. Staff and managers use one APK, and the role on each login decides which screens open.
+
+## What's inside
+
+### Staff app (4 tabs)
+| Tab | What it does |
+|---|---|
+| **Today** | Big **CHECK IN / CHECK OUT** button. It records GPS coordinates, accuracy and distance from the site, plus the time. A live timer shows today's total work time. Sites are listed nearest-first and scheduled sites come first. Staff can check in at **several sites per day**. Today's schedule and today's check-ins are shown below the button. |
+| **History** | A month switcher with total hours, days worked, average per day, off days and absences. It also shows a colour calendar and an expandable day-by-day log. The **off-day panel** shows how many of the 4 monthly off days are used and lets staff request an off day. |
+| **Site Update** | Pick a site, choose a category (Progress / Issue / Material / Safety), write a note, set progress %, add up to 3 photos. GPS is attached when available. Lists this month's updates. |
+| **Petty** | Balance card showing received, spent, pending and balance. Staff can **add an expense** (with a receipt photo) or **record cash received**. Both stay *Pending* until a manager approves them. The history can be filtered. |
+
+### Management dashboard (5 tabs)
+| Tab | What it does |
+|---|---|
+| **Overview** | KPIs: on duty now, present, work time today, active sites, pending approvals, flagged check-ins. Also shows a "Needs attention" list (forgotten check-outs, out-of-area or fake-GPS check-ins), approvals, team status, schedule coverage, site progress and the latest site updates. |
+| **Live Map** | OpenStreetMap with every staff member's **live location** (green = live, amber = stale, grey = off duty) and site geofence circles. A roster of on-duty staff sits along the bottom; tap anyone to see details and their route. |
+| **Team** | Search and filter staff by status, and add employees (creates their login). Each employee has a detail page with a monthly attendance calendar, **today's GPS route** on a map (with distance travelled), their petty-cash account and their site updates. |
+| **Sites** | Sites: add or edit with a map picker or "use my current location", geofence radius, status and progress. Schedule: assign one or more sites to one or more employees, with an optional repeat for N days (weekly offs are skipped). Updates: a feed of site updates you can filter. |
+| **Petty** | Totals, approvals, balance per employee and all transactions. **Give cash** records an advance to an employee. |
+
+### Rules built in
+- **Geofence:** each site has a radius (50–1000 m). Checking in outside it is allowed but **flagged**.
+- **Fake GPS:** mock-location apps are detected and the check-in is flagged.
+- **Live tracking:** this runs only while an employee is checked in. It uses an Android foreground service (an "On duty" notification), so it keeps working with the app in the background. A trail point is stored every 2 minutes or every 75 m of movement.
+- **Off days:** each employee gets a monthly quota (default **4**). Set a weekly off day (Sunday, Friday or any day) or leave it **flexible** so staff request their own days for approval.
+- **Forgotten check-outs** appear on the Overview, and a manager can close them with the correct time.
+- **No paid Firebase services needed.** Photos are compressed and stored inside Firestore, so the free *Spark* plan is enough.
+
+---
+
+## Fastest way to get the APK: build on GitHub (no Flutter install)
+1. Do **Setup step 1** below (create the Firebase project, enable Email/Password, create Firestore, paste the rules).
+2. In Firebase go to **Project settings → General → Add app → Android**. Package name: **`com.attendancepro.attendance_pro`**. Click *Register app*, then **download `google-services.json`**.
+3. On <https://github.com>, create a **private** repository and upload everything in this folder, including the hidden `.github` folder.
+4. In the repo, open **Settings → Secrets and variables → Actions → New repository secret**. Name: `GOOGLE_SERVICES_JSON`. Value: paste the whole contents of `google-services.json`.
+5. Open **Actions → Build APK → Run workflow**. After about 10 minutes, open the finished run and download **AttendancePro-apk** under *Artifacts*. Unzip it to get `app-release.apk`.
+6. Copy the APK to the phones and install it (allow "Install unknown apps"). Then do **Setup step 3** to create the first manager.
+
+---
+
+## Setup (about 20 minutes)
+
+### 0. Install the tools
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (stable channel) with Android Studio / Android SDK
+- Node.js / firebase-tools are **not needed**: just put `google-services.json` in the project folder before running `setup.sh`
+
+### 1. Create the Firebase project
+1. Go to <https://console.firebase.google.com> and choose **Add project**. Google Analytics is optional.
+2. **Build → Authentication → Get started → Sign-in method → Email/Password → Enable**.
+3. **Build → Firestore Database → Create database** in production mode. Pick a location near you (e.g. `asia-south1` for India).
+4. In **Firestore → Rules**, replace everything with the contents of [`firestore.rules`](firestore.rules) and click **Publish**.
+
+### 2. Generate the project and connect Firebase
+From this folder:
+
+```bash
+# macOS / Linux
+bash setup.sh
+```
+```powershell
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+The script:
+1. runs `flutter create` to add the Android files (your `lib/` and `AndroidManifest.xml` are kept)
+2. sets `minSdk` to 24
+3. runs `flutter pub get`
+4. runs `flutterfire configure`. Pick the project you created and Android. This writes `lib/firebase_options.dart` and `google-services.json`.
+
+### 3. Create the first manager account
+New accounts are normally created from inside the app, but the very first manager has to be created by hand:
+
+1. **Authentication → Users → Add user**
+   - Email: `admin@staff.attendance.app` (lets you log in with the ID **admin**)
+   - Password: choose one
+   - Copy the **User UID** that appears.
+2. **Firestore → Start collection** → Collection ID `users` → Document ID = *paste the UID* → add these fields:
+
+| Field | Type | Value |
+|---|---|---|
+| `name` | string | Your name |
+| `loginId` | string | `admin` |
+| `email` | string | `admin@staff.attendance.app` |
+| `role` | string | `admin` |
+| `active` | boolean | `true` |
+
+### 4. Run it
+```bash
+flutter run                    # on a connected phone
+flutter build apk --release    # APK in build/app/outputs/flutter-apk/app-release.apk
+```
+Sign in with **admin** and your password. Then:
+1. **Sites → Add site.** Stand at the site and tap *Use my current location*, or tap the map.
+2. **Team → Add employee.** Give them an ID such as `EMP001` and a password, and choose their weekly off day.
+3. **Sites → Schedule → Assign site** (optional).
+4. Install the same APK on the staff phones. They sign in with their ID and password.
+
+---
+
+## Tips for reliable GPS tracking
+- On first check-in, staff must allow **Location → "While using the app"** (or "Allow all the time"). On Android 13+ also allow notifications so the *On duty* notice is visible.
+- Some brands (Xiaomi, Oppo, Vivo, Realme, Samsung) kill background apps aggressively. On those phones set **Battery → App battery saver → Attendance Pro → No restrictions**, and on Xiaomi also turn on **Autostart**.
+- Check-in uses the best available GPS fix with a 25-second timeout. Indoors, accuracy can be ±50 m or worse. The radius slider on each site handles this.
+
+## Changing things
+| Want to change… | Edit |
+|---|---|
+| Currency symbol (₹) | `kCurrency` in `lib/core/utils.dart` |
+| Default monthly off days (4) | `kDefaultMonthlyOffQuota` in `lib/core/utils.dart` |
+| Default geofence radius | `kDefaultSiteRadius` in `lib/core/utils.dart` |
+| Brand colours | `AppColors` in `lib/core/theme.dart` |
+| Tracking frequency | `_trackEvery`, `_trackMinMeters` and `AndroidSettings` in `lib/services/tracking_service.dart` |
+| Expense categories | `expenseCategories` in `lib/widgets/petty_form.dart` |
+| App name | `android:label` in `android/app/src/main/AndroidManifest.xml` |
+
+## Project structure
+```
+lib/
+  main.dart                     auth gate → staff app or dashboard
+  core/        theme.dart, utils.dart
+  models/      models.dart       users, sites, schedules, attendance, updates, petty, off days
+  services/    db.dart           all Firestore reads/writes (no composite indexes needed)
+               auth_service.dart sign-in, create staff logins without logging the manager out
+               location_service.dart, tracking_service.dart, photo_service.dart
+  widgets/     common.dart, tiles.dart, month_view.dart, petty_form.dart, map_widgets.dart
+  screens/
+    auth/      login_screen.dart
+    employee/  employee_shell.dart, home_tab.dart, history_tab.dart, site_update_tab.dart, petty_tab.dart
+    admin/     admin_shell.dart, admin_live.dart, overview_tab.dart, live_map_tab.dart, team_tab.dart,
+               employee_detail_screen.dart, employee_form.dart, sites_tab.dart, site_editor.dart,
+               petty_admin_tab.dart, approvals.dart, staff_status.dart
+firestore.rules                 security rules (staff only see their own data)
+```
+
+## Firestore collections
+`users` (+ `users/{uid}/track` GPS trail) · `sites` · `schedules` · `attendance` · `siteUpdates` · `petty` · `offDays`
+
+## Known limits
+- **Password reset:** staff log in with IDs rather than real emails, so reset passwords in *Firebase Console → Authentication → (user) → Reset password*. You can also delete the user there and recreate them in the app.
+- **Android only.** iOS would also need location keys added to `Info.plist` and `flutterfire configure --platforms=ios`.
+- **Timestamps:** check-in times come from the phone clock. The server time is also stored (`checkInServer` / `checkOutServer`) for auditing.
+- **Version conflicts:** if `flutter pub get` reports them on a much newer Flutter, run `flutter pub upgrade --major-versions`.
