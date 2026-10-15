@@ -1,4 +1,4 @@
-# Attendance Pro
+# LLCT Attendance
 
 A Flutter + Firebase Android app for field staff attendance, with a management dashboard built into the same app. Staff and managers use one APK, and the role on each login decides which screens open.
 
@@ -30,6 +30,23 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 - **No paid Firebase services needed.** Photos are compressed and stored inside Firestore, so the free *Spark* plan is enough.
 
 ---
+
+## What's new
+- **Web dashboard** for managers (`web/` folder). It's published free on GitHub Pages and includes projects, live map, attendance, petty cash and downloadable reports in Excel, PDF and CSV.
+- **Roles:** `admin` has full access. `manager` sees everything except accounts (petty cash and budgets) and can't create logins. `employee` uses the mobile app.
+- **Strict geofence:** staff can only check in inside a site's radius, which you set per site. Fake-GPS check-ins are blocked.
+- **New sites from the field:** if no site is near, an employee can add their current location as a new site. It shows as *Awaiting approval* until an admin or manager approves it.
+- **Hourly location check:** while an employee is checked in, the phone records a GPS point at least every hour. It raises a **geofence alert** if they leave the site area without checking out, and management sees and resolves alerts on the dashboard.
+- **Stay signed in:** staff stay logged in on their phone until they sign out.
+- **LLCT branding:** logo, app icon and orange/charcoal colours.
+
+> **After every update, re-publish `firestore.rules`** in Firebase Console → Firestore → Rules. New collections (`projects`, `alerts`) and roles depend on it.
+
+## Web dashboard setup (one time)
+1. In the GitHub repo, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Go to **Actions → Deploy web dashboard → Run workflow**. The site appears at `https://<your-github-user>.github.io/<repo>/`.
+3. In Firebase, go to **Authentication → Settings → Authorized domains → Add domain** and add `<your-github-user>.github.io`.
+4. If login says the API key is not valid for web, register a Web app in Firebase (Project settings → Add app → Web). Copy its `firebaseConfig` into a repo secret named `FIREBASE_WEB_CONFIG`, then re-run the deploy.
 
 ## Fastest way to get the APK: build on GitHub (no Flutter install)
 1. Do **Setup step 1** below (create the Firebase project, enable Email/Password, create Firestore, paste the rules).

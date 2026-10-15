@@ -125,33 +125,40 @@ class _HomeTabState extends State<HomeTab> {
       showSnack(context, 'Check out from ${widget.open!.siteName} first.');
       return;
     }
-    if (_sites.isEmpty) {
-      showSnack(context, 'No sites have been set up yet. Ask management to add a site.',
-          error: true);
-      return;
-    }
     final pos = await _locate('Getting your GPS location…');
     if (pos == null || !mounted) return;
 
-    final site = preselected ?? await _pickSite(pos);
+    // No site anywhere near (or none exist yet) → offer to create one here.
+    if (pos.isMocked) {
+      await _blocked('Fake GPS detected',
+          'A mock-location app is active on this phone. Turn it off to check in.');
+      return;
+    }
+    final tol = TrackingService.tolerance(pos.accuracy);
+    final nearby = _visibleSites.any((s) =>
+        LocationService.distance(pos.latitude, pos.longitude, s.lat, s.lng) <= s.radius + tol);
+    Site? site = preselected;
+    if (site == null) {
+      site = (!nearby && _visibleSites.isEmpty)
+          ? _newSiteMarker
+          : await _pickSite(pos, offerNew: !nearby);
+    }
     if (site == null || !mounted) return;
+    if (identical(site, _newSiteMarker)) {
+      site = await _createSiteHere(pos);
+      if (site == null || !mounted) return;
+    }
 
     final dist = LocationService.distance(pos.latitude, pos.longitude, site.lat, site.lng);
-    if (pos.isMocked) {
-      final ok = await confirm(context, 'Fake GPS detected',
-          'A mock-location app seems to be active. This check-in will be flagged for management.',
-          ok: 'Continue');
-      if (!ok || !mounted) return;
-    }
-    if (dist > site.radius) {
-      final ok = await confirm(
-        context,
-        'You are outside the site',
-        'You are ${fmtDistance(dist)} from ${site.name} (allowed: ${site.radius.round()} m).\n\n'
-            'You can still check in, but it will be flagged for management.',
-        ok: 'Check in anyway',
+    // Strict geofence: check-in only inside the site's radius (set by management).
+    if (dist > site.radius + tol) {
+      await _blocked(
+        'Outside the site area',
+        'You are ${fmtDistance(dist)} from ${site.name}.\n'
+            'Check-in is allowed only within ${site.radius.round()} m of the site.\n\n'
+            'Move closer to the site and try again. (GPS accuracy now: ±${pos.accuracy.round()} m)',
       );
-      if (!ok || !mounted) return;
+      return;
     }
 
     setState(() {
@@ -223,10 +230,94 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
-  Future<Site?> _pickSite(Position pos) {
+  static final _newSiteMarker = Site(id: '__new__', name: '', lat: 0, lng: 0);
+
+  /// Approved sites, plus any site this employee added that is still awaiting approval.
+  List<Site> get _visibleSites =>
+      _sites.where((s) => s.approved || s.createdBy == widget.me.id).toList();
+
+  Future<void> _blocked(String title, String message) => showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          icon: const Icon(Icons.wrong_location_outlined, color: AppColors.danger, size: 36),
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(100, 42)),
+              onPressed: () => Navigator.pop(c),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+  /// Asks for a name and saves the employee's current GPS position as a new site.
+  Future<Site?> _createSiteHere(Position pos) async {
+    final name = TextEditingController();
+    final address = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        icon: const Icon(Icons.add_location_alt, color: AppColors.accentDark, size: 36),
+        title: const Text('New site at your location'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('No registered site was found here. Give this place a name and it will be '
+              'added as a new site (management will see it).'),
+          const SizedBox(height: 14),
+          TextField(
+            controller: name,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Site name *', hintText: 'e.g. Marina Tower Block B'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: address,
+            decoration: const InputDecoration(labelText: 'Landmark / address (optional)'),
+          ),
+          const SizedBox(height: 8),
+          Text('GPS ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)} · ±${pos.accuracy.round()} m',
+              style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(120, 42)),
+            onPressed: () {
+              if (name.text.trim().isEmpty) return;
+              Navigator.pop(c, true);
+            },
+            child: const Text('Add & check in'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return null;
+    setState(() {
+      _busy = true;
+      _busyText = 'Adding site…';
+    });
+    try {
+      return await Db.createSiteByEmployee(
+        user: widget.me,
+        name: name.text.trim(),
+        address: address.text.trim(),
+        lat: pos.latitude,
+        lng: pos.longitude,
+      );
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not add site: $e', error: true);
+      return null;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<Site?> _pickSite(Position pos, {bool offerNew = true}) {
     final scheduledIds = _schedules.map((s) => s.siteId).toSet();
     final doneIds = _sessions.where((s) => !s.isOpen).map((s) => s.siteId).toSet();
-    final items = _sites
+    final items = _visibleSites
         .map((s) => (
               site: s,
               dist: LocationService.distance(pos.latitude, pos.longitude, s.lat, s.lng),
@@ -260,11 +351,29 @@ class _HomeTabState extends State<HomeTab> {
             child: ListView.separated(
               controller: scroll,
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-              itemCount: items.length,
+              itemCount: items.length + 1,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (c, i) {
-                final it = items[i];
-                final inside = it.dist <= it.site.radius;
+                if (i == 0) {
+                  return Card(
+                    color: offerNew ? AppColors.accentSoft : null,
+                    child: ListTile(
+                      onTap: () => Navigator.pop(c, _newSiteMarker),
+                      leading: const CircleAvatar(
+                        backgroundColor: AppColors.accent,
+                        child: Icon(Icons.add_location_alt, color: AppColors.primaryDark),
+                      ),
+                      title: const Text('Add this place as a new site',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(offerNew
+                          ? 'No registered site is near you'
+                          : 'Use if your site is not in the list'),
+                      trailing: const Icon(Icons.chevron_right),
+                    ),
+                  );
+                }
+                final it = items[i - 1];
+                final inside = it.dist <= it.site.radius + TrackingService.tolerance(pos.accuracy);
                 final scheduled = scheduledIds.contains(it.site.id);
                 return Card(
                   child: ListTile(
@@ -277,16 +386,24 @@ class _HomeTabState extends State<HomeTab> {
                     ),
                     title: Text(it.site.name,
                         style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text(
-                        '${fmtDistance(it.dist)} away${it.site.address.isEmpty ? '' : ' · ${it.site.address}'}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    trailing: Wrap(spacing: 4, direction: Axis.vertical, children: [
-                      if (scheduled) const Pill('Scheduled', color: AppColors.info),
-                      if (doneIds.contains(it.site.id))
-                        const Pill('Visited', color: AppColors.muted),
-                      if (inside) const Pill('Inside', color: AppColors.success),
+                    subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(
+                          '${fmtDistance(it.dist)} away${it.site.address.isEmpty ? '' : ' · ${it.site.address}'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 4),
+                      Wrap(spacing: 4, runSpacing: 4, children: [
+                        inside
+                            ? const Pill('Inside', color: AppColors.success)
+                            : const Pill('Too far', color: AppColors.danger),
+                        if (scheduled) const Pill('Scheduled', color: AppColors.info),
+                        if (doneIds.contains(it.site.id))
+                          const Pill('Visited', color: AppColors.muted),
+                        if (!it.site.approved)
+                          const Pill('Awaiting approval', color: AppColors.warning),
+                      ]),
                     ]),
+                    trailing: const Icon(Icons.chevron_right),
                   ),
                 );
               },
@@ -388,36 +505,44 @@ class _HomeTabState extends State<HomeTab> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: open != null
-              ? const [Color(0xFF14704F), AppColors.success]
-              : const [AppColors.primaryDark, AppColors.primary],
+        gradient: const LinearGradient(
+          colors: [AppColors.primaryDark, AppColors.primary],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
+        border: Border(
+          bottom: BorderSide(
+              color: open != null ? AppColors.success : AppColors.accent, width: 4),
+        ),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('$greeting, ${widget.me.name.split(' ').first}',
             style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
         Text(fmtDate(now), style: TextStyle(color: Colors.white.withValues(alpha: 0.75))),
         const SizedBox(height: 18),
-        Row(children: [
-          Icon(open != null ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: Colors.white, size: 16),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              open != null ? 'On duty at ${open.siteName}' : 'Not checked in',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-            ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: (open != null ? AppColors.success : AppColors.accent).withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(20),
           ),
-        ]),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.circle, color: open != null ? const Color(0xFF5FD49A) : AppColors.accent, size: 10),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                open != null ? 'On duty · ${open.siteName}' : 'Not checked in',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+        ),
         if (open != null)
           Padding(
-            padding: const EdgeInsets.only(top: 2, left: 22),
+            padding: const EdgeInsets.only(top: 6, left: 4),
             child: Text('Since ${fmtTime(open.checkIn)}',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12.5)),
           ),
@@ -430,8 +555,8 @@ class _HomeTabState extends State<HomeTab> {
                 since: open.checkIn,
                 base: _closedToday,
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 38,
+                    color: AppColors.accent,
+                    fontSize: 40,
                     fontWeight: FontWeight.w800,
                     fontFeatures: [FontFeature.tabularFigures()]),
               )
@@ -451,9 +576,12 @@ class _HomeTabState extends State<HomeTab> {
       height: 64,
       child: FilledButton.icon(
         style: FilledButton.styleFrom(
-          backgroundColor: checkedIn ? AppColors.danger : AppColors.primary,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          backgroundColor: checkedIn ? AppColors.danger : AppColors.accent,
+          foregroundColor: checkedIn ? Colors.white : AppColors.primaryDark,
+          elevation: 2,
+          shadowColor: (checkedIn ? AppColors.danger : AppColors.accentDark).withValues(alpha: 0.4),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 1),
         ),
         onPressed: _busy ? null : (checkedIn ? _checkOut : () => _startCheckIn()),
         icon: Icon(checkedIn ? Icons.logout : Icons.fingerprint, size: 28),

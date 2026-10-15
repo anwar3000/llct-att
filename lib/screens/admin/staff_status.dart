@@ -61,7 +61,7 @@ List<StaffStatus> computeStatuses({
   final now = DateTime.now();
   final today = dateKey(now);
   final out = <StaffStatus>[];
-  for (final u in users.where((u) => !u.isAdmin && u.active)) {
+  for (final u in users.where((u) => u.isEmployee && u.active)) {
     final mine = todaySessions.where((s) => s.employeeId == u.id).toList();
     final open = openSessions.where((s) => s.employeeId == u.id).firstOrNull;
     final off = u.isWeeklyOff(now) ||

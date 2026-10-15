@@ -17,7 +17,7 @@
          system camera app; declaring CAMERA without requesting it breaks that. -->
 
     <application
-        android:label="Attendance Pro"
+        android:label="LLCT Attendance"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -60,7 +60,7 @@ class AppUser {
   final String email;
   final String phone;
   final String designation;
-  final String role; // 'employee' | 'admin'
+  final String role; // 'employee' | 'manager' | 'admin'
   final bool active;
 
   /// DateTime.weekday values (1 = Mon ... 7 = Sun). Empty = flexible off days.
@@ -84,7 +84,16 @@ class AppUser {
     this.lastLocation,
   });
 
+  /// Full access including accounts (petty cash) and staff logins.
   bool get isAdmin => role == 'admin';
+
+  /// Managers see everything except accounts.
+  bool get isManager => role == 'manager';
+
+  /// Admins and managers use the management dashboard.
+  bool get isManagement => role == 'admin' || role == 'manager';
+
+  bool get isEmployee => !isManagement;
 
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -140,6 +149,12 @@ class Site {
   final int progress; // 0-100
   final String status; // planned | active | on hold | completed
   final String notes;
+  final String createdByName; // set when an employee added the site from the field
+  final String createdBy;
+  final String projectId;
+
+  /// Sites added by employees stay unapproved until an admin/manager approves them.
+  final bool approved;
 
   Site({
     required this.id,
@@ -152,7 +167,13 @@ class Site {
     this.progress = 0,
     this.status = 'active',
     this.notes = '',
+    this.createdByName = '',
+    this.createdBy = '',
+    this.projectId = '',
+    this.approved = true,
   });
+
+  bool get addedByEmployee => createdByName.isNotEmpty;
 
   factory Site.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -167,6 +188,10 @@ class Site {
       progress: _int(m['progress']),
       status: _str(m['status'], 'active'),
       notes: _str(m['notes']),
+      createdByName: m['addedByEmployee'] == true ? _str(m['createdByName']) : '',
+      createdBy: _str(m['createdBy']),
+      projectId: _str(m['projectId']),
+      approved: m['approved'] != false,
     );
   }
 
@@ -180,6 +205,7 @@ class Site {
         'progress': progress,
         'status': status,
         'notes': notes,
+        'approved': approved,
       };
 }
 
@@ -492,6 +518,66 @@ class OffDay {
       createdAt: _ts(m['createdAt']),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Geofence alerts (employee left the site while still checked in)
+// ---------------------------------------------------------------------------
+
+class GeoAlert {
+  final String id;
+  final String employeeId;
+  final String employeeName;
+  final String siteId;
+  final String siteName;
+  final String sessionId;
+  final String type; // left_site | gps_off
+  final double? lat;
+  final double? lng;
+  final double? distance;
+  final DateTime? at;
+  final bool resolved;
+  final String resolvedBy;
+
+  GeoAlert({
+    required this.id,
+    required this.employeeId,
+    required this.employeeName,
+    required this.siteId,
+    required this.siteName,
+    required this.sessionId,
+    required this.type,
+    this.lat,
+    this.lng,
+    this.distance,
+    this.at,
+    this.resolved = false,
+    this.resolvedBy = '',
+  });
+
+  factory GeoAlert.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return GeoAlert(
+      id: d.id,
+      employeeId: _str(m['employeeId']),
+      employeeName: _str(m['employeeName']),
+      siteId: _str(m['siteId']),
+      siteName: _str(m['siteName']),
+      sessionId: _str(m['sessionId']),
+      type: _str(m['type'], 'left_site'),
+      lat: _dbl(m['lat']),
+      lng: _dbl(m['lng']),
+      distance: _dbl(m['distance']),
+      at: _ts(m['at']),
+      resolved: m['resolved'] == true,
+      resolvedBy: _str(m['resolvedBy']),
+    );
+  }
+
+  String get label => type == 'gps_off'
+      ? 'Location unavailable while checked in'
+      : 'Left ${siteName.isEmpty ? 'site' : siteName} without checking out'
+          '${distance == null ? '' : ' (${distance!.round()} m away)'}';
 }
 
 class TrackPoint {

@@ -53,6 +53,91 @@ class Db {
 
   static Future<void> deleteSite(String id) => sites.doc(id).delete();
 
+  /// Employee found no registered site where they are working → create one at their GPS spot.
+  static Future<Site> createSiteByEmployee({
+    required AppUser user,
+    required String name,
+    required String address,
+    required double lat,
+    required double lng,
+  }) async {
+    final site = Site(
+      id: '',
+      name: name,
+      address: address,
+      lat: lat,
+      lng: lng,
+      radius: kDefaultSiteRadius,
+      status: 'active',
+      notes: 'Added from the field by ${user.name}',
+      approved: false,
+    );
+    final ref = await sites.add({
+      ...site.toMap(),
+      'createdBy': user.id,
+      'createdByName': user.name,
+      'addedByEmployee': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return Site(
+      id: ref.id,
+      name: site.name,
+      address: site.address,
+      lat: lat,
+      lng: lng,
+      radius: site.radius,
+      status: site.status,
+      notes: site.notes,
+      createdByName: user.name,
+      createdBy: user.id,
+      approved: false,
+    );
+  }
+
+  static Future<Site?> getSite(String id) async {
+    final d = await sites.doc(id).get();
+    return d.exists ? Site.fromDoc(d) : null;
+  }
+
+  static Future<void> approveSite(String id, bool approve) => sites.doc(id).update(
+      approve ? {'approved': true} : {'approved': false, 'active': false, 'status': 'rejected'});
+
+  // --------------------------------------------------------------- alerts
+  static CollectionReference<Map<String, dynamic>> get alerts => _fs.collection('alerts');
+
+  static Future<void> addAlert({
+    required String uid,
+    required String name,
+    required AttendanceSession session,
+    required String type,
+    double? lat,
+    double? lng,
+    double? distance,
+  }) =>
+      alerts.add({
+        'employeeId': uid,
+        'employeeName': name,
+        'siteId': session.siteId,
+        'siteName': session.siteName,
+        'sessionId': session.id,
+        'type': type,
+        'lat': lat,
+        'lng': lng,
+        'distance': distance,
+        'date': dateKey(DateTime.now()),
+        'at': FieldValue.serverTimestamp(),
+        'resolved': false,
+      });
+
+  static Stream<List<GeoAlert>> openAlerts() => alerts
+      .where('resolved', isEqualTo: false)
+      .snapshots()
+      .map((q) => q.docs.map(GeoAlert.fromDoc).toList()
+        ..sort((a, b) => (b.at ?? DateTime(2100)).compareTo(a.at ?? DateTime(2100))));
+
+  static Future<void> resolveAlert(String id, String by) =>
+      alerts.doc(id).update({'resolved': true, 'resolvedBy': by, 'resolvedAt': FieldValue.serverTimestamp()});
+
   /// Employees may only touch these two fields on a site (enforced by rules).
   static Future<void> updateSiteProgress(String id, int progress) => sites.doc(id).update({
         'progress': progress,

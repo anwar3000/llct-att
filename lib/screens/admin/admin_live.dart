@@ -9,6 +9,11 @@ import 'staff_status.dart';
 
 /// Live data shared by every dashboard tab (one set of Firestore listeners).
 class AdminLive extends ChangeNotifier {
+  AdminLive({this.canSeeAccounts = true});
+
+  /// Managers can't read petty cash (Firestore rules), so don't subscribe.
+  final bool canSeeAccounts;
+
   List<AppUser> users = [];
   List<Site> sites = [];
   List<AttendanceSession> today = [];
@@ -17,6 +22,7 @@ class AdminLive extends ChangeNotifier {
   List<OffDay> pendingOff = [];
   List<Schedule> schedules = [];
   List<PettyTxn> pendingPetty = [];
+  List<GeoAlert> alerts = [];
   bool loaded = false;
   Object? error;
 
@@ -77,14 +83,18 @@ class AdminLive extends ChangeNotifier {
       schedules = v;
       notifyListeners();
     }, onError: onErr));
-    _subs.add(Db.pettyPending().listen((v) {
+    _subs.add(Db.openAlerts().listen((v) {
+      alerts = v;
+      notifyListeners();
+    }, onError: onErr));
+    if (canSeeAccounts) _subs.add(Db.pettyPending().listen((v) {
       pendingPetty = v;
       notifyListeners();
     }, onError: onErr));
   }
 
-  List<AppUser> get employees => users.where((u) => !u.isAdmin).toList();
-  List<AppUser> get activeEmployees => users.where((u) => !u.isAdmin && u.active).toList();
+  List<AppUser> get employees => users.where((u) => u.isEmployee).toList();
+  List<AppUser> get activeEmployees => users.where((u) => u.isEmployee && u.active).toList();
 
   List<StaffStatus> get statuses => computeStatuses(
         users: users,
@@ -96,7 +106,9 @@ class AdminLive extends ChangeNotifier {
   AppUser? userById(String id) => users.where((u) => u.id == id).firstOrNull;
   Site? siteById(String id) => sites.where((s) => s.id == id).firstOrNull;
 
-  int get pendingCount => pendingOff.length + pendingPetty.length;
+  List<Site> get pendingSites => sites.where((s) => !s.approved && s.status != 'rejected').toList();
+
+  int get pendingCount => pendingOff.length + pendingPetty.length + pendingSites.length;
 
   @override
   void dispose() {

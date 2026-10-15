@@ -37,7 +37,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
       if (!mounted) return;
       setState(() => _open = s);
       if (s != null) {
-        TrackingService.instance.start(uid: widget.me.id, siteName: s.siteName);
+        TrackingService.instance.start(uid: widget.me.id, name: widget.me.name, session: s);
       } else if (TrackingService.instance.isRunning) {
         TrackingService.instance.stop();
       }

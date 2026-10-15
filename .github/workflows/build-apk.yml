@@ -59,6 +59,9 @@ jobs:
       - name: Get packages
         run: flutter pub get || (flutter pub upgrade --major-versions && flutter pub get)
 
+      - name: Generate app icon
+        run: dart run flutter_launcher_icons || echo "::warning::Icon generation failed - default icon used"
+
       - name: Analyze code
         run: |
           flutter analyze --no-fatal-infos --no-fatal-warnings > analyze.txt 2>&1 || true

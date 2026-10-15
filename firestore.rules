@@ -1,15 +1,22 @@
 rules_version = '2';
 
-// Security rules for Attendance Pro.
-// Paste into Firebase Console → Firestore Database → Rules → Publish
-// (or deploy with `firebase deploy --only firestore:rules`).
+// Security rules for LLCT Attendance (mobile app + web dashboard).
+// Paste into Firebase Console → Firestore Database → Rules → Publish.
+//
+// Roles (users/{uid}.role):
+//   admin    – everything, including accounts (petty cash, budgets) and staff logins
+//   manager  – everything operational, but NO accounts and no staff-login admin
+//   employee – own attendance, own petty entries, site updates, can add a site from the field
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
-    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function isActive() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().get('active', true) != false; }
-    function isAdmin() { return isActive() && me().get('role', '') == 'admin'; }
+    function myDoc() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function me() { return get(myDoc()).data; }
+    function isActive() { return signedIn() && exists(myDoc()) && me().get('active', true) != false; }
+    function role() { return me().get('role', 'employee'); }
+    function isAdmin() { return isActive() && role() == 'admin'; }
+    function isManagement() { return isActive() && (role() == 'admin' || role() == 'manager'); }
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
     function owns() { return isActive() && resource.data.employeeId == request.auth.uid; }
     function createsOwn() { return isActive() && request.resource.data.employeeId == request.auth.uid; }
@@ -17,39 +24,52 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------- users
     match /users/{uid} {
-      allow read: if isSelf(uid) || isAdmin();
+      allow read: if isSelf(uid) || isManagement();
       allow create, delete: if isAdmin();
-      // Managers can edit anything; staff may only update their own live location.
+      // Admins edit profiles; staff may only update their own live location.
       allow update: if isAdmin() || (isSelf(uid) && isActive() && onlyChanges(['lastLocation']));
 
       // GPS trail while on duty
       match /track/{pointId} {
-        allow read: if isSelf(uid) || isAdmin();
+        allow read: if isSelf(uid) || isManagement();
         allow create: if isSelf(uid) && isActive();
         allow update, delete: if isAdmin();
       }
     }
 
+    // ---------------------------------------------------------------- projects
+    match /projects/{id} {
+      allow read: if isActive();
+      allow write: if isManagement();
+    }
+
     // ---------------------------------------------------------------- sites
     match /sites/{siteId} {
       allow read: if isActive();
-      allow create, delete: if isAdmin();
+      // Management creates sites; an employee may add a new site at their location from the field.
+      allow create: if isManagement() || (isActive()
+                      && request.resource.data.createdBy == request.auth.uid
+                      && request.resource.data.addedByEmployee == true
+                      && request.resource.data.approved == false
+                      && request.resource.data.keys().hasOnly(['name', 'address', 'lat', 'lng', 'radius', 'active',
+                           'progress', 'status', 'notes', 'approved', 'createdBy', 'createdByName', 'addedByEmployee', 'createdAt']));
       // Staff can update progress % from the Site Update tab.
-      allow update: if isAdmin() || (isActive() && onlyChanges(['progress', 'progressUpdatedAt']));
+      allow update: if isManagement() || (isActive() && onlyChanges(['progress', 'progressUpdatedAt']));
+      allow delete: if isManagement();
     }
 
     // ------------------------------------------------------------ schedules
     match /schedules/{id} {
-      allow read: if isAdmin() || owns();
-      allow write: if isAdmin();
+      allow read: if isManagement() || owns();
+      allow write: if isManagement();
     }
 
     // ----------------------------------------------------------- attendance
     match /attendance/{id} {
-      allow read: if isAdmin() || owns();
+      allow read: if isManagement() || owns();
       allow create: if isAdmin() || (createsOwn() && request.resource.data.status == 'open');
-      // Staff may only close their own open session (check-out fields).
-      allow update: if isAdmin() || (owns() && resource.data.status == 'open'
+      // Staff may only close their own open session; management can close forgotten sessions.
+      allow update: if isManagement() || (owns() && resource.data.status == 'open'
                       && request.resource.data.status == 'closed'
                       && request.resource.data.employeeId == resource.data.employeeId
                       && onlyChanges(['checkOut', 'checkOutServer', 'outLat', 'outLng', 'outAccuracy',
@@ -57,14 +77,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ------------------------------------------------------ geofence alerts
+    // Raised by the employee's phone when they leave the site while still checked in.
+    match /alerts/{id} {
+      allow read: if isManagement() || owns();
+      allow create: if createsOwn() && request.resource.data.resolved == false;
+      allow update, delete: if isManagement();
+    }
+
     // --------------------------------------------------------- site updates
     match /siteUpdates/{id} {
       allow read: if isActive();
-      allow create: if isAdmin() || createsOwn();
-      allow update, delete: if isAdmin();
+      allow create: if isManagement() || createsOwn();
+      allow update, delete: if isManagement();
     }
 
-    // ---------------------------------------------------------------- petty
+    // ---------------------------------------------------------------- petty (accounts: admin only)
     match /petty/{id} {
       allow read: if isAdmin() || owns();
       // Staff entries always start as pending.
@@ -75,10 +103,10 @@ service cloud.firestore {
 
     // ------------------------------------------------------------- off days
     match /offDays/{id} {
-      allow read: if isAdmin() || owns();
-      allow create: if isAdmin() || (createsOwn() && request.resource.data.status == 'pending');
-      allow update: if isAdmin();
-      allow delete: if isAdmin() || (owns() && resource.data.status == 'pending');
+      allow read: if isManagement() || owns();
+      allow create: if isManagement() || (createsOwn() && request.resource.data.status == 'pending');
+      allow update: if isManagement();
+      allow delete: if isManagement() || (owns() && resource.data.status == 'pending');
     }
   }
 }

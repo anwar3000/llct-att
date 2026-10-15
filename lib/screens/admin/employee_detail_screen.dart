@@ -47,28 +47,31 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
           return Scaffold(appBar: AppBar(), body: const Center(child: Text('Employee not found')));
         }
         final status = widget.live.statuses.where((s) => s.user.id == u.id).firstOrNull;
+        final accounts = widget.me.isAdmin;
         return DefaultTabController(
-          length: 4,
-          initialIndex: widget.initialTab,
+          length: accounts ? 4 : 3,
+          initialIndex: widget.initialTab.clamp(0, accounts ? 3 : 2),
           child: Scaffold(
             appBar: AppBar(
               title: Text(u.name),
               actions: [
-                IconButton(
-                  tooltip: 'Edit profile',
-                  icon: const Icon(Icons.edit_outlined),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => EmployeeFormScreen(existing: u))),
-                ),
+                if (accounts)
+                  IconButton(
+                    tooltip: 'Edit profile',
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => EmployeeFormScreen(existing: u))),
+                  ),
               ],
-              bottom: const TabBar(
+              bottom: TabBar(
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
+                indicatorColor: AppColors.accentDark,
                 tabs: [
-                  Tab(text: 'Attendance'),
-                  Tab(text: 'Route & location'),
-                  Tab(text: 'Petty cash'),
-                  Tab(text: 'Site updates'),
+                  const Tab(text: 'Attendance'),
+                  const Tab(text: 'Route & location'),
+                  if (accounts) const Tab(text: 'Petty cash'),
+                  const Tab(text: 'Site updates'),
                 ],
               ),
             ),
@@ -90,7 +93,7 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
                     ],
                   ),
                   _RouteView(user: u, live: widget.live),
-                  _PettyView(me: widget.me, user: u),
+                  if (accounts) _PettyView(me: widget.me, user: u),
                   _UpdatesView(user: u),
                 ]),
               ),
@@ -238,7 +241,8 @@ void showSessionSheet(BuildContext context, AttendanceSession s, AdminLive live)
                   label: const Text('Close session'),
                 ),
               ),
-            if (s.isOpen) const SizedBox(width: 10),
+            if (s.isOpen && live.canSeeAccounts) const SizedBox(width: 10),
+            if (live.canSeeAccounts)
             Expanded(
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),

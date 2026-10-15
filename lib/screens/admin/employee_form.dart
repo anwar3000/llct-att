@@ -151,12 +151,27 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
                 ButtonSegment(
                     value: 'employee', label: Text('Employee'), icon: Icon(Icons.engineering)),
                 ButtonSegment(
-                    value: 'admin',
+                    value: 'manager',
                     label: Text('Manager'),
+                    icon: Icon(Icons.manage_accounts_outlined)),
+                ButtonSegment(
+                    value: 'admin',
+                    label: Text('Admin'),
                     icon: Icon(Icons.admin_panel_settings_outlined)),
               ],
               selected: {_role},
               onSelectionChanged: (s) => setState(() => _role = s.first),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _role == 'employee'
+                    ? 'Uses the mobile app to check in, post site updates and petty cash.'
+                    : _role == 'manager'
+                        ? 'Sees and manages everything except accounts (petty cash, budgets) and staff logins.'
+                        : 'Full access, including accounts and creating staff logins.',
+                style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
             ),
             if (_role == 'employee') ...[
               _section('Off days'),

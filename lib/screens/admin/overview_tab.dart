@@ -125,7 +125,7 @@ class _OverviewTabState extends State<OverviewTab> {
                   icon: Icons.pending_actions_outlined,
                   color: AppColors.warning,
                   sub: '${live.pendingPetty.length} petty · ${live.pendingOff.length} off-day',
-                  onTap: () => widget.onNavigate(4),
+                  onTap: widget.me.isAdmin ? () => widget.onNavigate(4) : null,
                 ),
                 StatTile(
                   label: 'Flagged check-ins',
@@ -137,7 +137,7 @@ class _OverviewTabState extends State<OverviewTab> {
               ]),
 
               // ----------------------------------------------- attention
-              if (forgotten.isNotEmpty || flaggedToday.isNotEmpty) ...[
+              if (forgotten.isNotEmpty || flaggedToday.isNotEmpty || live.alerts.isNotEmpty) ...[
                 const SectionTitle('Needs attention'),
                 ...forgotten.map((s) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
@@ -150,6 +150,26 @@ class _OverviewTabState extends State<OverviewTab> {
                               '${s.siteName} · checked in ${fmtDateTime(s.checkIn)}'),
                           trailing: TextButton(
                               onPressed: () => _closeForgotten(s), child: const Text('Close')),
+                        ),
+                      ),
+                    )),
+                ...live.alerts.map((a) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Card(
+                        color: const Color(0xFFFFF4E2),
+                        child: ListTile(
+                          leading: const Icon(Icons.wrong_location, color: AppColors.accentDark),
+                          title: Text('${a.employeeName}: ${a.label}'),
+                          subtitle: Text(fmtDateTime(a.at) +
+                              (a.lat == null ? '' : ' · GPS ${a.lat!.toStringAsFixed(5)}, ${a.lng!.toStringAsFixed(5)}')),
+                          onTap: () {
+                            final u = live.userById(a.employeeId);
+                            if (u != null) _openEmployee(u);
+                          },
+                          trailing: TextButton(
+                            onPressed: () => Db.resolveAlert(a.id, widget.me.name),
+                            child: const Text('Resolve'),
+                          ),
                         ),
                       ),
                     )),
@@ -174,8 +194,37 @@ class _OverviewTabState extends State<OverviewTab> {
               // ----------------------------------------------- approvals
               if (live.pendingCount > 0) ...[
                 SectionTitle('Approvals',
-                    trailing: TextButton(
-                        onPressed: () => widget.onNavigate(4), child: const Text('All petty'))),
+                    trailing: !widget.me.isAdmin
+                        ? null
+                        : TextButton(
+                            onPressed: () => widget.onNavigate(4), child: const Text('All petty'))),
+                ...live.pendingSites.map((st) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Card(
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0xFFFFF4E2),
+                            child: Icon(Icons.add_location_alt, color: AppColors.accentDark),
+                          ),
+                          title: Text('New site: ${st.name}'),
+                          subtitle: Text('Added by ${st.createdByName}'
+                              '${st.address.isEmpty ? '' : ' · ${st.address}'}'),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            IconButton(
+                              tooltip: 'Reject',
+                              icon: const Icon(Icons.close, color: AppColors.danger),
+                              onPressed: () => Db.approveSite(st.id, false),
+                            ),
+                            IconButton.filled(
+                              tooltip: 'Approve',
+                              style: IconButton.styleFrom(backgroundColor: AppColors.success),
+                              icon: const Icon(Icons.check),
+                              onPressed: () => Db.approveSite(st.id, true),
+                            ),
+                          ]),
+                        ),
+                      ),
+                    )),
                 ...live.pendingOff.map((o) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: OffDayApproval(o),

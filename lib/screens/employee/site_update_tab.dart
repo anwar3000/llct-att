@@ -110,7 +110,8 @@ class _SiteUpdateTabState extends State<SiteUpdateTab> {
   Widget build(BuildContext context) {
     return StreamView<List<Site>>(
       stream: _sitesStream,
-      builder: (context, sites) {
+      builder: (context, allSites) {
+        final sites = allSites.where((s) => s.approved || s.createdBy == widget.me.id).toList();
         // Default to the site the employee is currently checked in at.
         if (_siteId == null || !sites.any((s) => s.id == _siteId)) {
           final openId = widget.open?.siteId;

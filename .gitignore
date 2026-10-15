@@ -6,3 +6,4 @@ build/
 .idea/
 android/app/google-services.json
 lib/firebase_options.dart
+web/js/config.js

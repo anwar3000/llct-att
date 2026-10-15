@@ -23,7 +23,7 @@ class AdminShell extends StatefulWidget {
 
 class _AdminShellState extends State<AdminShell> {
   int _index = 0;
-  final _live = AdminLive();
+  late final _live = AdminLive(canSeeAccounts: widget.me.isAdmin);
 
   @override
   void initState() {
@@ -37,7 +37,7 @@ class _AdminShellState extends State<AdminShell> {
     super.dispose();
   }
 
-  static const _items = [
+  static const _allItems = [
     (icon: Icons.dashboard_outlined, active: Icons.dashboard, label: 'Overview'),
     (icon: Icons.map_outlined, active: Icons.map, label: 'Live Map'),
     (icon: Icons.groups_outlined, active: Icons.groups, label: 'Team'),
@@ -45,7 +45,11 @@ class _AdminShellState extends State<AdminShell> {
     (icon: Icons.account_balance_wallet_outlined, active: Icons.account_balance_wallet, label: 'Petty'),
   ];
 
-  void go(int i) => setState(() => _index = i);
+  /// Managers don't see accounts (Petty tab).
+  List<({IconData icon, IconData active, String label})> get _items =>
+      widget.me.isAdmin ? _allItems : _allItems.sublist(0, 4);
+
+  void go(int i) => setState(() => _index = i.clamp(0, _items.length - 1));
 
   Future<void> _signOut() async {
     if (await confirm(context, 'Sign out', 'Sign out of the management dashboard?', ok: 'Sign out')) {
@@ -61,14 +65,17 @@ class _AdminShellState extends State<AdminShell> {
       LiveMapTab(me: widget.me, live: _live),
       TeamTab(me: widget.me, live: _live),
       SitesTab(me: widget.me, live: _live),
-      PettyAdminTab(me: widget.me, live: _live),
+      if (widget.me.isAdmin) PettyAdminTab(me: widget.me, live: _live),
     ];
     final body = IndexedStack(index: _index, children: pages);
 
     final appBar = AppBar(
       title: Row(children: [
-        const Icon(Icons.fingerprint, color: AppColors.primary),
-        const SizedBox(width: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.asset('assets/icon.png', width: 32, height: 32),
+        ),
+        const SizedBox(width: 10),
         Text(_items[_index].label),
       ]),
       actions: [
@@ -87,7 +94,7 @@ class _AdminShellState extends State<AdminShell> {
           itemBuilder: (_) => [
             PopupMenuItem(
               enabled: false,
-              child: Text('${widget.me.name}\nManager',
+              child: Text('${widget.me.name}\n${widget.me.isAdmin ? 'Admin' : 'Manager'}',
                   style: const TextStyle(color: AppColors.ink)),
             ),
             const PopupMenuDivider(),

@@ -145,6 +145,12 @@ class _SitesList extends StatelessWidget {
                             color: AppColors.info, icon: Icons.timer_outlined),
                         Pill('Geofence ${s.radius.round()} m',
                             color: AppColors.primary, icon: Icons.radar),
+                        if (s.addedByEmployee)
+                          Pill('Added by ${s.createdByName}',
+                              color: AppColors.accentDark, icon: Icons.add_location_alt),
+                        if (!s.approved)
+                          const Pill('Awaiting approval · tap to review & save',
+                              color: AppColors.danger, icon: Icons.pending_actions),
                       ]),
                       if (onSite.isNotEmpty) ...[
                         const SizedBox(height: 8),

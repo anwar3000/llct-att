@@ -30,13 +30,15 @@ class _TeamTabState extends State<TeamTab> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'addEmp',
-        onPressed: () => Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const EmployeeFormScreen())),
-        icon: const Icon(Icons.person_add_alt_1),
-        label: const Text('Add employee'),
-      ),
+      floatingActionButton: !widget.me.isAdmin
+          ? null
+          : FloatingActionButton.extended(
+              heroTag: 'addEmp',
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const EmployeeFormScreen())),
+              icon: const Icon(Icons.person_add_alt_1),
+              label: const Text('Add person'),
+            ),
       body: ListenableBuilder(
         listenable: widget.live,
         builder: (context, _) {
@@ -52,7 +54,7 @@ class _TeamTabState extends State<TeamTab> {
                 s.user.designation.toLowerCase().contains(q);
           }).toList();
           final inactive = live.employees.where((u) => !u.active).toList();
-          final admins = live.users.where((u) => u.isAdmin).toList();
+          final admins = live.users.where((u) => u.isManagement).toList();
           int count(StaffState st) => all.where((s) => s.state == st).length;
 
           return ListView(
@@ -116,15 +118,16 @@ class _TeamTabState extends State<TeamTab> {
                       ),
                     )),
               if (admins.isNotEmpty) ...[
-                const SectionTitle('Managers'),
+                const SectionTitle('Admins & managers'),
                 ...admins.map((u) => Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       child: ListTile(
                         leading: Avatar(u.name),
                         title: Text(u.name),
                         subtitle: Text('ID ${u.loginId}'),
-                        trailing: const Pill('Admin', color: AppColors.info),
-                        onTap: u.id == widget.me.id
+                        trailing: Pill(u.isAdmin ? 'Admin' : 'Manager',
+                            color: u.isAdmin ? const Color(0xFF8E5CC4) : AppColors.info),
+                        onTap: u.id == widget.me.id || !widget.me.isAdmin
                             ? null
                             : () => Navigator.of(context).push(MaterialPageRoute(
                                 builder: (_) => EmployeeFormScreen(existing: u))),

@@ -48,7 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [AppColors.primaryDark, AppColors.primary],
+            colors: [AppColors.accent, Color(0xFFF39A1E)],
           ),
         ),
         child: SafeArea(
@@ -58,21 +58,17 @@ class _LoginScreenState extends State<LoginScreen> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: Column(children: [
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.fingerprint, size: 56, color: Colors.white),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Image.asset('assets/logo.png', width: 220),
                   ),
-                  const SizedBox(height: 16),
-                  const Text('Attendance Pro',
+                  const SizedBox(height: 18),
+                  const Text('Attendance',
                       style: TextStyle(
-                          color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
+                          color: AppColors.primaryDark, fontSize: 26, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 4),
                   Text('Check in. Get work done. Go home.',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.8))),
+                      style: TextStyle(color: AppColors.primaryDark.withValues(alpha: 0.75))),
                   const SizedBox(height: 28),
                   Card(
                     child: Padding(
@@ -128,7 +124,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text('Accounts are created by management.',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12.5)),
+                      style: TextStyle(
+                          color: AppColors.primaryDark.withValues(alpha: 0.7), fontSize: 12.5)),
                 ]),
               ),
             ),
