@@ -24,15 +24,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Check Firebase secret
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "::error::Add the GOOGLE_SERVICES_JSON secret (Settings > Secrets and variables > Actions). See README."
-            exit 1
-          fi
-
       - name: Generate Android project files
         run: |
           flutter create --org com.attendancepro --platforms android --project-name attendance_pro .
@@ -47,14 +38,33 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::warning::GOOGLE_SERVICES_JSON secret missing - building with a placeholder config (code check only, APK will NOT connect to Firebase)."
+            cat > android/app/google-services.json <<'JSON'
+          {"project_info":{"project_number":"000000000000","project_id":"placeholder","storage_bucket":"placeholder.appspot.com"},
+           "client":[{"client_info":{"mobilesdk_app_id":"1:000000000000:android:0000000000000000","android_client_info":{"package_name":"com.attendancepro.attendance_pro"}},
+           "api_key":[{"current_key":"placeholder"}]}]}
+          JSON
+            echo "PLACEHOLDER=1" >> "$GITHUB_ENV"
+          else
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          fi
           python3 tools/gen_firebase_options.py android/app/google-services.json com.attendancepro.attendance_pro
 
       - name: Get packages
         run: flutter pub get || (flutter pub upgrade --major-versions && flutter pub get)
 
+      - name: Analyze code
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
+
       - name: Build APK
         run: flutter build apk --release
+
+      - name: Stop if Firebase secret is missing
+        if: env.PLACEHOLDER == '1'
+        run: |
+          echo "::error::Code compiled OK, but add the GOOGLE_SERVICES_JSON secret and re-run to get a working APK."
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
