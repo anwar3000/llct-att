@@ -20,6 +20,12 @@ except json.JSONDecodeError as e:
         "Copy the WHOLE file contents (starting with { and ending with }) into the secret."
     )
 
+if not isinstance(data, dict) or "project_info" not in data:
+    keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+    hint = (" This looks like firebase.json (made by flutterfire), not google-services.json."
+            if isinstance(data, dict) and "flutter" in data else "")
+    sys.exit(f"ERROR: this is not google-services.json (top-level keys: {keys}).{hint} "
+             "Use the file from android/app/google-services.json or download it from Firebase.")
 info = data["project_info"]
 clients = data.get("client", [])
 client = next(
