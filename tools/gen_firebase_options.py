@@ -17,7 +17,7 @@ try:
 except json.JSONDecodeError as e:
     sys.exit(
         f"ERROR: google-services.json is not valid JSON ({e}). "
-        "Copy the WHOLE file contents (starting with {{ and ending with }}) into the secret."
+        "Copy the WHOLE file contents (starting with { and ending with }) into the secret."
     )
 
 info = data["project_info"]
