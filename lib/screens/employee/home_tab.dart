@@ -33,7 +33,7 @@ class _HomeTabState extends State<HomeTab> {
   List<OffDay> _offDays = [];
   bool _loaded = false;
   bool _busy = false;
-  int _workerCount = 0;
+  int _workerCount = -1; // -1 = not loaded yet / could not load
   List<WorkerEntry> _sessionWorkers = [];
   StreamSubscription? _sessionWorkersSub;
   String? _sessionWorkersFor;
@@ -211,7 +211,7 @@ class _HomeTabState extends State<HomeTab> {
     }
     // Next step: pick the external workers who are with you (skippable).
     final sid = sessionId;
-    if (sid != null && mounted && _workersRegistered) {
+    if (sid != null && mounted && _workerCount != 0) {
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => WorkerPickerScreen(
           me: widget.me,
@@ -237,7 +237,6 @@ class _HomeTabState extends State<HomeTab> {
     ));
   }
 
-  bool get _workersRegistered => _workerCount > 0;
   int get _onSiteWorkers => _sessionWorkers.where((e) => e.open).length;
 
   Future<void> _checkOut() async {
@@ -485,10 +484,8 @@ class _HomeTabState extends State<HomeTab> {
             _statusCard(open),
             const SizedBox(height: 14),
             _actionButton(open),
-            if (open != null && (_workersRegistered || _sessionWorkers.isNotEmpty)) ...[
-              const SizedBox(height: 12),
-              _workersCard(open),
-            ],
+            const SizedBox(height: 12),
+            open != null ? _workersCard(open) : _workersHint(),
             if (_isOffToday) ...[
               const SizedBox(height: 12),
               Card(
@@ -630,6 +627,20 @@ class _HomeTabState extends State<HomeTab> {
       ]),
     );
   }
+
+  Widget _workersHint() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+            color: AppColors.accentSoft, borderRadius: BorderRadius.circular(14)),
+        child: const Row(children: [
+          Icon(Icons.engineering, color: AppColors.accentDark, size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text('External workers: check in first, then tick the labour working with you.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.primary)),
+          ),
+        ]),
+      );
 
   Widget _workersCard(AttendanceSession open) {
     final onSite = _sessionWorkers.where((e) => e.open).toList();

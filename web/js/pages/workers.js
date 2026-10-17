@@ -2,7 +2,7 @@
 // per-worker attendance, and ID downloads for customers.
 import {
   store, saveWorker, deleteWorker, saveIdInfo, uploadIdFile, releaseWorkerLock, workerEntriesInRange,
-  closeWorkerEntry, deleteWorkerEntry, isAdmin,
+  closeWorkerEntry, deleteWorkerEntry, isAdmin, addWorkersToSession,
 } from '../fb.js';
 import {
   esc, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtMonth, dateKey, monthKey, startOfMonth, endOfMonth,
@@ -22,8 +22,10 @@ const norm = (s) => String(s || '').replace(/[\s-]/g, '').toLowerCase();
 function list(el, { setHeader }) {
   setHeader('External workers', 'Labour registered by management — staff add them to their check-in',
     `<button class="btn ghost" id="w-ids">${icon('download', 16)} Download IDs</button>
+     <button class="btn ghost" id="w-checkin">${icon('check', 16)} Check in workers</button>
      <button class="btn" id="w-new">${icon('plus', 16)} Register worker</button>`);
   document.getElementById('w-new').onclick = () => registerWorker();
+  document.getElementById('w-checkin').onclick = () => checkInWorkers();
   let q = '', filter = 'active';
   const sel = new Set();
   document.getElementById('w-ids').onclick = () => {
@@ -97,6 +99,62 @@ function list(el, { setHeader }) {
   }
   draw();
   return store.on(() => { if (!el.querySelector('#w-q:focus')) draw(); });
+}
+
+// ------------------------------------------------------------------ check in workers with an employee
+export function checkInWorkers(presetSessionId = '') {
+  const sessions = [...store.open].sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+  if (!sessions.length) { toast('Nobody is checked in right now. An employee must check in first.', true); return; }
+  if (!store.workers.some((w) => w.active)) { toast('Register external workers first.', true); return; }
+  const picked = new Set();
+  let q = '';
+  modal({
+    title: 'Check in external workers',
+    wide: true,
+    body: `<label class="f"><span>With employee (checked in now)</span><select id="ci-s">${sessions.map((s) =>
+      `<option value="${s.id}" ${s.id === presetSessionId ? 'selected' : ''}>${esc(s.employeeName)} — ${esc(s.siteName)} (since ${fmtTime(s.checkIn)})</option>`).join('')}</select></label>
+      <input id="ci-q" placeholder="Search workers…" style="margin:4px 0 10px">
+      <div id="ci-list" style="max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:10px"></div>
+      <div class="small muted" style="margin-top:8px">Workers' hours follow this employee's check-in until removed or until the employee checks out. A worker can be on only one site at a time.</div>`,
+    foot: `<span class="small" id="ci-n" style="margin-right:auto"></span><button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-ok>Check in</button>`,
+    onMount: (m, close) => {
+      const sel = m.querySelector('#ci-s');
+      const draw = () => {
+        const sid = sel.value;
+        const ql = q.toLowerCase();
+        const ws = store.workers.filter((w) => w.active && (!ql || `${w.name} ${w.company} ${w.trade} ${w.phone}`.toLowerCase().includes(ql)));
+        m.querySelector('#ci-list').innerHTML = ws.map((w) => {
+          const lk = store.workerLock(w.id);
+          const here = lk && lk.sessionId === sid;
+          const busy = lk && !here;
+          return `<label class="list-item" style="cursor:${busy || here ? 'default' : 'pointer'};margin:0">
+            <input type="checkbox" data-w="${w.id}" ${here || picked.has(w.id) ? 'checked' : ''} ${busy || here ? 'disabled' : ''}>
+            ${avatar(w.name, 28)}<div class="grow"><b>${esc(w.name)}</b> <span class="small muted">${esc([w.company, w.trade].filter(Boolean).join(' · '))}</span>
+            ${busy ? `<div class="small" style="color:#D64545">With ${esc(lk.employeeName)} at ${esc(lk.siteName)}</div>` : here ? '<div class="small" style="color:#2E9E6A">Already on this check-in</div>' : ''}</div></label>`;
+        }).join('') || '<div class="empty">No workers match</div>';
+        m.querySelectorAll('[data-w]').forEach((c) => { c.onchange = () => { if (c.checked) picked.add(c.dataset.w); else picked.delete(c.dataset.w); count(); }; });
+        count();
+      };
+      const count = () => { m.querySelector('#ci-n').innerHTML = `<b>${picked.size}</b> selected`; };
+      sel.onchange = () => { picked.clear(); draw(); };
+      m.querySelector('#ci-q').oninput = (e) => { q = e.target.value; draw(); };
+      m.querySelector('[data-cancel]').onclick = close;
+      m.querySelector('[data-ok]').onclick = async (ev) => {
+        if (!picked.size) { toast('Tick at least one worker', true); return; }
+        const s = store.open.find((x) => x.id === sel.value);
+        if (!s) { toast('That employee has checked out', true); return; }
+        ev.currentTarget.disabled = true;
+        try {
+          const busy = await addWorkersToSession(s, store.workers.filter((w) => picked.has(w.id)));
+          const n = picked.size - busy.length;
+          if (busy.length) toast(`Not added — ${busy.join('; ')}`, true);
+          if (n) toast(`${n} worker${n === 1 ? '' : 's'} checked in with ${s.employeeName}`);
+          close();
+        } catch (e) { toast(friendlyError(e), true); ev.currentTarget.disabled = false; }
+      };
+      draw();
+    },
+  });
 }
 
 // ------------------------------------------------------------------ register / edit

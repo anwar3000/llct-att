@@ -42,18 +42,22 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
   final Set<String> _selected = {};
   bool _loadedWorkers = false, _loadedEntries = false, _initialised = false;
   bool _saving = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
     _subs.add(Db.activeWorkersStream().listen((l) {
       if (mounted) setState(() { _workers = l; _loadedWorkers = true; });
-    }, onError: (_) { if (mounted) setState(() => _loadedWorkers = true); }));
+    }, onError: (e) {
+      if (mounted) setState(() { _loadedWorkers = true; _loadError = '$e'; });
+    }));
     _subs.add(Db.workerLocksStream().listen((m) {
       if (mounted) setState(() => _locks = m);
     }));
     _subs.add(Db.workersForSession(widget.sessionId, widget.me.id).listen((l) {
       if (!mounted) return;
+      _loadError = null;
       setState(() {
         _entries = l;
         _loadedEntries = true;
@@ -62,6 +66,8 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
           _selected.addAll(_onSiteIds);
         }
       });
+    }, onError: (e) {
+      if (mounted) setState(() { _loadedEntries = true; _loadError = '$e'; });
     }));
   }
 
@@ -195,11 +201,19 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
                 ),
               ),
               Expanded(
-                child: _workers.isEmpty
+                child: _loadError != null
+                    ? EmptyState(
+                        icon: Icons.lock_outline,
+                        title: 'Could not load workers',
+                        message: _loadError!.contains('permission')
+                            ? 'Ask management to publish the latest Firestore rules.'
+                            : _loadError!,
+                      )
+                    : _workers.isEmpty
                     ? const EmptyState(
                         icon: Icons.engineering_outlined,
                         title: 'No external workers registered',
-                        message: 'Management registers workers on the web dashboard.',
+                        message: 'Management registers workers on the web dashboard (External workers).',
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(8, 4, 8, 100),

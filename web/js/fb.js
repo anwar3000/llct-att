@@ -411,6 +411,36 @@ export async function releaseWorkerLock(lock, at = new Date()) {
   }
   await deleteDoc(doc(db, 'workerLocks', lock.workerId));
 }
+/** Management: add workers to an employee's open check-in (same rules as the app — one site at a time). */
+export async function addWorkersToSession(session, workers) {
+  const busy = [];
+  const now = new Date();
+  const start = now - session.checkIn <= 15 * 60000 ? session.checkIn : now;
+  for (const w of workers) {
+    const lockRef = doc(db, 'workerLocks', w.id);
+    const lock = await getDoc(lockRef);
+    if (lock.exists()) {
+      const m = lock.data();
+      if (m.sessionId !== session.id) busy.push(`${w.name} is already with ${m.employeeName} at ${m.siteName}`);
+      continue;
+    }
+    const rec = doc(C('workerAttendance'));
+    const b = writeBatch(db);
+    b.set(rec, {
+      workerId: w.id, workerName: w.name, company: w.company, trade: w.trade, sessionId: session.id,
+      employeeId: session.employeeId, employeeName: session.employeeName, siteId: session.siteId, siteName: session.siteName,
+      date: dateKey(start), month: monthKey(start), checkIn: Timestamp.fromDate(start), open: true,
+      note: `added by ${store.me?.name || 'management'}`, createdAt: serverTimestamp(),
+    });
+    b.set(lockRef, {
+      recordId: rec.id, sessionId: session.id, employeeId: session.employeeId, employeeName: session.employeeName,
+      siteId: session.siteId, siteName: session.siteName, since: Timestamp.fromDate(start),
+    });
+    await b.commit();
+  }
+  return busy;
+}
+
 export async function workerEntriesInRange(from, to) {
   const snap = await getDocs(query(C('workerAttendance'), where('date', '>=', from), where('date', '<=', to)));
   return snap.docs.map(mapWorkerEntry).sort((a, b) => a.checkIn - b.checkIn);
