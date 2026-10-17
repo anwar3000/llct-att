@@ -39,6 +39,23 @@ jobs:
       - name: Generate Android project files
         run: |
           flutter create --org com.attendancepro --platforms android --project-name attendance_pro .
+          # Some plugins (e.g. file_picker) still compile against an old Android SDK; force all to 36.
+          if [ -f android/build.gradle.kts ]; then
+            { cat <<'KTS'
+          subprojects {
+              val forceSdk: Project.() -> Unit = {
+                  extensions.findByName("android")?.let { ext ->
+                      try { ext.javaClass.getMethod("compileSdkVersion", Int::class.javaPrimitiveType).invoke(ext, 36) } catch (e: Exception) { }
+                  }
+              }
+              if (state.executed) forceSdk() else afterEvaluate { forceSdk() }
+          }
+          KTS
+            cat android/build.gradle.kts; } > /tmp/root.kts && sed 's/^          //' /tmp/root.kts > android/build.gradle.kts
+          elif [ -f android/build.gradle ]; then
+            { printf '%s\n' 'subprojects { def f = { p -> if (p.hasProperty("android")) p.android.compileSdkVersion 36 }; if (state.executed) f(it) else afterEvaluate { f(it) } }'; cat android/build.gradle; } > /tmp/root.gradle && mv /tmp/root.gradle android/build.gradle
+          fi
+          head -12 android/build.gradle* || true
           for f in android/app/build.gradle.kts android/app/build.gradle; do
             if [ -f "$f" ]; then
               sed -i -E 's/minSdk( = |Version )flutter\.minSdkVersion/minSdk\1 24/' "$f"

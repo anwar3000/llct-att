@@ -212,7 +212,7 @@ class _HomeTabState extends State<HomeTab> {
     }
     // Next step: pick the external workers who are with you (skippable).
     final sid = sessionId;
-    if (sid != null && mounted && _workerCount != 0) {
+    if (sid != null && mounted && _workerCount != 0 && await _askAboutWorkers(picked.name) && mounted) {
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => WorkerPickerScreen(
           me: widget.me,
@@ -224,6 +224,57 @@ class _HomeTabState extends State<HomeTab> {
         ),
       ));
     }
+  }
+
+  /// "Any external workers with you?" — one tap for No, or Yes to pick names.
+  Future<bool> _askAboutWorkers(String siteName) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => AlertDialog(
+        icon: Container(
+          width: 56,
+          height: 56,
+          decoration: const BoxDecoration(color: AppColors.accentSoft, shape: BoxShape.circle),
+          child: const Icon(Icons.engineering, color: AppColors.accentDark, size: 30),
+        ),
+        title: const Text('Any external workers with you?'),
+        content: Text('Checked in at $siteName.\nSelect the labour working with you today, if any.',
+            textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.center,
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        actions: [
+          Row(children: [
+            Expanded(
+              child: SizedBox(
+                height: 54,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  style: OutlinedButton.styleFrom(
+                      textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                  child: const Text('NO'),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: SizedBox(
+                height: 54,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: AppColors.primaryDark,
+                      textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                  child: const Text('YES, SELECT'),
+                ),
+              ),
+            ),
+          ]),
+        ],
+      ),
+    );
+    return yes == true;
   }
 
   void _openWorkers(AttendanceSession open) {
