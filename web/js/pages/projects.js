@@ -78,7 +78,7 @@ export function editProject(p) {
       <label class="f"><span>Project manager</span><input name="manager" value="${esc(p?.manager)}"></label>
       <label class="f"><span>Start date</span><input name="startDate" type="date" value="${esc(p?.startDate)}"></label>
       <label class="f"><span>Target end date</span><input name="endDate" type="date" value="${esc(p?.endDate)}"></label>
-      ${isAdmin() ? `<label class="f"><span>Budget (₹)</span><input name="budget" type="number" min="0" step="1" value="${p?.budget || ''}"></label>` : ''}
+      ${isAdmin() ? `<label class="f"><span>Budget (AED)</span><input name="budget" type="number" min="0" step="0.01" value="${p?.budget || ''}"></label>` : ''}
       <label class="f"><span>Status</span><select name="status">${PROJECT_STATUSES.map((s) => `<option value="${s}" ${(p?.status || 'active') === s ? 'selected' : ''}>${cap(s)}</option>`).join('')}</select></label>
       <label class="f full"><span>Description / scope of work</span><textarea name="description" rows="3">${esc(p?.description)}</textarea></label>
       <div class="full"><label class="f" style="margin-bottom:6px"><span>Sites in this project</span></label>

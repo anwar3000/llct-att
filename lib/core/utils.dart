@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 /// Currency symbol used across the app (petty cash).
-const String kCurrency = '₹';
+const String kCurrency = 'AED';
 
 /// Default monthly off-day allowance for a new employee.
 const int kDefaultMonthlyOffQuota = 4;
@@ -31,7 +31,9 @@ String fmtDateTime(DateTime? d) =>
 String fmtMonth(DateTime d) => DateFormat('MMMM yyyy').format(d);
 
 String fmtMoney(num v) {
-  final f = NumberFormat.currency(symbol: kCurrency, decimalDigits: 0, locale: 'en_IN');
+  // AED with fils only when needed: "AED 1,250" / "AED 12.50".
+  final whole = v == v.roundToDouble();
+  final f = NumberFormat.currency(symbol: '$kCurrency ', decimalDigits: whole ? 0 : 2, locale: 'en_US');
   return f.format(v);
 }
 
@@ -97,7 +99,7 @@ String initials(String name) {
 }
 
 /// Shown in the profile sheet so staff can confirm they have the latest app.
-const kAppVersion = '1.3.0';
+const kAppVersion = '1.3.1';
 
 void showSnack(BuildContext context, String msg, {bool error = false}) {
   ScaffoldMessenger.of(context)

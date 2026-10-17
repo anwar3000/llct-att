@@ -1,5 +1,5 @@
 // Small helpers shared by every page.
-export const CURRENCY = '₹';
+export const CURRENCY = 'AED';
 export const WEEKDAYS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
 export const WEEKDAYS_LONG = { 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday' };
 
@@ -29,7 +29,10 @@ export const fmtDate = (d) => (d ? d.toLocaleDateString('en-IN', { day: 'numeric
 export const fmtDay = (d) => (d ? d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '—');
 export const fmtDateTime = (d) => (d ? `${fmtDate(d)}, ${fmtTime(d)}` : '—');
 export const fmtMonth = (d) => d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-export const fmtMoney = (v) => `${CURRENCY}${Math.round(v || 0).toLocaleString('en-IN')}`;
+export const fmtMoney = (v) => {
+  const n = Number(v) || 0;
+  return `${CURRENCY} ${n.toLocaleString('en-US', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;
+};
 export const fmtMins = (m) => {
   m = Math.max(0, Math.round(m || 0));
   const h = Math.floor(m / 60), mm = m % 60;

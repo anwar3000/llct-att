@@ -3,7 +3,7 @@ import {
   store, isAdmin, alertsInRange, workerEntriesInRange, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
-  tzLabel, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
+  fmtMoney, tzLabel, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
 } from './util.js';
 import { employeeSummary, employeeDays, pettySummary, flagText } from './calc.js';
 
@@ -115,20 +115,20 @@ export async function pettyReport(from, to, empId = null) {
   const ps = pettySummary(list);
   return {
     title: `Petty cash statement${empId ? ` — ${store.user(empId)?.name || ''}` : ''}`,
-    subtitle: `${from} to ${to} · received ${Math.round(ps.credited)} · spent ${Math.round(ps.spent)} · pending ${Math.round(ps.pending)} (₹)`,
+    subtitle: `${from} to ${to} · received ${fmtMoney(ps.credited)} · spent ${fmtMoney(ps.spent)} · pending ${fmtMoney(ps.pending)}`,
     filename: `petty-cash-${from}-to-${to}`,
     orientation: 'landscape',
     sheets: [
       {
         name: 'Balances',
-        columns: ['Employee', 'Cash given in period (₹)', 'Spent in period (₹)', 'Pending (₹)', 'Current balance (₹)'],
+        columns: ['Employee', 'Cash given in period (AED)', 'Spent in period (AED)', 'Pending (AED)', 'Current balance (AED)'],
         widths: [24, 22, 20, 14, 20],
         rows: bal,
         totals: ['TOTAL', ...[1, 2, 3, 4].map((i) => bal.reduce((a, r) => a + r[i], 0))],
       },
       {
         name: 'Transactions',
-        columns: ['Date', 'Employee', 'Type', 'Category', 'Site', 'Note', 'Cash given (₹)', 'Spent (₹)', 'Status', 'By', 'Review note'],
+        columns: ['Date', 'Employee', 'Type', 'Category', 'Site', 'Note', 'Cash given (AED)', 'Spent (AED)', 'Status', 'By', 'Review note'],
         widths: [11, 20, 11, 13, 18, 28, 14, 11, 10, 16, 20],
         rows,
         totals: ['TOTAL', '', '', '', '', '', rows.reduce((a, r) => a + (r[6] || 0), 0), rows.reduce((a, r) => a + (r[7] || 0), 0), '', '', ''],
@@ -214,10 +214,10 @@ export async function projectReport(p) {
   if (isAdmin()) {
     const petty = store.petty.filter((t) => p.siteIds.includes(t.siteId));
     const ps = pettySummary(petty);
-    summary.splice(8, 0, ['Budget (₹)', p.budget || ''], ['Spent — approved petty (₹)', ps.spent], ['Pending petty (₹)', ps.pending],
+    summary.splice(8, 0, ['Budget (AED)', p.budget || ''], ['Spent — approved petty (AED)', ps.spent], ['Pending petty (AED)', ps.pending],
       ['Budget used', p.budget ? `${Math.round((ps.spent / p.budget) * 100)}%` : '']);
     sheets.push({
-      name: 'Expenses', columns: ['Date', 'Employee', 'Type', 'Category', 'Site', 'Note', 'Amount (₹)', 'Status'], widths: [11, 18, 11, 12, 18, 30, 12, 10],
+      name: 'Expenses', columns: ['Date', 'Employee', 'Type', 'Category', 'Site', 'Note', 'Amount (AED)', 'Status'], widths: [11, 18, 11, 12, 18, 30, 12, 10],
       rows: petty.map((t) => [t.date || d2(t.createdLocal), t.employeeName, t.type === 'credit' ? 'Cash given' : 'Expense', t.category, t.siteName, t.note, t.amount, cap(t.status)]),
     });
   }
@@ -246,7 +246,7 @@ export async function projectsOverviewReport() {
     return row;
   });
   const cols = ['Code', 'Project', 'Client', 'Manager', 'Status', 'Start', 'End', 'Sites', 'Progress %', 'Man-hours', 'Staff'];
-  if (isAdmin()) cols.push('Budget (₹)', 'Spent (₹)');
+  if (isAdmin()) cols.push('Budget (AED)', 'Spent (AED)');
   return {
     title: 'Projects overview', subtitle: `${rows.length} projects · generated ${fmtDate(new Date())}`, filename: 'projects-overview', orientation: 'landscape',
     sheets: [{ name: 'Projects', columns: cols, widths: [12, 26, 18, 16, 10, 11, 11, 7, 10, 10, 7, 12, 12], rows }],
@@ -471,8 +471,7 @@ async function toPdf(rep) {
   if (!jsPDF) throw new Error('PDF library did not load — check your internet connection.');
   const doc = new jsPDF({ orientation: rep.orientation || 'portrait', unit: 'pt', format: 'a4' });
   if (typeof doc.autoTable !== 'function') throw new Error('PDF table plugin did not load.');
-  // The built-in PDF fonts have no ₹ glyph.
-  const clean = (v) => (v == null ? '' : String(v).replace(/₹/g, 'Rs.').replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ]/g, ''));
+  const clean = (v) => (v == null ? '' : String(v).replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ]/g, ''));
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   doc.setFillColor(64, 64, 65);

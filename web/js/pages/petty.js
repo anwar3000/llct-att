@@ -95,7 +95,7 @@ function giveCash(preselect) {
     body: `<form id="gc"><div class="fields">
       <label class="f full"><span>Type</span><select name="type"><option value="credit">Cash given to employee (+)</option><option value="expense">Expense by employee (−)</option></select></label>
       <label class="f"><span>Employee</span><select name="emp">${emps.map((u) => `<option value="${u.id}" ${preselect === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
-      <label class="f"><span>Amount (₹)</span><input name="amount" type="number" min="1" step="1" required></label>
+      <label class="f"><span>Amount (AED)</span><input name="amount" type="number" min="0.01" step="0.01" required></label>
       <label class="f" id="gc-cat"><span>Category</span><select name="cat">${CATS.map((c) => `<option>${c}</option>`).join('')}</select></label>
       <label class="f"><span>Site (optional)</span><select name="site"><option value="">— None —</option>${store.sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
       <label class="f full"><span>Note</span><input name="note"></label>
