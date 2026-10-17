@@ -1,6 +1,6 @@
 import {
   store, isAdmin, staffStatuses, createStaff, updateUser, sessionsInRange, offDaysInRange, trackForDay,
-  sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL,
+  sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL, deleteEmployee,
 } from '../fb.js';
 import {
   esc, fromTz, icon, avatar, pill, cap, fmtMins, fmtTime, fmtDate, fmtDay, fmtDateTime, fmtMoney, fmtDist, fmtMonth, timeAgo,
@@ -11,6 +11,7 @@ import { employeeSummary, pettySummary, flagText } from '../calc.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
 import { monthlySummaryReport, attendanceLogReport, downloadReport } from '../report-lib.js';
 import { docsPanel, ownerFromUser, exportMenu, docsSummaryHtml } from '../iddocs.js';
+import { editTimesDialog, deleteDayDialog } from '../admin-edit.js';
 
 const STATE = { onDuty: ['On duty', 'green'], done: ['Checked out', 'teal'], off: ['Off day', 'amber'], notIn: ['Not checked in', 'gray'] };
 
@@ -93,13 +94,15 @@ export function editPerson(u) {
       <label class="f" style="margin-top:12px"><span>Off days per month</span><input name="quota" type="number" min="0" max="15" value="${u?.monthlyOffQuota ?? 4}"></label>
       ${editing ? `<label class="f row" style="gap:8px;margin-top:34px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}> Account active</label>` : ''}
     </div><div class="error" id="ef-err"></div></form>`,
-    foot: `<button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>${editing ? 'Save changes' : 'Create login'}</button>`,
+    foot: `${editing && isAdmin() && u.id !== store.me.id ? `<button class="btn danger" data-delp style="margin-right:auto">${icon('trash', 16)} Delete person</button>` : ''}
+      <button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>${editing ? 'Save changes' : 'Create login'}</button>`,
     onMount: (m, close) => {
       const f = m.querySelector('#ef');
       m.querySelectorAll('[data-w]').forEach((c) => {
         c.onclick = () => { const w = Number(c.dataset.w); c.classList.toggle('on'); if (off.has(w)) off.delete(w); else off.add(w); };
       });
       m.querySelector('[data-cancel]').onclick = close;
+      m.querySelector('[data-delp]')?.addEventListener('click', () => { close(); deletePersonDialog(u); });
       m.querySelector('[data-save]').onclick = async () => {
         const err = m.querySelector('#ef-err');
         const btn = m.querySelector('[data-save]');
@@ -122,6 +125,31 @@ export function editPerson(u) {
           }
           close();
         } catch (e) { err.textContent = friendlyError(e); btn.disabled = false; }
+      };
+    },
+  });
+}
+
+function deletePersonDialog(u) {
+  modal({
+    title: `Delete ${u.name}?`,
+    body: `<p style="margin-top:0">This removes <b>${esc(u.name)}</b> (${esc(u.loginId)}) from the team. They can no longer use the app or the dashboard.</p>
+      <label class="f row" style="gap:8px;align-items:flex-start"><input type="checkbox" id="dp-r" style="margin-top:3px">
+        <span style="font-weight:500">Also delete all their records: attendance, external-worker time they logged, schedules, off days, alerts and ID documents. <b>Cannot be undone.</b><br>
+        <span class="muted small">Leave unticked to keep their history in reports. Petty cash entries are always kept for the accounts.</span></span></label>
+      <label class="f"><span>Type DELETE to confirm</span><input id="dp-c" autocomplete="off"></label>
+      <div class="small muted">Tip: to only stop access, use Edit → untick “Account active” instead. To free the login ID for reuse, also delete the user in Firebase Console → Authentication.</div>
+      <div class="error" id="dp-e"></div>`,
+    foot: '<button class="btn ghost" data-x2>Cancel</button><button class="btn danger" data-ok>Delete person</button>',
+    onMount: (m, close) => {
+      m.querySelector('[data-x2]').onclick = close;
+      m.querySelector('[data-ok]').onclick = async (ev) => {
+        if (m.querySelector('#dp-c').value.trim().toUpperCase() !== 'DELETE') { m.querySelector('#dp-e').textContent = 'Type DELETE to confirm.'; return; }
+        ev.currentTarget.disabled = true; ev.currentTarget.textContent = 'Deleting…';
+        try {
+          const n = await deleteEmployee(u, { records: m.querySelector('#dp-r').checked });
+          toast(`${u.name} deleted${n ? ` with ${n} records` : ''}`); close(); location.hash = '#/employees';
+        } catch (e) { m.querySelector('#dp-e').textContent = friendlyError(e); ev.currentTarget.disabled = false; ev.currentTarget.textContent = 'Delete person'; }
       };
     },
   });
@@ -203,16 +231,17 @@ function detail(root, id, { setHeader }) {
     </div>
     <div class="grid cols-2 mt">
       <div class="card"><div class="card-head"><h2>Calendar</h2><span class="muted small">click a day for its route</span></div><div class="card-pad">${sum ? calendar(sum) : 'Loading…'}</div></div>
-      <div class="card"><div class="card-head"><h2>Route · ${fmtDay(parseKey(day))}</h2><span id="rt-info" class="muted small"></span></div><div id="rt-map" class="map small" style="border:0;border-radius:0 0 14px 14px"></div></div>
+      <div class="card"><div class="card-head"><h2>Route · ${fmtDay(parseKey(day))}</h2><span id="rt-info" class="muted small"></span>
+        ${isAdmin() && (sessions || []).some((x) => x.date === day) ? `<button class="btn sm ghost danger-t" id="rt-delday" title="Delete all check-ins on this day">${icon('trash', 14)} Delete day</button>` : ''}</div><div id="rt-map" class="map small" style="border:0;border-radius:0 0 14px 14px"></div></div>
     </div>
     <div class="card mt"><div class="card-head"><h2>Check-ins</h2><span class="muted small">${sessions ? `${sessions.length} this month` : ''}</span></div>
       <div class="table-wrap"><table class="t"><tr><th>Date</th><th>Site</th><th>In</th><th>Out</th><th class="num">Duration</th><th>GPS check</th><th></th></tr>
       ${sessions && sessions.length ? [...sessions].reverse().map((s) => `<tr>
-        <td class="nowrap">${fmtDay(s.inLocal)}</td><td><b>${esc(s.siteName)}</b></td><td>${fmtTime(s.inLocal)}</td>
+        <td class="nowrap">${fmtDay(s.inLocal)}${s.editedAt ? ` <span class="pill gray" title="Times edited by ${esc(s.editedBy)}">edited</span>` : ''}</td><td><b>${esc(s.siteName)}</b></td><td>${fmtTime(s.inLocal)}</td>
         <td>${s.checkOut ? fmtTime(s.outLocal) : pill('Open', 'green', true)}</td><td class="num"><b>${fmtMins(sessionMinutes(s))}</b></td>
         <td class="small">${sessionFlagged(s) ? `<span style="color:#D64545">${esc(flagText(s))}</span>` : `<span class="muted">OK · ${fmtDist(s.inDistance)}</span>`}</td>
         <td class="right nowrap">${!s.checkOut ? `<button class="btn sm ghost" data-close="${s.id}">Close</button>` : ''}
-          ${isAdmin() ? `<button class="btn sm ghost" data-del="${s.id}" title="Delete">${icon('trash', 14)}</button>` : ''}</td></tr>`).join('')
+          ${isAdmin() ? `<button class="btn sm ghost" data-edit-s="${s.id}" title="Edit times">${icon('edit', 14)}</button><button class="btn sm ghost" data-del="${s.id}" title="Delete">${icon('trash', 14)}</button>` : ''}</td></tr>`).join('')
         : `<tr><td colspan="7"><div class="empty">${sessions ? 'No check-ins this month' : 'Loading…'}</div></td></tr>`}
       </table></div></div>
     ${offDays.length ? `<div class="card mt"><div class="card-head"><h2>Off-day requests</h2></div>
@@ -237,6 +266,8 @@ function detail(root, id, { setHeader }) {
         await closeSession(s, at); toast('Closed'); load();
       };
     });
+    el.querySelectorAll('[data-edit-s]').forEach((b) => { b.onclick = () => editTimesDialog(sessions.find((x) => x.id === b.dataset.editS), load); });
+    el.querySelector('#rt-delday')?.addEventListener('click', () => deleteDayDialog(id, u.name, day, sessions.filter((x) => x.date === day).length, load));
     el.querySelectorAll('[data-del]').forEach((b) => {
       b.onclick = async () => {
         if (!await confirmBox('Delete record?', 'Permanently delete this attendance record?', { ok: 'Delete', danger: true })) return;

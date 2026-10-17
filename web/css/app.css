@@ -353,3 +353,4 @@ tr.wf-sub td { font-weight: 700; font-size: 12.5px; }
 tr.wf-sub.staff td { color: #2b62b3; background: #f3f7fd; }
 tr.wf-sub.ext td { color: #a8640f; background: #fdf6ea; }
 tr.wf-sub.total td { background: #f2f1ee; border-top: 2px solid var(--line); }
+.danger-t { color: var(--danger) !important; }

@@ -10,7 +10,7 @@ import {
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
-import { dateKey, monthKey, atTz } from './util.js';
+import { dateKey, monthKey, atTz, fromTz } from './util.js';
 
 export const LOGIN_DOMAIN = 'staff.attendance.app';
 export const loginToEmail = (l) => {
@@ -82,7 +82,7 @@ export function mapSession(d) {
     inLat: m.inLat ?? null, inLng: m.inLng ?? null, inAccuracy: m.inAccuracy ?? null, inDistance: m.inDistance ?? null,
     inOutside: m.inOutside === true, outLat: m.outLat ?? null, outLng: m.outLng ?? null, outDistance: m.outDistance ?? null,
     outOutside: m.outOutside === true, mocked: m.mocked === true, note: m.note || '', status: m.status || '',
-    tz: tzOf(m.tz), outTz: tzOf(m.outTz) ?? tzOf(m.tz),
+    tz: tzOf(m.tz), outTz: tzOf(m.outTz) ?? tzOf(m.tz), editedAt: toDate(m.editedAt), editedBy: m.editedBy || '',
   });
 }
 /** Adds inLocal/outLocal (site wall-clock) to a session or worker entry. */
@@ -389,6 +389,96 @@ export async function deleteSession(id) {
     if (lk && lk.recordId === d.id) b.delete(doc(db, 'workerLocks', lk.workerId));
   });
   await b.commit();
+}
+
+// ------------------------------------------------------------------ admin corrections
+/**
+ * Admin: change a check-in's times (entered as site-local wall-clock Dates).
+ * `outWall` null keeps it open. External workers on the same check-in follow the new times.
+ */
+export async function editSessionTimes(s, inWall, outWall, { applyWorkers = true, reason = '' } = {}) {
+  const tz = s.tz;
+  const newIn = fromTz(inWall, tz);
+  const newOut = outWall ? fromTz(outWall, s.outTz ?? tz) : null;
+  if (newOut && newOut <= newIn) throw new Error('Check-out must be after check-in.');
+  const day = atTz(newIn, tz) || newIn;
+  const data = {
+    checkIn: Timestamp.fromDate(newIn), date: dateKey(day), month: monthKey(day),
+    editedBy: store.me?.name || 'admin', editedAt: serverTimestamp(),
+    note: `${s.note ? `${s.note} ` : ''}[times edited by ${store.me?.name || 'admin'}${reason ? `: ${reason}` : ''}]`.trim(),
+  };
+  if (!s.editedAt) data.originalCheckIn = Timestamp.fromDate(s.checkIn);
+  if (!s.editedAt && s.checkOut) data.originalCheckOut = Timestamp.fromDate(s.checkOut);
+  if (newOut) Object.assign(data, { checkOut: Timestamp.fromDate(newOut), durationMin: Math.round((newOut - newIn) / 60000), status: 'closed' });
+  await updateDoc(doc(db, 'attendance', s.id), data);
+  if (!applyWorkers) return;
+  const snap = await getDocs(query(C('workerAttendance'), where('sessionId', '==', s.id)));
+  const near = (a, b) => a && b && Math.abs(a - b) < 90000;
+  for (const d of snap.docs) {
+    const e = mapWorkerEntry(d);
+    let eIn = near(e.checkIn, s.checkIn) ? newIn : new Date(Math.max(e.checkIn, newIn));
+    let eOut = e.checkOut ? (near(e.checkOut, s.checkOut) ? newOut || e.checkOut : e.checkOut) : null;
+    if (newOut && eOut && eOut > newOut) eOut = newOut;
+    if (newOut && eIn > newOut) eIn = newOut;
+    const ed = atTz(eIn, e.tz ?? tz) || eIn;
+    const upd = { checkIn: Timestamp.fromDate(eIn), date: dateKey(ed), month: monthKey(ed) };
+    if (eOut) Object.assign(upd, { checkOut: Timestamp.fromDate(eOut), durationMin: Math.round((eOut - eIn) / 60000) });
+    if (!e.open && !eOut && newOut) Object.assign(upd, { checkOut: Timestamp.fromDate(newOut), durationMin: Math.round((newOut - eIn) / 60000) });
+    await updateDoc(d.ref, upd);
+  }
+  // A check-in that is now closed must free its workers.
+  if (newOut) await closeWorkersForSession(s.id, newOut);
+}
+
+/** Admin: delete every check-in of one employee on one day (and the worker time tied to them). */
+export async function deleteWorkDay(employeeId, date) {
+  const snap = await getDocs(query(C('attendance'), where('employeeId', '==', employeeId), where('date', '==', date)));
+  for (const d of snap.docs) await deleteSession(d.id);
+  return snap.size;
+}
+
+/** Admin: edit an external worker entry's times (site-local wall clock). */
+export async function editWorkerEntryTimes(e, inWall, outWall) {
+  const newIn = fromTz(inWall, e.tz);
+  const newOut = outWall ? fromTz(outWall, e.tz) : null;
+  if (newOut && newOut <= newIn) throw new Error('End must be after start.');
+  const day = atTz(newIn, e.tz) || newIn;
+  const upd = { checkIn: Timestamp.fromDate(newIn), date: dateKey(day), month: monthKey(day), note: `${e.note ? `${e.note} ` : ''}[times edited by ${store.me?.name || 'admin'}]` };
+  if (newOut) Object.assign(upd, { checkOut: Timestamp.fromDate(newOut), durationMin: Math.round((newOut - newIn) / 60000) });
+  await updateDoc(doc(db, 'workerAttendance', e.id), upd);
+  if (newOut && e.open) await closeWorkerEntry({ ...e, checkIn: newIn }, newOut);
+}
+
+async function deleteWhere(col, field, value) {
+  const snap = await getDocs(query(C(col), where(field, '==', value)));
+  for (let i = 0; i < snap.docs.length; i += 400) {
+    const b = writeBatch(db);
+    snap.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref));
+    await b.commit();
+  }
+  return snap.size;
+}
+
+/**
+ * Admin: delete a staff member's profile (their login can no longer use the app or dashboard).
+ * With `records`, also deletes their attendance, worker time they logged, schedules, off-days, alerts and ID documents.
+ * Petty cash entries are always kept for the accounts.
+ */
+export async function deleteEmployee(u, { records = false } = {}) {
+  if (u.id === store.me?.id) throw new Error('You cannot delete your own account.');
+  let n = 0;
+  if (records) {
+    for (const l of store.workerLocks.filter((x) => x.employeeId === u.id)) await deleteDoc(doc(db, 'workerLocks', l.workerId));
+    n += await deleteWhere('attendance', 'employeeId', u.id);
+    n += await deleteWhere('workerAttendance', 'employeeId', u.id);
+    n += await deleteWhere('schedules', 'employeeId', u.id);
+    n += await deleteWhere('offDays', 'employeeId', u.id);
+    n += await deleteWhere('alerts', 'employeeId', u.id);
+    for (const f of store.files(u.id)) { await deleteIdFile(f); n++; }
+    await deleteDoc(doc(db, 'idInfo', u.id)).catch(() => {});
+  }
+  await deleteDoc(doc(db, 'users', u.id));
+  return n;
 }
 
 // ------------------------------------------------------------------ external workers

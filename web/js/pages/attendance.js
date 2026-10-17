@@ -4,6 +4,7 @@ import {
 } from '../util.js';
 import { flagText } from '../calc.js';
 import { attendanceLogReport, downloadReport } from '../report-lib.js';
+import { editTimesDialog } from '../admin-edit.js';
 
 export function mount(el, _p, { setHeader }) {
   const today = new Date();
@@ -55,7 +56,7 @@ export function mount(el, _p, { setHeader }) {
         <td class="small nowrap">${fmtDist(s.inDistance)}${s.outDistance != null ? ` / ${fmtDist(s.outDistance)}` : ''}</td>
         <td>${sessionFlagged(s) ? `<span class="pill red" title="${esc(flagText(s))}">${esc(flagText(s))}</span>` : pill('OK', 'green')}</td>
         <td class="right nowrap">${!s.checkOut ? `<button class="btn sm ghost" data-close="${s.id}">Close</button>` : ''}
-          ${isAdmin() ? `<button class="btn sm ghost icon" data-del="${s.id}">${icon('trash', 14)}</button>` : ''}</td></tr>`).join('')
+          ${isAdmin() ? `<button class="btn sm ghost icon" data-edit-s="${s.id}" title="Edit times">${icon('edit', 14)}</button><button class="btn sm ghost icon" data-del="${s.id}" title="Delete">${icon('trash', 14)}</button>` : ''}</td></tr>`).join('')
         : `<tr><td colspan="9"><div class="empty">${rows ? 'No check-ins for these filters' : 'Loading…'}</div></td></tr>`}
     </table></div></div>`;
 
@@ -85,6 +86,7 @@ export function mount(el, _p, { setHeader }) {
         await closeSession(s, at); toast('Closed'); load();
       };
     });
+    el.querySelectorAll('[data-edit-s]').forEach((b) => { b.onclick = () => editTimesDialog(rows.find((x) => x.id === b.dataset.editS), load); });
     el.querySelectorAll('[data-del]').forEach((b) => {
       b.onclick = async () => {
         if (!await confirmBox('Delete record?', 'Permanently delete this attendance record?', { ok: 'Delete', danger: true })) return;

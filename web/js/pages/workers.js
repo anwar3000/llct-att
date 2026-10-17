@@ -10,6 +10,7 @@ import {
 } from '../util.js';
 import { docsPanel, ownerFromWorker, docsSummaryHtml, exportMenu, ownerExpiry, prepareFile, DOC_KINDS } from '../iddocs.js';
 import { workerAttendanceReport, downloadReport } from '../report-lib.js';
+import { editTimesDialog } from '../admin-edit.js';
 
 export function mount(el, params, ctx) {
   if (params[0]) return detail(el, params[0], ctx);
@@ -309,6 +310,7 @@ function detail(el, id, { setHeader }) {
         <td>${esc(e.employeeName)}</td><td>${fmtTime(e.inLocal)}</td><td>${e.checkOut ? fmtTime(e.outLocal) : pill('On site', 'green', true)}</td>
         <td class="num"><b>${fmtMins(Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000))}</b></td>
         <td class="right nowrap">${e.open ? `<button class="btn sm ghost" data-close="${e.id}">End</button>` : ''}
+          ${isAdmin() ? `<button class="btn sm ghost icon" data-edit-e="${e.id}" title="Edit times">${icon('edit', 14)}</button>` : ''}
           <button class="btn sm ghost icon" data-del="${e.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')
         : `<tr><td colspan="7"><div class="empty">${entries ? 'No attendance this month' : 'Loading…'}</div></td></tr>`}
       </table></div>`;
@@ -323,6 +325,7 @@ function detail(el, id, { setHeader }) {
         try { await closeWorkerEntry(e, at, 'ended by management'); toast('Saved'); load(); } catch (er) { toast(friendlyError(er), true); }
       };
     });
+    box.querySelectorAll('[data-edit-e]').forEach((b) => { b.onclick = () => editTimesDialog(entries.find((x) => x.id === b.dataset.editE), load, { worker: true }); });
     box.querySelectorAll('[data-del]').forEach((b) => {
       b.onclick = async () => {
         if (!await confirmBox('Delete entry?', 'Delete this attendance entry?', { ok: 'Delete', danger: true })) return;
