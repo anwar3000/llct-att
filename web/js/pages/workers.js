@@ -190,7 +190,7 @@ export function registerWorker(w = null) {
         <div class="reg-doc-title">${esc(k.label)}</div>
         <label class="f"><span>Number</span><input name="${k.num}" value="${esc(i[k.num] || '')}"></label>
         <label class="f"><span>Expiry</span><input name="${k.exp}" type="date" value="${esc(i[k.exp] || '')}"></label>
-        ${editing ? '' : `<label class="f"><span>Copy (photo / PDF)</span><input name="file_${k.k}" type="file" accept="image/*,application/pdf" multiple></label>`}
+        ${editing ? '' : `<label class="f"><span>Copy (photo / PDF, max 2 MB)</span><input name="file_${k.k}" type="file" accept="image/*,application/pdf" multiple></label>`}
       </div>`).join('')}
       ${editing ? '<div class="full small muted">Upload or replace copies on the worker’s page.</div>' : ''}
     </div>

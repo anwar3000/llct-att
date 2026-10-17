@@ -818,3 +818,64 @@ class WorkerEntry {
     );
   }
 }
+
+/// A scanned ID copy (passport, Emirates ID, SIRA…) stored in chunks.
+class IdFileMeta {
+  final String id;
+  final String ownerId;
+  final String kind;
+  final String name;
+  final String mime;
+  final int size;
+  final int chunks;
+  final DateTime? uploadedAt;
+
+  IdFileMeta({
+    required this.id,
+    required this.ownerId,
+    required this.kind,
+    required this.name,
+    required this.mime,
+    required this.size,
+    required this.chunks,
+    this.uploadedAt,
+  });
+
+  bool get isImage => mime.startsWith('image/');
+
+  factory IdFileMeta.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return IdFileMeta(
+      id: d.id,
+      ownerId: _str(m['ownerId']),
+      kind: _str(m['kind'], 'other'),
+      name: _str(m['name'], 'file'),
+      mime: _str(m['mime'], 'application/octet-stream'),
+      size: _int(m['size']),
+      chunks: _int(m['chunks'], 1),
+      uploadedAt: _ts(m['uploadedAt']),
+    );
+  }
+}
+
+/// The ID documents an employee can keep up to date themselves.
+class IdKind {
+  final String key;
+  final String label;
+  final String? numField;
+  final String? expField;
+  const IdKind(this.key, this.label, [this.numField, this.expField]);
+}
+
+const idKinds = [
+  IdKind('passport', 'Passport', 'passportNo', 'passportExpiry'),
+  IdKind('eid', 'Emirates ID', 'eidNo', 'eidExpiry'),
+  IdKind('sira', 'SIRA card', 'siraNo', 'siraExpiry'),
+  IdKind('visa', 'Visa', 'visaNo', 'visaExpiry'),
+  IdKind('labour', 'Labour card / work permit', 'labourCardNo', 'labourCardExpiry'),
+  IdKind('photo', 'Photo'),
+  IdKind('other', 'Other documents'),
+];
+
+/// Max size of one uploaded document copy.
+const kMaxDocBytes = 2 * 1024 * 1024;

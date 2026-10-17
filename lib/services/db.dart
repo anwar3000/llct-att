@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/utils.dart';
@@ -642,4 +645,74 @@ class Db {
           ..sort((a, b) => (a.at ?? DateTime(2100)).compareTo(b.at ?? DateTime(2100)));
         return l;
       });
+
+  // ---------------------------------------------------------------- my ID documents
+  static CollectionReference<Map<String, dynamic>> get idInfo => _fs.collection('idInfo');
+  static CollectionReference<Map<String, dynamic>> get idFiles => _fs.collection('idFiles');
+
+  static Stream<Map<String, dynamic>> myIdInfo(String uid) =>
+      idInfo.doc(uid).snapshots().map((d) => d.data() ?? {});
+
+  static Future<void> saveMyIdInfo(AppUser me, Map<String, String> fields) =>
+      idInfo.doc(me.id).set({
+        ...fields,
+        'ownerType': 'staff',
+        'name': me.name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+  static Stream<List<IdFileMeta>> myIdFiles(String uid) =>
+      idFiles.where('ownerId', isEqualTo: uid).snapshots().map((q) =>
+          q.docs.map(IdFileMeta.fromDoc).toList()
+            ..sort((a, b) => (a.uploadedAt ?? DateTime(2000)).compareTo(b.uploadedAt ?? DateTime(2000))));
+
+  static const _chunk = 700000; // base64 characters per Firestore document
+
+  static Future<void> uploadMyIdFile({
+    required AppUser me,
+    required String kind,
+    required String name,
+    required String mime,
+    required Uint8List bytes,
+  }) async {
+    if (bytes.length > kMaxDocBytes) throw Exception('File is larger than 2 MB.');
+    final b64 = base64Encode(bytes);
+    final ref = idFiles.doc();
+    final n = (b64.length / _chunk).ceil().clamp(1, 1000);
+    final batch = _fs.batch();
+    for (var i = 0; i < n; i++) {
+      final end = (i + 1) * _chunk;
+      batch.set(ref.collection('chunks').doc('$i'),
+          {'d': b64.substring(i * _chunk, end > b64.length ? b64.length : end)});
+    }
+    batch.set(ref, {
+      'ownerId': me.id,
+      'ownerType': 'staff',
+      'ownerName': me.name,
+      'kind': kind,
+      'name': name,
+      'mime': mime,
+      'size': bytes.length,
+      'chunks': n,
+      'uploadedAt': FieldValue.serverTimestamp(),
+      'uploadedBy': me.name,
+    });
+    await batch.commit();
+  }
+
+  static Future<Uint8List> readIdFile(IdFileMeta f) async {
+    final q = await idFiles.doc(f.id).collection('chunks').get();
+    final parts = q.docs.toList()..sort((a, b) => int.parse(a.id).compareTo(int.parse(b.id)));
+    return base64Decode(parts.map((d) => _str(d.data()['d'])).join());
+  }
+
+  static Future<void> deleteIdFile(IdFileMeta f) async {
+    final q = await idFiles.doc(f.id).collection('chunks').get();
+    final batch = _fs.batch();
+    for (final d in q.docs) {
+      batch.delete(d.reference);
+    }
+    batch.delete(idFiles.doc(f.id));
+    await batch.commit();
+  }
 }

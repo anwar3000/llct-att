@@ -137,16 +137,33 @@ service cloud.firestore {
       allow delete: if isManagement();
     }
 
-    // ------------------------------------------- ID documents (management only)
+    // ------------------------------------------- ID documents
     // Passport / Emirates ID / SIRA numbers & expiry for staff and external workers.
+    // Management sees everything; each employee can view and update their own.
     match /idInfo/{ownerId} {
-      allow read, write: if isManagement();
+      allow read: if isManagement() || (isSelf(ownerId) && isActive());
+      allow write: if isManagement() || (isSelf(ownerId) && isActive()
+                      && request.resource.data.ownerType == 'staff'
+                      && request.resource.data.keys().hasOnly(['ownerType', 'name', 'updatedAt', 'nationality',
+                           'passportNo', 'passportExpiry', 'eidNo', 'eidExpiry', 'siraNo', 'siraExpiry',
+                           'visaNo', 'visaExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes']));
     }
-    // Scanned copies, stored in chunks so files up to ~6 MB fit in Firestore.
+    // Scanned copies (max 2 MB each), stored in chunks inside Firestore.
+    function ownsFile(fileId) {
+      return isActive() && get(/databases/$(database)/documents/idFiles/$(fileId)).data.ownerId == request.auth.uid;
+    }
     match /idFiles/{fileId} {
-      allow read, write: if isManagement();
+      allow read: if isManagement() || (isActive() && resource.data.ownerId == request.auth.uid);
+      allow create: if isManagement() || (isActive() && request.resource.data.ownerId == request.auth.uid
+                      && request.resource.data.ownerType == 'staff' && request.resource.data.size <= 2097152);
+      allow update: if isManagement();
+      allow delete: if isManagement() || (isActive() && resource.data.ownerId == request.auth.uid);
       match /chunks/{n} {
-        allow read, write: if isManagement();
+        allow read: if isManagement() || ownsFile(fileId);
+        allow create: if isManagement() || (isActive()
+                        && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.ownerId == request.auth.uid);
+        allow update: if isManagement();
+        allow delete: if isManagement() || ownsFile(fileId);
       }
     }
   }

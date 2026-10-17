@@ -16,7 +16,7 @@ export const DOC_KINDS = [
   { k: 'other', label: 'Other documents' },
 ];
 const KIND_LABEL = Object.fromEntries(DOC_KINDS.map((d) => [d.k, d.label]));
-const MAX_PDF = 6 * 1024 * 1024;
+export const MAX_FILE = 2 * 1024 * 1024; // 2 MB per document copy
 
 // ------------------------------------------------------------------ owners
 export const ownerFromUser = (u) => ({
@@ -70,10 +70,10 @@ function readAsDataUrl(file) {
 function loadImage(src) {
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Could not read this image. Use JPG, PNG or PDF (iPhone HEIC photos: export as JPG first).')); i.src = src; });
 }
-/** Images are resized to ≤2000 px JPEG (sharp enough to read, small enough to store). PDFs kept as-is. */
+/** Images are resized to ≤2000 px JPEG (sharp enough to read, small enough to store). PDFs kept as-is. Max 2 MB each. */
 export async function prepareFile(file) {
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-    if (file.size > MAX_PDF) throw new Error(`${file.name} is larger than 6 MB. Compress the PDF or upload a photo of it.`);
+    if (file.size > MAX_FILE) throw new Error(`${file.name} is larger than 2 MB. Compress the PDF or upload a photo of it.`);
     const url = await readAsDataUrl(file);
     return { name: file.name, mime: 'application/pdf', base64: url.split(',')[1] };
   }
@@ -89,7 +89,9 @@ export async function prepareFile(file) {
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0, c.width, c.height);
-    const out = c.toDataURL('image/jpeg', 0.85);
+    let out = c.toDataURL('image/jpeg', 0.85);
+    if (out.length * 0.75 > MAX_FILE) out = c.toDataURL('image/jpeg', 0.6);
+    if (out.length * 0.75 > MAX_FILE) throw new Error(`${file.name} is still larger than 2 MB after compressing.`);
     return { name: file.name.replace(/\.[^.]+$/, '') + '.jpg', mime: 'image/jpeg', base64: out.split(',')[1] };
   } finally { URL.revokeObjectURL(url); }
 }
@@ -149,7 +151,7 @@ export function docsPanel(el, owner) {
       <label class="f" style="margin:0;flex:2;min-width:200px"><span>Notes</span><input data-field="idNotes" value="${esc(info.idNotes || '')}"></label>
       <button class="btn" data-save-info>${icon('check', 16)} Save ID details</button>
     </div>
-    <div class="small muted" style="margin-top:6px">Copies upload straight away. Numbers and dates are saved with the button.</div>`;
+    <div class="small muted" style="margin-top:6px">Copies (photo or PDF, max 2 MB each) upload straight away. Numbers and dates are saved with the button.</div>`;
 
   const drawFiles = () => {
     el.querySelectorAll('[data-files]').forEach((box) => {

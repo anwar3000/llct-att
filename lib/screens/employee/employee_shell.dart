@@ -11,6 +11,7 @@ import '../../services/tracking_service.dart';
 import '../../widgets/common.dart';
 import 'history_tab.dart';
 import 'home_tab.dart';
+import 'my_documents_screen.dart';
 import 'petty_tab.dart';
 import 'site_update_tab.dart';
 
@@ -80,7 +81,19 @@ class _EmployeeShellState extends State<EmployeeShell> {
             InfoRow(Icons.event_busy_outlined, 'Off days', me.offDayLabel),
             InfoRow(Icons.calendar_month_outlined, 'Monthly quota', '${me.monthlyOffQuota} days'),
             const SizedBox(height: 16),
-            const SizedBox(height: 4),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.accent, foregroundColor: AppColors.primaryDark),
+              onPressed: () {
+                Navigator.pop(c);
+                Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => MyDocumentsScreen(me: widget.me)));
+              },
+              icon: const Icon(Icons.badge_outlined),
+              label: const Text('My ID documents'),
+            ),
+            const SizedBox(height: 8),
             const Text('LLCT Attendance v$kAppVersion',
                 style: TextStyle(color: AppColors.muted, fontSize: 12)),
             const SizedBox(height: 10),
