@@ -23,6 +23,7 @@ class AdminLive extends ChangeNotifier {
   List<Schedule> schedules = [];
   List<PettyTxn> pendingPetty = [];
   List<GeoAlert> alerts = [];
+  List<WorkerEntry> workersToday = [];
   bool loaded = false;
   Object? error;
 
@@ -87,6 +88,10 @@ class AdminLive extends ChangeNotifier {
       alerts = v;
       notifyListeners();
     }, onError: onErr));
+    _subs.add(Db.workersForDate(dateKey(now)).listen((v) {
+      workersToday = v;
+      notifyListeners();
+    }, onError: (_) {}));
     if (canSeeAccounts) _subs.add(Db.pettyPending().listen((v) {
       pendingPetty = v;
       notifyListeners();
@@ -105,6 +110,23 @@ class AdminLive extends ChangeNotifier {
 
   AppUser? userById(String id) => users.where((u) => u.id == id).firstOrNull;
   Site? siteById(String id) => sites.where((s) => s.id == id).firstOrNull;
+
+  /// External workers on site right now (open entries; any date, catches forgotten check-outs).
+  List<WorkerEntry> get externalOnSite => workersToday.where((e) => e.open).toList();
+
+  /// One entry per external worker who worked today: latest entry + total time.
+  List<({WorkerEntry e, Duration time, bool onSite})> get externalToday {
+    final by = <String, List<WorkerEntry>>{};
+    for (final e in workersToday) {
+      by.putIfAbsent(e.workerId, () => []).add(e);
+    }
+    final out = by.values.map((l) {
+      l.sort((a, b) => a.checkIn.compareTo(b.checkIn));
+      return (e: l.last, time: l.fold(Duration.zero, (a, x) => a + x.worked()), onSite: l.any((x) => x.open));
+    }).toList()
+      ..sort((a, b) => a.onSite == b.onSite ? a.e.workerName.compareTo(b.e.workerName) : (a.onSite ? -1 : 1));
+    return out;
+  }
 
   List<Site> get pendingSites => sites.where((s) => !s.approved && s.status != 'rejected').toList();
 

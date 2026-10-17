@@ -13,12 +13,14 @@ import * as reports from './pages/reports.js';
 import * as workers from './pages/workers.js';
 import * as documents from './pages/documents.js';
 import * as requests from './pages/requests.js';
+import * as working from './pages/working.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
 
 const NAV = [
   { path: '', label: 'Dashboard', icon: 'dashboard', page: dashboard },
+  { path: 'working', label: 'Working now', icon: 'people', page: working, badge: () => store.open.length + store.workerLocks.length, badgeColor: 'green' },
   { path: 'map', label: 'Live map', icon: 'map', page: livemap },
   { sep: 'Work' },
   { path: 'projects', label: 'Projects', icon: 'project', page: projects },
@@ -154,7 +156,7 @@ function renderNav() {
   nav.innerHTML = NAV.filter((n) => !n.adminOnly || isAdmin()).map((n) => {
     if (n.sep) return `<div class="sep">${n.sep}</div>`;
     const b = n.badge ? n.badge() : 0;
-    return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}">${icon(n.icon)}<span>${n.label}</span>${b ? `<span class="badge">${b}</span>` : ''}</a>`;
+    return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}">${icon(n.icon)}<span>${n.label}</span>${b ? `<span class="badge${n.badgeColor ? ` ${n.badgeColor}` : ''}">${b}</span>` : ''}</a>`;
   }).join('');
 }
 

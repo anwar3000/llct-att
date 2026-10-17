@@ -5,6 +5,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../widgets/common.dart';
+import '../../widgets/site_workforce.dart' show kStaffColor, kExtColor;
 import '../../widgets/tiles.dart';
 import 'admin_live.dart';
 import 'approvals.dart';
@@ -70,6 +71,9 @@ class _OverviewTabState extends State<OverviewTab> {
         final notIn = st.where((s) => s.state == StaffState.notIn).length;
         final off = st.where((s) => s.state == StaffState.off).length;
         final hours = st.fold(Duration.zero, (a, s) => a + s.worked);
+        final ext = live.externalToday;
+        final extOn = ext.where((x) => x.onSite).length;
+        final extHours = ext.fold(Duration.zero, (a, x) => a + x.time);
         final flaggedToday = live.today.where((s) => s.flagged).toList();
         final forgotten = live.open.where((s) => s.date != dateKey(DateTime.now())).toList();
         final activeSiteIds = {
@@ -88,28 +92,26 @@ class _OverviewTabState extends State<OverviewTab> {
               StatGrid(children: [
                 StatTile(
                   label: 'On duty now',
-                  value: '$onDuty / ${st.length}',
+                  value: '${onDuty + extOn}',
                   icon: Icons.radio_button_checked,
                   color: AppColors.success,
-                  sub: 'Tap to see on map',
+                  sub: '$onDuty staff · $extOn external',
                   onTap: () => widget.onNavigate(1),
                 ),
                 StatTile(
-                  label: 'Present today',
-                  value: '$present',
+                  label: 'Workforce today',
+                  value: '${present + ext.length}',
                   icon: Icons.how_to_reg_outlined,
                   color: AppColors.primary,
-                  sub: '$notIn not checked in · $off off',
+                  sub: '$present staff · ${ext.length} external · $notIn not in',
                   onTap: () => widget.onNavigate(2),
                 ),
                 StatTile(
-                  label: 'Work time today',
-                  value: fmtDuration(hours),
+                  label: 'Man-hours today',
+                  value: fmtDuration(hours + extHours),
                   icon: Icons.timer_outlined,
                   color: AppColors.info,
-                  sub: present == 0
-                      ? '—'
-                      : 'Avg ${fmtDuration(Duration(minutes: hours.inMinutes ~/ present))} / person',
+                  sub: 'staff ${fmtDuration(hours)} · ext ${fmtDuration(extHours)}',
                 ),
                 StatTile(
                   label: 'Sites active',
@@ -236,7 +238,7 @@ class _OverviewTabState extends State<OverviewTab> {
               ],
 
               // ----------------------------------------------- team today
-              SectionTitle('Team today',
+              SectionTitle('Team today · ${st.length} staff${ext.isEmpty ? '' : ' + ${ext.length} external'}',
                   trailing: TextButton(
                       onPressed: () => widget.onNavigate(2), child: const Text('Manage team'))),
               if (st.isEmpty)
@@ -258,6 +260,40 @@ class _OverviewTabState extends State<OverviewTab> {
                     ],
                   ),
                 ),
+              if (ext.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Card(
+                  child: Column(children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                      color: kExtColor.withValues(alpha: 0.08),
+                      child: Text('External workers today · ${ext.length}  ($extOn on site)',
+                          style: const TextStyle(color: kExtColor, fontWeight: FontWeight.w800)),
+                    ),
+                    for (var i = 0; i < ext.length; i++) ...[
+                      if (i > 0) const Divider(height: 1, indent: 64),
+                      ListTile(
+                        leading: Avatar(ext[i].e.workerName, ring: kExtColor),
+                        title: Text(ext[i].e.workerName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Text('${ext[i].e.siteName} · with ${ext[i].e.employeeName}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Pill(ext[i].onSite ? 'On site' : 'Done',
+                                color: ext[i].onSite ? AppColors.success : kExtColor),
+                            const SizedBox(height: 4),
+                            Text(fmtDuration(ext[i].time),
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ]),
+                ),
+              ],
 
               // ----------------------------------------------- schedule coverage
               if (live.schedules.isNotEmpty) ...[

@@ -45,6 +45,7 @@ export function mount(el, _params, { setHeader }) {
 
     body.innerHTML = `
     <div class="quick">
+      <a href="#/working">${icon('people', 16)} Working now</a>
       <a href="#/workers" data-qa="checkin">${icon('check', 16)} Check in workers</a>
       <a href="#/workers" data-qa="register">${icon('worker', 16)} Register worker</a>
       <a href="#/sites" data-qa="site">${icon('site', 16)} Add site</a>
@@ -53,7 +54,7 @@ export function mount(el, _params, { setHeader }) {
       <a href="#/reports">${icon('report', 16)} Reports</a>
     </div>
     <div class="grid kpis">
-      ${kpi('On site now', count('onDuty') + extNow, `${count('onDuty')} staff · ${extNow} external`, 'pin', '#2E9E6A', 'map')}
+      ${kpi('On site now', count('onDuty') + extNow, `${count('onDuty')} staff · ${extNow} external`, 'pin', '#2E9E6A', 'working')}
       ${kpi('Workforce today', present + extIds.size, `${present} staff · ${extIds.size} external`, 'people', '#D98A1A', 'attendance')}
       ${kpi('Man-hours today', fmtMins(minutes + extMins), `staff ${fmtMins(minutes)} · external ${fmtMins(extMins)}`, 'clock', '#3A7BD5')}
       ${kpi('External workers', `${extNow} on site`, `${new Set(store.workerLocks.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', EXT_COLOR, 'workers')}

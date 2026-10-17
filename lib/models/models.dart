@@ -112,7 +112,7 @@ class AppUser {
   /// Admins and managers use the management dashboard.
   bool get isManagement => role == 'admin' || role == 'manager';
 
-  bool get isEmployee => !isManagement;
+  bool get isEmployee => role == 'employee';
 
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -789,6 +789,8 @@ class WorkerEntry {
   final String date;
   final String company;
   final String trade;
+  final String employeeName;
+  final String siteId;
 
   WorkerEntry({
     required this.id,
@@ -803,6 +805,8 @@ class WorkerEntry {
     this.date = '',
     this.company = '',
     this.trade = '',
+    this.employeeName = '',
+    this.siteId = '',
   });
 
   DateTime get inLocal => atZone(checkIn, tz);
@@ -824,6 +828,8 @@ class WorkerEntry {
       date: _str(m['date']),
       company: _str(m['company']),
       trade: _str(m['trade']),
+      employeeName: _str(m['employeeName']),
+      siteId: _str(m['siteId']),
     );
   }
 }

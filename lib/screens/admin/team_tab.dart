@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
+import '../../widgets/site_workforce.dart' show kExtColor;
 import 'admin_live.dart';
 import 'employee_detail_screen.dart';
 import 'employee_form.dart';
@@ -21,6 +22,44 @@ class TeamTab extends StatefulWidget {
 class _TeamTabState extends State<TeamTab> {
   String _q = '';
   StaffState? _filter;
+  bool _extOnly = false;
+
+  List<Widget> _extCards({bool onlyOnSite = false}) {
+    final ext = widget.live.externalToday.where((x) => !onlyOnSite || x.onSite).toList();
+    if (ext.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+        child: Text('External workers ${onlyOnSite ? 'on site' : 'today'} · ${ext.length}',
+            style: const TextStyle(color: kExtColor, fontWeight: FontWeight.w800)),
+      ),
+      for (final x in ext)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Card(
+            color: const Color(0xFFFFFAF2),
+            child: ListTile(
+              leading: Avatar(x.e.workerName, ring: kExtColor),
+              title: Text(x.e.workerName, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                [if (x.e.company.isNotEmpty) x.e.company, x.e.siteName, 'with ${x.e.employeeName}'].join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Pill(x.onSite ? 'On site' : 'Done', color: x.onSite ? AppColors.success : kExtColor),
+                  const SizedBox(height: 4),
+                  Text(fmtDuration(x.time), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                ],
+              ),
+            ),
+          ),
+        ),
+    ];
+  }
 
   void _open(AppUser u) => Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => EmployeeDetailScreen(me: widget.me, userId: u.id, live: widget.live),
@@ -76,10 +115,21 @@ class _TeamTabState extends State<TeamTab> {
                   _f('Checked out (${count(StaffState.done)})', StaffState.done),
                   _f('Not in (${count(StaffState.notIn)})', StaffState.notIn),
                   _f('Off (${count(StaffState.off)})', StaffState.off),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: FilterChip(
+                      label: Text('External today (${widget.live.externalToday.length})'),
+                      selected: _extOnly,
+                      selectedColor: kExtColor.withValues(alpha: 0.2),
+                      onSelected: (v) => setState(() => _extOnly = v),
+                    ),
+                  ),
                 ]),
               ),
               const SizedBox(height: 10),
-              if (list.isEmpty)
+              if (_extOnly)
+                ..._extCards()
+              else if (list.isEmpty)
                 const Card(
                   child: EmptyState(icon: Icons.person_search_outlined, title: 'No matching staff'),
                 )
@@ -117,6 +167,8 @@ class _TeamTabState extends State<TeamTab> {
                         ),
                       ),
                     )),
+              if (!_extOnly && (_filter == null || _filter == StaffState.onDuty))
+                ..._extCards(onlyOnSite: _filter == StaffState.onDuty),
               if (admins.isNotEmpty) ...[
                 const SectionTitle('Admins & managers'),
                 ...admins.map((u) => Card(
@@ -158,8 +210,11 @@ class _TeamTabState extends State<TeamTab> {
         padding: const EdgeInsets.only(right: 8),
         child: ChoiceChip(
           label: Text(label),
-          selected: _filter == v,
-          onSelected: (_) => setState(() => _filter = v),
+          selected: !_extOnly && _filter == v,
+          onSelected: (_) => setState(() {
+            _filter = v;
+            _extOnly = false;
+          }),
         ),
       );
 }

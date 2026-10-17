@@ -1,9 +1,9 @@
 import {
   store, isAdmin, staffStatuses, createStaff, updateUser, sessionsInRange, offDaysInRange, trackForDay,
-  sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL, deleteEmployee, isShortDay, minDayMins,
+  sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL, deleteEmployee, isShortDay, minDayMins, entryMinutes,
 } from '../fb.js';
 import {
-  esc, fromTz, icon, avatar, pill, cap, fmtMins, fmtTime, fmtDate, fmtDay, fmtDateTime, fmtMoney, fmtDist, fmtMonth, timeAgo,
+  esc, fromTz, EXT_COLOR, icon, avatar, pill, cap, fmtMins, fmtTime, fmtDate, fmtDay, fmtDateTime, fmtMoney, fmtDist, fmtMonth, timeAgo,
   dateKey, monthKey, parseKey, startOfMonth, endOfMonth, addDays, WEEKDAYS, WEEKDAYS_LONG, toast, modal, confirmBox,
   promptBox, friendlyError, statusPill,
 } from '../util.js';
@@ -22,7 +22,7 @@ export function mount(el, params, ctx) {
 
 // ------------------------------------------------------------------ list
 function list(el, { setHeader }) {
-  setHeader('Employees', 'Staff, managers and their status today',
+  setHeader('Employees', 'Staff and external workers — status today',
     isAdmin() ? `<button class="btn" id="e-new">${icon('plus', 16)} Add person</button>` : '');
   document.getElementById('e-new')?.addEventListener('click', () => editPerson(null));
   let q = '', filter = 'all';
@@ -30,16 +30,27 @@ function list(el, { setHeader }) {
   function draw() {
     const st = staffStatuses();
     const ql = q.toLowerCase();
-    const rows = st.filter((s) => (filter === 'all' || s.state === filter) &&
+    const rows = st.filter((s) => filter !== 'ext' && (filter === 'all' || s.state === filter) &&
       (!ql || [s.user.name, s.user.loginId, s.user.phone, s.user.designation].join(' ').toLowerCase().includes(ql)));
     const staffMgr = store.users.filter((u) => u.role !== 'employee');
     const inactive = store.users.filter((u) => u.role === 'employee' && !u.active);
     const cnt = (k) => st.filter((s) => s.state === k).length;
+    // External workers who worked today (one row each), shown with the staff in orange.
+    const extMap = new Map();
+    for (const e of store.workersToday) {
+      const x = extMap.get(e.workerId) || { id: e.workerId, name: store.worker(e.workerId)?.name || e.workerName, w: store.worker(e.workerId), mins: 0, open: false, last: e };
+      x.mins += entryMinutes(e); if (e.open) x.open = true; if (e.checkIn >= x.last.checkIn) x.last = e;
+      extMap.set(e.workerId, x);
+    }
+    const extAll = [...extMap.values()].sort((a, b) => (a.open === b.open ? a.name.localeCompare(b.name) : a.open ? -1 : 1));
+    const extRows = extAll.filter((x) => (filter === 'all' || (filter === 'onDuty' && x.open) || (filter === 'done' && !x.open) || filter === 'ext')
+      && (!ql || [x.name, x.w?.phone, x.w?.company, x.w?.trade].join(' ').toLowerCase().includes(ql)));
+    const extOn = extAll.filter((x) => x.open).length;
     el.innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <input id="e-q" placeholder="Search name, ID, phone…" value="${esc(q)}" style="max-width:300px">
-      <div class="chips">${[['all', `All (${st.length})`], ['onDuty', `On duty (${cnt('onDuty')})`], ['done', `Checked out (${cnt('done')})`],
-        ['notIn', `Not in (${cnt('notIn')})`], ['off', `Off (${cnt('off')})`]].map(([k, l]) => `<span class="chip ${filter === k ? 'on' : ''}" data-f="${k}">${l}</span>`).join('')}</div>
+      <div class="chips">${[['all', `All (${st.length} + ${extAll.length} ext)`], ['onDuty', `On duty (${cnt('onDuty')} + ${extOn} ext)`], ['done', `Checked out (${cnt('done')})`],
+        ['notIn', `Not in (${cnt('notIn')})`], ['off', `Off (${cnt('off')})`], ['ext', `External today (${extAll.length})`]].map(([k, l]) => `<span class="chip ${filter === k ? 'on' : ''}" data-f="${k}">${l}</span>`).join('')}</div>
     </div>
     <div class="card"><div class="table-wrap"><table class="t">
       <tr><th>Employee</th><th>Login ID</th><th>Phone</th><th>Weekly off</th><th>Status today</th><th class="num">Today</th><th>IDs</th><th>Last GPS</th></tr>
@@ -51,7 +62,12 @@ function list(el, { setHeader }) {
         <td class="num"><b>${s.minutes ? fmtMins(s.minutes) : '—'}</b></td>
         <td>${docsSummaryHtml(s.user.id)}</td>
         <td class="small muted">${s.user.lastLocation ? timeAgo(s.user.lastLocation.at) : '—'}</td></tr>`).join('')
-        : '<tr><td colspan="8"><div class="empty">No matching employees</div></td></tr>'}
+        : (extRows.length ? '' : '<tr><td colspan="8"><div class="empty">No matching employees</div></td></tr>')}
+      ${extRows.length ? `<tr class="wf-sub ext"><td colspan="8">External workers today · ${extRows.length}</td></tr>` + extRows.map((x) => `<tr class="click wf-row ext" data-wid="${x.id}">
+        <td><div class="person">${avatar(x.name, 32, EXT_COLOR)}<div><div class="nm">${esc(x.name)}</div><div class="small muted">${esc([x.w?.company, x.w?.trade].filter(Boolean).join(' · ') || 'External worker')}</div></div></div></td>
+        <td><span class="wf-chip ext">External</span></td><td>${esc(x.w?.phone || '')}</td><td class="small muted">with ${esc(x.last.employeeName)}</td>
+        <td>${x.open ? pill('On site', 'green', true) : pill('Done', 'teal')}<div class="small muted">${esc(x.last.siteName)}</div></td>
+        <td class="num"><b>${fmtMins(x.mins)}</b></td><td>${docsSummaryHtml(x.id)}</td><td class="small muted">—</td></tr>`).join('') : ''}
     </table></div></div>
     ${staffMgr.length ? `<h2 class="mt2" style="margin-bottom:10px">Admins, managers & document clerks</h2>
     <div class="card"><div class="table-wrap"><table class="t"><tr><th>Name</th><th>Role</th><th>Login ID</th><th>Access</th><th></th></tr>
@@ -66,6 +82,7 @@ function list(el, { setHeader }) {
     qi.oninput = (e) => { q = e.target.value; draw(); el.querySelector('#e-q').focus(); el.querySelector('#e-q').setSelectionRange(q.length, q.length); };
     el.querySelectorAll('[data-f]').forEach((c) => { c.onclick = () => { filter = c.dataset.f; draw(); }; });
     el.querySelectorAll('tr[data-id]').forEach((r) => { r.onclick = () => { location.hash = `#/employees/${r.dataset.id}`; }; });
+    el.querySelectorAll('tr[data-wid]').forEach((r) => { r.onclick = () => { location.hash = `#/workers/${r.dataset.wid}`; }; });
     el.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => editPerson(store.user(b.dataset.edit)); });
   }
   draw();

@@ -49,3 +49,17 @@ export function fitTo(map, points, maxZoom = 16) {
   if (points.length === 1) { map.setView(points[0], 15); return; }
   map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom });
 }
+
+/** External worker shown at the position of the employee who checked them in (orange, small). */
+export function workerMarker(name, lat, lng) {
+  return L.marker([lat, lng], {
+    icon: L.divIcon({
+      className: '',
+      html: `<div style="display:flex;flex-direction:column;align-items:center">
+        <div class="emp-pin ext-pin">${esc(initials(name))}</div>
+        <div class="pin-label ext-label" style="margin-top:1px">${esc(name.split(' ')[0])}</div></div>`,
+      iconSize: [70, 46], iconAnchor: [35, 13],
+    }),
+    zIndexOffset: 900,
+  });
+}

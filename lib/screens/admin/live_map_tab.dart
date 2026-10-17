@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -10,6 +12,7 @@ import '../../widgets/map_widgets.dart';
 import 'admin_live.dart';
 import 'employee_detail_screen.dart';
 import 'staff_status.dart';
+import '../../widgets/site_workforce.dart' show kExtColor;
 
 class LiveMapTab extends StatefulWidget {
   final AppUser me;
@@ -52,6 +55,83 @@ class _LiveMapTabState extends State<LiveMapTab> {
       padding: const EdgeInsets.fromLTRB(50, 80, 50, 170),
       maxZoom: 16,
     ));
+  }
+
+  /// External workers have no phone of their own — show them around the employee who checked them in
+  /// (or at the site if that employee has no GPS yet).
+  List<Marker> _workerMarkers() {
+    final bySession = <String, StaffStatus>{
+      for (final s in widget.live.statuses)
+        if (s.open != null && s.user.lastLocation != null) s.open!.id: s,
+    };
+    final groups = <String, List<WorkerEntry>>{};
+    for (final e in widget.live.externalOnSite) {
+      groups.putIfAbsent(e.sessionId, () => []).add(e);
+    }
+    final out = <Marker>[];
+    groups.forEach((sid, list) {
+      final emp = bySession[sid];
+      LatLng? base;
+      if (emp != null) {
+        base = LatLng(emp.user.lastLocation!.lat, emp.user.lastLocation!.lng);
+      } else {
+        final site = widget.live.siteById(list.first.siteId);
+        if (site != null) base = LatLng(site.lat, site.lng);
+      }
+      if (base == null) return;
+      for (var i = 0; i < list.length; i++) {
+        final a = 2 * math.pi * i / list.length - math.pi / 2;
+        final r = 0.00017 * (1 + (i ~/ 8) * 0.6);
+        final p = LatLng(base.latitude + r * math.sin(a),
+            base.longitude + r * math.cos(a) / math.cos(base.latitude * math.pi / 180));
+        final e = list[i];
+        out.add(Marker(
+          point: p,
+          width: 70,
+          height: 44,
+          child: GestureDetector(
+            onTap: () => showModalBottomSheet(
+              context: context,
+              showDragHandle: true,
+              builder: (_) => SafeArea(
+                child: ListTile(
+                  leading: Avatar(e.workerName, ring: kExtColor),
+                  title: Text(e.workerName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text('External worker · ${e.siteName}\nWith ${e.employeeName} · since ${fmtTime(e.inLocal)}\n'
+                      'Location = ${emp != null ? "${e.employeeName}'s phone" : 'site (no GPS from employee yet)'}'),
+                  isThreeLine: true,
+                ),
+              ),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: kExtColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
+                ),
+                child: Text(initials(e.workerName),
+                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
+              ),
+              Container(
+                margin: const EdgeInsets.only(top: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+                child: Text(e.workerName.split(' ').first,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 9.5, color: kExtColor, fontWeight: FontWeight.w700)),
+              ),
+            ]),
+          ),
+        ));
+      }
+    });
+    return out;
   }
 
   void _focus(StaffStatus s) {
@@ -140,6 +220,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
               osmTiles(),
               if (_showSites) CircleLayer(circles: sites.map(siteCircle).toList()),
               if (_showSites) MarkerLayer(markers: sites.map((s) => siteMarker(s)).toList()),
+              MarkerLayer(markers: _workerMarkers()),
               MarkerLayer(
                 markers: staff
                     .map((s) => employeeMarker(s.user, s.user.lastLocation!,

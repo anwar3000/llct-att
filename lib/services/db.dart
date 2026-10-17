@@ -318,6 +318,12 @@ class Db {
       q.docs.map(ExtWorker.fromDoc).where((w) => w.active).toList()
         ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
 
+  /// All external-worker entries for a day (management).
+  static Stream<List<WorkerEntry>> workersForDate(String date) => workerAttendance
+      .where('date', isEqualTo: date)
+      .snapshots()
+      .map((q) => q.docs.map(WorkerEntry.fromDoc).toList()..sort((a, b) => a.workerName.compareTo(b.workerName)));
+
   /// This month's staff sessions and external-worker entries at one site.
   static Stream<List<AttendanceSession>> siteSessionsMonth(String siteId, String month) => attendance
       .where('siteId', isEqualTo: siteId)

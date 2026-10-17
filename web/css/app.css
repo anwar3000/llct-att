@@ -373,3 +373,6 @@ tr.short-day td { background: #fdf1f1; }
 .pchip.rm { background: #fbe6e6; text-decoration: line-through; color: #b23535; }
 .pchip.new { background: #e2f4ea; color: #1f7a50; }
 @media (max-width: 700px) { .ptop, .ptabs, .pmain { padding-left: 14px; padding-right: 14px; } .hide-sm { display: none; } }
+.nav a .badge.green { background: #2E9E6A; }
+.emp-pin.ext-pin { background: #D98A1A !important; width: 24px; height: 24px; font-size: 9.5px; border-width: 2px; }
+.pin-label.ext-label { color: #a8640f; font-size: 10px; }
