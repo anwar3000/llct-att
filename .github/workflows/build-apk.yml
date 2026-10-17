@@ -85,6 +85,15 @@ jobs:
           fi
           cat gen.txt
 
+      - name: Release signing key
+        env:
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          if [ -z "$ANDROID_SIGNING_KEY" ]; then
+            echo "::warning title=Not signed with your permanent key::Add the ANDROID_SIGNING_KEY secret so updates install over the existing app."
+            exit 0
+          fi
+          python3 tools/setup_signing.py android/app
       - name: Get packages
         run: flutter pub get || (flutter pub upgrade --major-versions && flutter pub get)
 
