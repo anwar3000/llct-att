@@ -10,6 +10,8 @@ import * as attendance from './pages/attendance.js';
 import * as petty from './pages/petty.js';
 import * as updates from './pages/updates.js';
 import * as reports from './pages/reports.js';
+import * as workers from './pages/workers.js';
+import * as documents from './pages/documents.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -24,7 +26,9 @@ const NAV = [
   { path: 'updates', label: 'Site updates', icon: 'updates', page: updates },
   { sep: 'People' },
   { path: 'employees', label: 'Employees', icon: 'people', page: employees },
+  { path: 'workers', label: 'External workers', icon: 'worker', page: workers },
   { path: 'attendance', label: 'Attendance', icon: 'clock', page: attendance },
+  { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
   { path: 'petty', label: 'Petty cash', icon: 'wallet', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
   { sep: 'Output' },
   { path: 'reports', label: 'Reports', icon: 'report', page: reports },

@@ -10,6 +10,7 @@ import {
 import { employeeSummary, pettySummary, flagText } from '../calc.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
 import { monthlySummaryReport, attendanceLogReport, downloadReport } from '../report-lib.js';
+import { docsPanel, ownerFromUser, exportMenu, docsSummaryHtml } from '../iddocs.js';
 
 const STATE = { onDuty: ['On duty', 'green'], done: ['Checked out', 'teal'], off: ['Off day', 'amber'], notIn: ['Not checked in', 'gray'] };
 
@@ -40,19 +41,20 @@ function list(el, { setHeader }) {
         ['notIn', `Not in (${cnt('notIn')})`], ['off', `Off (${cnt('off')})`]].map(([k, l]) => `<span class="chip ${filter === k ? 'on' : ''}" data-f="${k}">${l}</span>`).join('')}</div>
     </div>
     <div class="card"><div class="table-wrap"><table class="t">
-      <tr><th>Employee</th><th>Login ID</th><th>Phone</th><th>Weekly off</th><th>Status today</th><th class="num">Today</th><th>Last GPS</th></tr>
+      <tr><th>Employee</th><th>Login ID</th><th>Phone</th><th>Weekly off</th><th>Status today</th><th class="num">Today</th><th>IDs</th><th>Last GPS</th></tr>
       ${rows.length ? rows.map((s) => `<tr class="click" data-id="${s.user.id}">
         <td><div class="person">${avatar(s.user.name, 32)}<div><div class="nm">${esc(s.user.name)}</div><div class="small muted">${esc(s.user.designation)}</div></div></div></td>
         <td class="mono">${esc(s.user.loginId)}</td><td>${esc(s.user.phone)}</td>
         <td>${s.user.weeklyOffDays.length ? s.user.weeklyOffDays.map((w) => WEEKDAYS[w]).join(', ') : '<span class="muted">Flexible</span>'}</td>
         <td>${pill(STATE[s.state][0], STATE[s.state][1], s.state === 'onDuty')}${s.open ? `<div class="small muted">${esc(s.open.siteName)}</div>` : ''}</td>
         <td class="num"><b>${s.minutes ? fmtMins(s.minutes) : '—'}</b></td>
+        <td>${docsSummaryHtml(s.user.id)}</td>
         <td class="small muted">${s.user.lastLocation ? timeAgo(s.user.lastLocation.at) : '—'}</td></tr>`).join('')
-        : '<tr><td colspan="7"><div class="empty">No matching employees</div></td></tr>'}
+        : '<tr><td colspan="8"><div class="empty">No matching employees</div></td></tr>'}
     </table></div></div>
     ${staffMgr.length ? `<h2 class="mt2" style="margin-bottom:10px">Admins & managers</h2>
     <div class="card"><div class="table-wrap"><table class="t"><tr><th>Name</th><th>Role</th><th>Login ID</th><th>Access</th><th></th></tr>
-      ${staffMgr.map((u) => `<tr><td><div class="person">${avatar(u.name, 30)}<span class="nm">${esc(u.name)}</span></div></td>
+      ${staffMgr.map((u) => `<tr><td><a class="person" href="#/employees/${u.id}" style="color:inherit">${avatar(u.name, 30)}<span class="nm">${esc(u.name)}</span></a></td>
         <td>${pill(ROLE_LABEL[u.role] || u.role, u.role === 'admin' ? 'purple' : 'blue')}</td><td class="mono">${esc(u.loginId)}</td>
         <td class="small muted">${u.role === 'admin' ? 'Everything incl. accounts & logins' : 'Everything except accounts'}${u.active ? '' : ' · <b style="color:#D64545">disabled</b>'}</td>
         <td class="right">${isAdmin() && u.id !== store.me.id ? `<button class="btn sm ghost" data-edit="${u.id}">${icon('edit', 14)} Edit</button>` : ''}</td></tr>`).join('')}
@@ -126,7 +128,19 @@ export function editPerson(u) {
 }
 
 // ------------------------------------------------------------------ detail
-function detail(el, id, { setHeader }) {
+function detail(root, id, { setHeader }) {
+  // Top part is redrawn as data loads; the ID documents card below is built once (keeps typed values).
+  root.innerHTML = `<div></div><div class="card mt" id="ed-docs-card" style="display:none">
+    <div class="card-head"><h2>ID documents</h2><span class="small muted">Passport · Emirates ID · SIRA · visa · labour card — for sending to customers</span></div>
+    <div class="card-pad" id="ed-docs"></div></div>`;
+  const el = root.firstChild;
+  let docsCleanup = null;
+  const buildDocs = () => {
+    const u = store.user(id);
+    if (docsCleanup || !u) return;
+    root.querySelector('#ed-docs-card').style.display = '';
+    docsCleanup = docsPanel(root.querySelector('#ed-docs'), ownerFromUser(u));
+  };
   let month = startOfMonth(new Date());
   let sessions = null, offDays = [];
   let day = dateKey(new Date());
@@ -150,8 +164,11 @@ function detail(el, id, { setHeader }) {
     setHeader(u.name, `${esc(ROLE_LABEL[u.role])} · ID <span class="mono">${esc(u.loginId)}</span>${u.phone ? ` · ${esc(u.phone)}` : ''}${u.designation ? ` · ${esc(u.designation)}` : ''}`,
       `<a class="btn ghost" href="#/employees">← All employees</a>
        <button class="btn ghost" id="ed-xlsx">${icon('download', 16)} Month report</button>
+       <button class="btn ghost" id="ed-ids">${icon('download', 16)} IDs</button>
        ${isAdmin() ? `<button class="btn" id="ed-edit">${icon('edit', 16)} Edit</button>` : ''}`);
     document.getElementById('ed-edit')?.addEventListener('click', () => editPerson(u));
+    document.getElementById('ed-ids').onclick = () => exportMenu([ownerFromUser(u)], `${u.name} IDs`);
+    buildDocs();
     document.getElementById('ed-xlsx').onclick = async () => {
       try {
         const from = dateKey(month), to = dateKey(endOfMonth(month));
@@ -273,7 +290,7 @@ function detail(el, id, { setHeader }) {
   // Only redraw from live data until the profile first appears (avoids rebuilding the map every 30 s).
   let shown = false;
   const off = store.on(() => { if (!shown && store.user(id)) { shown = true; draw(); } });
-  return () => { off(); if (map) map.remove(); loadToken++; };
+  return () => { off(); if (map) map.remove(); loadToken++; if (docsCleanup) docsCleanup(); };
 }
 
 const k = (label, value, sub) => `<div class="card kpi"><div class="lbl">${esc(label)}</div><div class="val" style="font-size:22px">${esc(value)}</div><div class="sub">${esc(sub)}</div></div>`;

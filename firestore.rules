@@ -108,5 +108,43 @@ service cloud.firestore {
       allow update: if isManagement();
       allow delete: if isManagement() || (owns() && resource.data.status == 'pending');
     }
+
+    // ------------------------------------------------- external workers (labour)
+    // Registered by management. Staff only see name / company / trade / phone to pick them at check-in.
+    match /extWorkers/{id} {
+      allow read: if isActive();
+      allow write: if isManagement();
+    }
+
+    // One lock per worker while they are on a site: stops the same worker being
+    // checked in twice (by two employees, or at two sites) at the same time.
+    match /workerLocks/{workerId} {
+      allow read: if isActive();
+      allow create: if isManagement() || createsOwn();
+      allow update: if isManagement();
+      allow delete: if isManagement() || owns();
+    }
+
+    // Worker attendance — follows the employee's check-in session.
+    match /workerAttendance/{id} {
+      allow read: if isManagement() || owns();
+      allow create: if isManagement() || (createsOwn() && request.resource.data.open == true);
+      allow update: if isManagement() || (owns() && request.resource.data.employeeId == request.auth.uid
+                      && onlyChanges(['checkOut', 'durationMin', 'open']));
+      allow delete: if isManagement();
+    }
+
+    // ------------------------------------------- ID documents (management only)
+    // Passport / Emirates ID / SIRA numbers & expiry for staff and external workers.
+    match /idInfo/{ownerId} {
+      allow read, write: if isManagement();
+    }
+    // Scanned copies, stored in chunks so files up to ~6 MB fit in Firestore.
+    match /idFiles/{fileId} {
+      allow read, write: if isManagement();
+      match /chunks/{n} {
+        allow read, write: if isManagement();
+      }
+    }
   }
 }

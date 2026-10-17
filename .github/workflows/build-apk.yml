@@ -2,10 +2,20 @@ name: Build APK
 
 # Builds an installable Android APK in the cloud.
 # Needs one repository secret: GOOGLE_SERVICES_JSON (the full text of google-services.json).
+# ROLLBACK: Actions → Build APK → Run workflow → type a saved version
+# (e.g. stable-2026-10-17) in "version". That APK is also kept permanently under Releases.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (blank = latest). e.g. stable-2026-10-17'
+        required: false
+        default: ''
   push:
     branches: [main, master]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -13,6 +23,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -87,6 +99,17 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AttendancePro-apk
+          name: AttendancePro-apk${{ inputs.version && format('-{0}', inputs.version) || '' }}
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
+
+      - name: Keep this version's APK permanently (Releases)
+        if: inputs.version
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk "LLCT-Attendance-${{ inputs.version }}.apk"
+          gh release delete "apk-${{ inputs.version }}" -y --cleanup-tag 2>/dev/null || true
+          gh release create "apk-${{ inputs.version }}" "LLCT-Attendance-${{ inputs.version }}.apk" \
+            --target "$(git rev-parse HEAD)" --title "LLCT Attendance APK — ${{ inputs.version }}" \
+            --notes "Restore-point APK built from ${{ inputs.version }}."
+        env:
+          GH_TOKEN: ${{ github.token }}

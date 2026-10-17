@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, alertsInRange, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, alertsInRange, workerEntriesInRange, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -293,6 +293,112 @@ export function filterReport(rep, q) {
   };
 }
 
+// ================================================================== external workers
+const entryEnd = (e) => e.checkOut || new Date();
+/** Minutes per worker per day, with overlapping entries merged (a worker is never counted twice). */
+function workerDayMinutes(entries) {
+  const by = new Map();
+  for (const e of entries) {
+    const k = `${e.workerId}|${e.date}`;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push([e.checkIn.getTime(), entryEnd(e).getTime()]);
+  }
+  const out = new Map();
+  for (const [k, iv] of by) {
+    iv.sort((a, b) => a[0] - b[0]);
+    let total = 0, [cs, ce] = iv[0];
+    for (const [s, e] of iv.slice(1)) {
+      if (s <= ce) ce = Math.max(ce, e); else { total += ce - cs; cs = s; ce = e; }
+    }
+    total += ce - cs;
+    out.set(k, Math.max(0, Math.round(total / 60000)));
+  }
+  return out;
+}
+const workerInfo = (id, e) => {
+  const w = store.worker(id);
+  return { name: w?.name || e?.workerName || 'Worker', company: w?.company || e?.company || '', trade: w?.trade || e?.trade || '', code: w?.code || '' };
+};
+
+export async function workerAttendanceReport(from, to, workerId = null, siteId = null) {
+  const all = await workerEntriesInRange(from, to);
+  const list = all.filter((e) => (!workerId || e.workerId === workerId) && (!siteId || e.siteId === siteId));
+  const mins = (e) => Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000));
+  const log = list.map((e) => {
+    const w = workerInfo(e.workerId, e);
+    return [e.date, w.name, w.company, w.trade, e.siteName, e.employeeName, t2(e.checkIn), e.checkOut ? t2(e.checkOut) : 'ON SITE',
+      fmtMins(mins(e)), hoursDec(mins(e)), e.note];
+  });
+  const dayMins = workerDayMinutes(list);
+  const ids = [...new Set(list.map((e) => e.workerId))];
+  const summary = ids.map((id) => {
+    const w = workerInfo(id, list.find((e) => e.workerId === id));
+    const mine = list.filter((e) => e.workerId === id);
+    const days = [...new Set(mine.map((e) => e.date))];
+    const m = days.reduce((a, d) => a + (dayMins.get(`${id}|${d}`) || 0), 0);
+    return [w.name, w.code, w.company, w.trade, days.length, fmtMins(m), hoursDec(m), [...new Set(mine.map((e) => e.siteName))].join(', '),
+      [...new Set(mine.map((e) => e.employeeName))].join(', ')];
+  }).sort((a, b) => a[0].localeCompare(b[0]));
+  const totalM = summary.reduce((a, r) => a + r[6], 0);
+  const who = workerId ? workerInfo(workerId).name : null;
+  const where = siteId ? store.site(siteId)?.name : null;
+  return {
+    title: `External workers attendance${who ? ` — ${who}` : ''}${where ? ` — ${where}` : ''}`,
+    subtitle: `${from} to ${to} · ${ids.length} workers · ${Math.round(totalM * 100) / 100} hours`,
+    filename: `workers-attendance-${from}-to-${to}`,
+    orientation: 'landscape',
+    sheets: [
+      {
+        name: 'By worker',
+        columns: ['Worker', 'Code', 'Company', 'Trade', 'Days', 'Total time', 'Hours', 'Sites', 'Added by'],
+        widths: [24, 10, 20, 14, 7, 11, 8, 34, 26],
+        rows: summary,
+        totals: ['TOTAL', '', '', '', summary.reduce((a, r) => a + r[4], 0), fmtMins(totalM * 60), Math.round(totalM * 100) / 100, '', ''],
+      },
+      {
+        name: 'Daily log',
+        columns: ['Date', 'Worker', 'Company', 'Trade', 'Site', 'Added by (employee)', 'In', 'Out', 'Duration', 'Hours', 'Note'],
+        widths: [11, 22, 18, 13, 22, 20, 7, 9, 9, 7, 20],
+        rows: log,
+        pdfColumns: [0, 1, 2, 4, 5, 6, 7, 8, 9],
+      },
+    ],
+  };
+}
+
+export async function workerRegisterReport(month) {
+  const from = dateKey(startOfMonth(month)), to = dateKey(endOfMonth(month));
+  const list = await workerEntriesInRange(from, to);
+  const dayMins = workerDayMinutes(list);
+  const n = daysInMonth(month);
+  const ids = [...new Set([...store.workers.filter((w) => w.active).map((w) => w.id), ...list.map((e) => e.workerId)])];
+  const rows = ids.map((id) => {
+    const w = workerInfo(id, list.find((e) => e.workerId === id));
+    let days = 0, mins = 0;
+    const cells = [];
+    for (let i = 1; i <= n; i++) {
+      const m = dayMins.get(`${id}|${dateKey(new Date(month.getFullYear(), month.getMonth(), i))}`) || 0;
+      if (m) { days++; mins += m; }
+      cells.push(m ? hoursDec(m) : '');
+    }
+    return [w.name, w.company, ...cells, days, hoursDec(mins)];
+  }).sort((a, b) => a[0].localeCompare(b[0]));
+  const cols = ['Worker', 'Company'];
+  for (let i = 1; i <= n; i++) {
+    const d = new Date(month.getFullYear(), month.getMonth(), i);
+    cols.push(`${i} ${WEEKDAYS[d.getDay() === 0 ? 7 : d.getDay()][0]}`);
+  }
+  cols.push('Days', 'Hours');
+  return {
+    title: `External workers register — ${fmtMonth(month)}`,
+    subtitle: 'Numbers are hours on site each day',
+    filename: `workers-register-${from.slice(0, 7)}`,
+    orientation: 'landscape',
+    pdfFont: 6,
+    sheets: [{ name: 'Register', columns: cols, widths: [22, 16, ...Array(n).fill(5), 6, 8], rows }],
+  };
+}
+
 // ================================================================== export
 function safeSheetName(n, used) {
   let s = n.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet';
@@ -302,7 +408,7 @@ function safeSheetName(n, used) {
   return s;
 }
 
-function saveBlob(blob, name) {
+export function saveBlob(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -351,7 +457,7 @@ function toCsv(rep) {
 }
 
 let logoData = null;
-async function loadLogo() {
+export async function loadLogo() {
   if (logoData !== null) return logoData;
   try {
     const blob = await (await fetch('img/logo.png')).blob();

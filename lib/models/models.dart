@@ -667,3 +667,106 @@ class MonthSummary {
     return MonthSummary(month, list, user.monthlyOffQuota);
   }
 }
+
+/// External worker / labour, registered by management. Does not log in.
+class ExtWorker {
+  final String id;
+  final String name;
+  final String phone;
+  final String company;
+  final String trade;
+  final bool active;
+
+  ExtWorker({
+    required this.id,
+    required this.name,
+    this.phone = '',
+    this.company = '',
+    this.trade = '',
+    this.active = true,
+  });
+
+  String get subtitle => [company, trade].where((s) => s.isNotEmpty).join(' · ');
+
+  factory ExtWorker.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return ExtWorker(
+      id: d.id,
+      name: _str(m['name'], 'Worker'),
+      phone: _str(m['phone']),
+      company: _str(m['company']),
+      trade: _str(m['trade']),
+      active: m['active'] != false,
+    );
+  }
+}
+
+/// Who currently "holds" a worker (one lock per worker → no duplicates across sites/employees).
+class WorkerLock {
+  final String workerId;
+  final String recordId;
+  final String sessionId;
+  final String employeeId;
+  final String employeeName;
+  final String siteName;
+
+  WorkerLock({
+    required this.workerId,
+    required this.recordId,
+    required this.sessionId,
+    required this.employeeId,
+    required this.employeeName,
+    required this.siteName,
+  });
+
+  factory WorkerLock.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return WorkerLock(
+      workerId: d.id,
+      recordId: _str(m['recordId']),
+      sessionId: _str(m['sessionId']),
+      employeeId: _str(m['employeeId']),
+      employeeName: _str(m['employeeName']),
+      siteName: _str(m['siteName']),
+    );
+  }
+}
+
+/// One external worker's time on a site, tied to the employee's check-in session.
+class WorkerEntry {
+  final String id;
+  final String workerId;
+  final String workerName;
+  final String sessionId;
+  final String siteName;
+  final DateTime checkIn;
+  final DateTime? checkOut;
+  final bool open;
+
+  WorkerEntry({
+    required this.id,
+    required this.workerId,
+    required this.workerName,
+    required this.sessionId,
+    required this.siteName,
+    required this.checkIn,
+    this.checkOut,
+    this.open = false,
+  });
+
+  Duration worked([DateTime? now]) => (checkOut ?? now ?? DateTime.now()).difference(checkIn);
+
+  factory WorkerEntry.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return WorkerEntry(
+      id: d.id,
+      workerId: _str(m['workerId']),
+      workerName: _str(m['workerName'], 'Worker'),
+      sessionId: _str(m['sessionId']),
+      siteName: _str(m['siteName']),
+      checkIn: _ts(m['checkIn']) ?? DateTime.now(),
+      checkOut: _ts(m['checkOut']),
+      open: m['open'] == true,
+    );
+  }
+}

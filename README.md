@@ -39,8 +39,19 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 - **Hourly location check:** while an employee is checked in, the phone records a GPS point at least every hour. It raises a **geofence alert** if they leave the site area without checking out, and management sees and resolves alerts on the dashboard.
 - **Stay signed in:** staff stay logged in on their phone until they sign out.
 - **LLCT branding:** logo, app icon and orange/charcoal colours.
+- **External workers (labour):** management registers each worker on the web dashboard (**External workers → Register worker**) with their phone number, passport copy and Emirates ID. Workers don't punch in. Right after an employee checks in, the app opens a **workers page** where they tick who is with them, and they can add or remove workers later with the **Manage** button. A worker can be on only one check-in at a time, so they can't be counted twice. Their time ends when they're removed or when the employee checks out. Reports: **External workers attendance** (hours per worker plus a daily log) and **External workers register** (month grid).
+- **ID documents:** passport, Emirates ID, SIRA card, visa and labour card numbers, expiry dates and scanned copies for both staff and workers. **ID documents** lists everyone and flags expired or expiring IDs. To send IDs to a customer, select people and download a **ZIP** (a folder per person plus an Excel list), a **PDF ID pack**, or Excel only.
 
 > **After every update, re-publish `firestore.rules`** in Firebase Console → Firestore → Rules. New collections (`projects`, `alerts`) and roles depend on it.
+
+## Going back to a saved version (if an update breaks something)
+Saved versions are kept as branches. The first one is **`stable-2026-10-17`**, which is the app before external workers and ID documents were added.
+
+- **App:** go to **Actions → Build APK → Run workflow**, type `stable-2026-10-17` in **version** and run it. The APK appears under **Releases** as `LLCT-Attendance-stable-2026-10-17.apk` and is kept permanently. Install it over the current app.
+- **Web dashboard:** go to **Actions → Deploy web dashboard → Run workflow**, type the same version and run it.
+- **Back to the latest:** run both workflows again with **version** left blank.
+
+Data is never deleted by going back. Older versions simply ignore the newer collections.
 
 ## Web dashboard setup (one time)
 1. In the GitHub repo, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
@@ -163,7 +174,9 @@ firestore.rules                 security rules (staff only see their own data)
 ```
 
 ## Firestore collections
-`users` (+ `users/{uid}/track` GPS trail) · `sites` · `schedules` · `attendance` · `siteUpdates` · `petty` · `offDays`
+`users` (+ `users/{uid}/track` GPS trail) · `sites` · `projects` · `schedules` · `attendance` · `siteUpdates` · `petty` · `offDays` · `alerts` ·
+`extWorkers` (registered labour) · `workerLocks` (who has which worker right now) · `workerAttendance` (worker time per check-in) ·
+`idInfo` (ID numbers and expiry dates) · `idFiles` (+ `chunks`: scanned copies, management only)
 
 ## Known limits
 - **Password reset:** staff log in with IDs rather than real emails, so reset passwords in *Firebase Console → Authentication → (user) → Reset password*. You can also delete the user there and recreate them in the app.

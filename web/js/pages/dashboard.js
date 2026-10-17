@@ -42,6 +42,7 @@ export function mount(el, _params, { setHeader }) {
       ${kpi('On duty now', `${count('onDuty')} / ${st.length}`, 'Tap for live map', 'pin', '#2E9E6A', 'map')}
       ${kpi('Present today', present, `${count('notIn')} not in · ${count('off')} off`, 'people', '#D98A1A', 'attendance')}
       ${kpi('Work time today', fmtMins(minutes), present ? `Avg ${fmtMins(minutes / present)} / person` : '—', 'clock', '#3A7BD5')}
+      ${kpi('External workers on site', store.workerLocks.length, `${new Set(store.workerLocks.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', '#5B6B78', 'workers')}
       ${kpi('Active sites', activeSites.size, `${store.schedulesToday.length} visits scheduled`, 'site', '#8E5CC4', 'sites')}
       ${kpi('Active projects', activeProjects.length, `${store.projects.length} total`, 'project', '#C2557A', 'projects')}
       ${isAdmin()

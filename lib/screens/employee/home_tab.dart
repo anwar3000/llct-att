@@ -11,6 +11,7 @@ import '../../services/location_service.dart';
 import '../../services/tracking_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
+import 'worker_picker_screen.dart';
 
 class HomeTab extends StatefulWidget {
   final AppUser me;
@@ -32,6 +33,10 @@ class _HomeTabState extends State<HomeTab> {
   List<OffDay> _offDays = [];
   bool _loaded = false;
   bool _busy = false;
+  int _workerCount = 0;
+  List<WorkerEntry> _sessionWorkers = [];
+  StreamSubscription? _sessionWorkersSub;
+  String? _sessionWorkersFor;
   String _busyText = '';
 
   @override
@@ -68,6 +73,22 @@ class _HomeTabState extends State<HomeTab> {
     _subs.add(Db.offDaysForEmployeeMonth(uid, monthKey(DateTime.now())).listen((l) {
       if (mounted) setState(() => _offDays = l);
     }));
+    _subs.add(Db.activeWorkersStream().listen((l) {
+      if (mounted) setState(() => _workerCount = l.length);
+    }, onError: (_) {}));
+  }
+
+  /// Keeps the "workers with you" list in sync with the open check-in.
+  void _watchSessionWorkers() {
+    final id = widget.open?.id;
+    if (id == _sessionWorkersFor) return;
+    _sessionWorkersFor = id;
+    _sessionWorkersSub?.cancel();
+    _sessionWorkers = [];
+    if (id == null) return;
+    _sessionWorkersSub = Db.workersForSession(id, widget.me.id).listen((l) {
+      if (mounted) setState(() => _sessionWorkers = l);
+    }, onError: (_) {});
   }
 
   @override
@@ -76,6 +97,7 @@ class _HomeTabState extends State<HomeTab> {
       s.cancel();
     }
     _dayWatcher?.cancel();
+    _sessionWorkersSub?.cancel();
     super.dispose();
   }
 
@@ -165,8 +187,11 @@ class _HomeTabState extends State<HomeTab> {
       _busy = true;
       _busyText = 'Checking in…';
     });
+    final picked = site;
+    String? sessionId;
+    final start = DateTime.now();
     try {
-      await Db.checkIn(
+      sessionId = await Db.checkIn(
         user: widget.me,
         site: site,
         lat: pos.latitude,
@@ -174,16 +199,46 @@ class _HomeTabState extends State<HomeTab> {
         accuracy: pos.accuracy,
         distance: dist,
         mocked: pos.isMocked,
+        at: start,
       );
       await TrackingService.instance
           .pushOnce(widget.me.id, pos, checkedIn: true, siteName: site.name);
-      if (mounted) showSnack(context, 'Checked in at ${site.name} · ${fmtTime(DateTime.now())}');
+      if (mounted) showSnack(context, 'Checked in at ${site.name} · ${fmtTime(start)}');
     } catch (e) {
       if (mounted) showSnack(context, 'Check-in failed: $e', error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+    // Next step: pick the external workers who are with you (skippable).
+    final sid = sessionId;
+    if (sid != null && mounted && _workersRegistered) {
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => WorkerPickerScreen(
+          me: widget.me,
+          sessionId: sid,
+          siteId: picked.id,
+          siteName: picked.name,
+          sessionStart: start,
+          afterCheckIn: true,
+        ),
+      ));
+    }
   }
+
+  void _openWorkers(AttendanceSession open) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WorkerPickerScreen(
+        me: widget.me,
+        sessionId: open.id,
+        siteId: open.siteId,
+        siteName: open.siteName,
+        sessionStart: open.checkIn,
+      ),
+    ));
+  }
+
+  bool get _workersRegistered => _workerCount > 0;
+  int get _onSiteWorkers => _sessionWorkers.where((e) => e.open).length;
 
   Future<void> _checkOut() async {
     final open = widget.open;
@@ -191,7 +246,8 @@ class _HomeTabState extends State<HomeTab> {
     final ok = await confirm(
       context,
       'Check out?',
-      'Check out from ${open.siteName}.\nTime on this site: ${fmtDuration(open.worked())}',
+      'Check out from ${open.siteName}.\nTime on this site: ${fmtDuration(open.worked())}'
+          '${_onSiteWorkers == 0 ? '' : '\n\n$_onSiteWorkers external worker${_onSiteWorkers == 1 ? '' : 's'} will be checked out with you.'}',
       ok: 'Check out',
     );
     if (!ok || !mounted) return;
@@ -419,6 +475,7 @@ class _HomeTabState extends State<HomeTab> {
   @override
   Widget build(BuildContext context) {
     final open = widget.open;
+    _watchSessionWorkers();
     return Stack(children: [
       RefreshIndicator(
         onRefresh: () async => _subscribe(),
@@ -428,6 +485,10 @@ class _HomeTabState extends State<HomeTab> {
             _statusCard(open),
             const SizedBox(height: 14),
             _actionButton(open),
+            if (open != null && (_workersRegistered || _sessionWorkers.isNotEmpty)) ...[
+              const SizedBox(height: 12),
+              _workersCard(open),
+            ],
             if (_isOffToday) ...[
               const SizedBox(height: 12),
               Card(
@@ -567,6 +628,48 @@ class _HomeTabState extends State<HomeTab> {
                     fontWeight: FontWeight.w800,
                     fontFeatures: [FontFeature.tabularFigures()])),
       ]),
+    );
+  }
+
+  Widget _workersCard(AttendanceSession open) {
+    final onSite = _sessionWorkers.where((e) => e.open).toList();
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _openWorkers(open),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+          child: Row(children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                  color: AppColors.accentSoft, borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.engineering, color: AppColors.accentDark),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                    onSite.isEmpty
+                        ? 'No external workers added'
+                        : '${onSite.length} external worker${onSite.length == 1 ? '' : 's'} with you',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(
+                  onSite.isEmpty
+                      ? 'Tap to add labour working with you at this site'
+                      : onSite.map((e) => e.workerName).join(', '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+                ),
+              ]),
+            ),
+            TextButton(onPressed: () => _openWorkers(open), child: Text(onSite.isEmpty ? 'Add' : 'Manage')),
+          ]),
+        ),
+      ),
     );
   }
 

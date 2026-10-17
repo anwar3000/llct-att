@@ -230,8 +230,9 @@ class Db {
     required double distance,
     required bool mocked,
     String note = '',
+    DateTime? at,
   }) async {
-    final now = DateTime.now();
+    final now = at ?? DateTime.now();
     final ref = await attendance.add({
       'employeeId': user.id,
       'employeeName': user.name,
@@ -277,18 +278,146 @@ class Db {
       if (mocked) 'mocked': true,
       if (note.isNotEmpty) 'note': note,
     });
+    await _closeWorkersSafely(session, now);
   }
 
   /// Admin: force-close a session someone forgot to check out of.
-  static Future<void> adminCloseSession(AttendanceSession s, DateTime at) =>
-      attendance.doc(s.id).update({
-        'checkOut': Timestamp.fromDate(at),
-        'durationMin': at.difference(s.checkIn).inMinutes,
-        'status': 'closed',
-        'note': '${s.note} [closed by management]'.trim(),
-      });
+  static Future<void> adminCloseSession(AttendanceSession s, DateTime at) async {
+    await attendance.doc(s.id).update({
+      'checkOut': Timestamp.fromDate(at),
+      'durationMin': at.difference(s.checkIn).inMinutes,
+      'status': 'closed',
+      'note': '${s.note} [closed by management]'.trim(),
+    });
+    await _closeWorkersSafely(s, at);
+  }
 
-  static Future<void> deleteSession(String id) => attendance.doc(id).delete();
+  static Future<void> _closeWorkersSafely(AttendanceSession s, DateTime at) async {
+    try {
+      await closeWorkersForSession(s.id, s.employeeId, at);
+    } catch (_) {
+      // Never block a check-out; management can release workers from the dashboard.
+    }
+  }
+
+  // ---------------------------------------------------------------- external workers
+  static CollectionReference<Map<String, dynamic>> get extWorkers => _fs.collection('extWorkers');
+  static CollectionReference<Map<String, dynamic>> get workerLocks => _fs.collection('workerLocks');
+  static CollectionReference<Map<String, dynamic>> get workerAttendance =>
+      _fs.collection('workerAttendance');
+
+  static Stream<List<ExtWorker>> activeWorkersStream() => extWorkers.snapshots().map((q) =>
+      q.docs.map(ExtWorker.fromDoc).where((w) => w.active).toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+
+  static Stream<Map<String, WorkerLock>> workerLocksStream() => workerLocks
+      .snapshots()
+      .map((q) => {for (final d in q.docs) d.id: WorkerLock.fromDoc(d)});
+
+  /// Workers on this employee's session (open and finished).
+  static Stream<List<WorkerEntry>> workersForSession(String sessionId, String uid) =>
+      workerAttendance
+          .where('sessionId', isEqualTo: sessionId)
+          .where('employeeId', isEqualTo: uid)
+          .snapshots()
+          .map((q) => q.docs.map(WorkerEntry.fromDoc).toList()
+            ..sort((a, b) => a.workerName.toLowerCase().compareTo(b.workerName.toLowerCase())));
+
+  /// Adds workers to the employee's open session. Each worker can be on only one
+  /// site at a time (enforced with a lock document). Returns a message for every
+  /// worker that could not be added because someone else already has them.
+  static Future<List<String>> addWorkersToSession({
+    required AppUser user,
+    required String sessionId,
+    required String siteId,
+    required String siteName,
+    required DateTime sessionStart,
+    required List<ExtWorker> workers,
+  }) async {
+    final now = DateTime.now();
+    // Picked right after checking in → they arrived with the employee.
+    final start = now.difference(sessionStart) <= const Duration(minutes: 15) ? sessionStart : now;
+    final busy = <String>[];
+    for (final w in workers) {
+      final lockRef = workerLocks.doc(w.id);
+      final msg = await _fs.runTransaction<String?>((tx) async {
+        final lock = await tx.get(lockRef);
+        if (lock.exists) {
+          final m = lock.data() ?? {};
+          if (m['sessionId'] == sessionId) return null; // already on this check-in
+          return '${w.name} is already with ${m['employeeName'] ?? 'someone'} at ${m['siteName'] ?? 'another site'}';
+        }
+        final rec = workerAttendance.doc();
+        tx.set(rec, {
+          'workerId': w.id,
+          'workerName': w.name,
+          'company': w.company,
+          'trade': w.trade,
+          'sessionId': sessionId,
+          'employeeId': user.id,
+          'employeeName': user.name,
+          'siteId': siteId,
+          'siteName': siteName,
+          'date': dateKey(start),
+          'month': monthKey(start),
+          'checkIn': Timestamp.fromDate(start),
+          'open': true,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        tx.set(lockRef, {
+          'recordId': rec.id,
+          'sessionId': sessionId,
+          'employeeId': user.id,
+          'employeeName': user.name,
+          'siteId': siteId,
+          'siteName': siteName,
+          'since': Timestamp.fromDate(start),
+        });
+        return null;
+      });
+      if (msg != null) busy.add(msg);
+    }
+    return busy;
+  }
+
+  /// Ends one worker's time on site and frees them for another check-in.
+  static Future<void> endWorkerEntry(WorkerEntry e, DateTime at) async {
+    final end = at.isBefore(e.checkIn) ? e.checkIn : at;
+    final lockRef = workerLocks.doc(e.workerId);
+    await _fs.runTransaction((tx) async {
+      final lock = await tx.get(lockRef);
+      tx.update(workerAttendance.doc(e.id), {
+        'checkOut': Timestamp.fromDate(end),
+        'durationMin': end.difference(e.checkIn).inMinutes,
+        'open': false,
+      });
+      if (lock.exists && lock.data()?['recordId'] == e.id) tx.delete(lockRef);
+    });
+  }
+
+  static Future<void> closeWorkersForSession(String sessionId, String employeeId, DateTime at) async {
+    final q = await workerAttendance
+        .where('sessionId', isEqualTo: sessionId)
+        .where('employeeId', isEqualTo: employeeId)
+        .where('open', isEqualTo: true)
+        .get();
+    for (final d in q.docs) {
+      await endWorkerEntry(WorkerEntry.fromDoc(d), at);
+    }
+  }
+
+  static Future<void> deleteSession(String id) async {
+    await attendance.doc(id).delete();
+    final q = await workerAttendance.where('sessionId', isEqualTo: id).get();
+    for (final d in q.docs) {
+      final lockRef = workerLocks.doc(_str(d.data()['workerId']));
+      final lock = await lockRef.get();
+      if (lock.exists && lock.data()?['recordId'] == d.id) await lockRef.delete();
+      await d.reference.delete();
+    }
+  }
+
+  static String _str(dynamic v) => v is String ? v : '';
 
   // --------------------------------------------------------- site updates
   static Stream<List<SiteUpdate>> recentUpdates({int limit = 60}) => siteUpdates

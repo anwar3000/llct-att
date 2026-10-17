@@ -80,6 +80,10 @@ export const ICONS = {
   warn: '<path d="M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z"/>',
   pending: '<path d="M17 12c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm1.65 7.35L16.5 17.2V14h1v2.79l1.85 1.85zM18 3h-3.18C14.4 1.84 13.3 1 12 1s-2.4.84-2.82 2H6c-1.1 0-2 .9-2 2v15c0 1.1.9 2 2 2h6.11a6.74 6.74 0 01-1.42-2H6V5h2v3h8V5h2v5.08c.71.1 1.38.31 2 .6V5c0-1.1-.9-2-2-2zm-6 2c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/>',
 };
+Object.assign(ICONS, {
+  worker: '<path d="M12 1a4 4 0 00-4 4v1H6v2h12V6h-2V5a4 4 0 00-4-4zm-1 2.1V6h2V3.1A2 2 0 0114 5v1h-4V5a2 2 0 011-1.9zM12 9a3 3 0 100 6 3 3 0 000-6zm0 7c-3.3 0-8 1.7-8 4v2h16v-2c0-2.3-4.7-4-8-4z"/>',
+  idcard: '<path d="M20 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2zM8 7.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM13 17H3v-.75C3 14.5 6.3 13.5 8 13.5s5 1 5 2.75zm8-2h-6v-1.5h6zm0-3h-6v-1.5h6zm0-3h-6V7.5h6z"/>',
+});
 export const icon = (name, size = 18, color = 'currentColor') =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 

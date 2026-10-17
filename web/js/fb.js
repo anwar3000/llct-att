@@ -128,6 +128,47 @@ export function mapSchedule(d) {
     siteName: m.siteName || '', date: m.date || '', startTime: m.startTime || '', endTime: m.endTime || '', note: m.note || '',
   };
 }
+export function mapWorker(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, name: m.name || 'Worker', phone: m.phone || '', company: m.company || '', trade: m.trade || '',
+    nationality: m.nationality || '', code: m.code || '', active: m.active !== false, createdAt: toDate(m.createdAt),
+  };
+}
+export function mapWorkerLock(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, workerId: d.id, recordId: m.recordId || '', sessionId: m.sessionId || '', employeeId: m.employeeId || '',
+    employeeName: m.employeeName || '', siteId: m.siteId || '', siteName: m.siteName || '', since: toDate(m.since),
+  };
+}
+export function mapWorkerEntry(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, workerId: m.workerId || '', workerName: m.workerName || '', company: m.company || '', trade: m.trade || '',
+    sessionId: m.sessionId || '', employeeId: m.employeeId || '', employeeName: m.employeeName || '',
+    siteId: m.siteId || '', siteName: m.siteName || '', date: m.date || '', month: m.month || '',
+    checkIn: toDate(m.checkIn) || new Date(), checkOut: toDate(m.checkOut), open: m.open === true, note: m.note || '',
+  };
+}
+export function mapIdInfo(d) {
+  const m = d.data() || {};
+  const o = { id: d.id, ownerType: m.ownerType || '', updatedAt: toDate(m.updatedAt) };
+  for (const k of ID_FIELDS) o[k] = m[k] || '';
+  return o;
+}
+export function mapIdFile(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, ownerId: m.ownerId || '', ownerType: m.ownerType || '', kind: m.kind || 'other', name: m.name || 'file',
+    mime: m.mime || 'application/octet-stream', size: num(m.size), chunks: num(m.chunks, 1), uploadedAt: toDate(m.uploadedAt),
+    uploadedBy: m.uploadedBy || '',
+  };
+}
+/** Text fields kept in idInfo/{ownerId}. */
+export const ID_FIELDS = ['nationality', 'passportNo', 'passportExpiry', 'eidNo', 'eidExpiry', 'siraNo', 'siraExpiry',
+  'visaNo', 'visaExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes'];
+
 export const sessionMinutes = (s, now = new Date()) =>
   Math.max(0, Math.round(((s.checkOut || now) - s.checkIn) / 60000));
 export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked;
@@ -144,6 +185,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
+  workers: [], workerLocks: [], idInfo: [], idFiles: [],
   _subs: [], _listeners: new Set(), _day: null,
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -169,6 +211,10 @@ export const store = {
     sub(query(C('alerts'), where('resolved', '==', false)), 'alerts', mapAlert, (l) => l.sort((a, b) => (b.at || 0) - (a.at || 0)));
     sub(query(C('offDays'), where('month', '==', monthKey(now))), 'monthOff', mapOff);
     if (isAdmin()) sub(query(C('petty'), orderBy('createdAt', 'desc'), limit(3000)), 'petty', mapPetty);
+    sub(C('extWorkers'), 'workers', mapWorker, (l) => l.sort(byName));
+    sub(C('workerLocks'), 'workerLocks', mapWorkerLock);
+    sub(C('idInfo'), 'idInfo', mapIdInfo);
+    sub(C('idFiles'), 'idFiles', mapIdFile, (l) => l.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0)));
     this._tick = setInterval(() => {
       if (dateKey(new Date()) !== this._day) this.start(); else this.emit();
     }, 30000);
@@ -182,6 +228,10 @@ export const store = {
   user(id) { return this.users.find((u) => u.id === id) || null; },
   site(id) { return this.sites.find((s) => s.id === id) || null; },
   project(id) { return this.projects.find((p) => p.id === id) || null; },
+  worker(id) { return this.workers.find((w) => w.id === id) || null; },
+  workerLock(id) { return this.workerLocks.find((l) => l.workerId === id) || null; },
+  info(ownerId) { return this.idInfo.find((i) => i.id === ownerId) || null; },
+  files(ownerId) { return this.idFiles.filter((f) => f.ownerId === ownerId); },
   get pendingSites() { return this.sites.filter((s) => !s.approved && s.status !== 'rejected'); },
 };
 
@@ -311,11 +361,91 @@ export function addSchedule(emp, site, date, startTime, endTime, note) {
 }
 export const deleteSchedule = (id) => deleteDoc(doc(db, 'schedules', id));
 
-export const closeSession = (s, at) => updateDoc(doc(db, 'attendance', s.id), {
-  checkOut: Timestamp.fromDate(at), durationMin: Math.round((at - s.checkIn) / 60000), status: 'closed',
-  note: `${s.note} [closed by management]`.trim(),
-});
-export const deleteSession = (id) => deleteDoc(doc(db, 'attendance', id));
+export async function closeSession(s, at) {
+  await updateDoc(doc(db, 'attendance', s.id), {
+    checkOut: Timestamp.fromDate(at), durationMin: Math.round((at - s.checkIn) / 60000), status: 'closed',
+    note: `${s.note} [closed by management]`.trim(),
+  });
+  await closeWorkersForSession(s.id, at);
+}
+export async function deleteSession(id) {
+  await deleteDoc(doc(db, 'attendance', id));
+  const snap = await getDocs(query(C('workerAttendance'), where('sessionId', '==', id)));
+  const b = writeBatch(db);
+  snap.docs.forEach((d) => {
+    b.delete(d.ref);
+    const lk = store.workerLock(d.data().workerId);
+    if (lk && lk.recordId === d.id) b.delete(doc(db, 'workerLocks', lk.workerId));
+  });
+  await b.commit();
+}
+
+// ------------------------------------------------------------------ external workers
+export async function saveWorker(id, data) {
+  if (id) { await setDoc(doc(db, 'extWorkers', id), data, { merge: true }); return id; }
+  return (await addDoc(C('extWorkers'), { ...data, active: true, createdAt: serverTimestamp(), createdBy: store.me?.name || '' })).id;
+}
+export const deleteWorker = (id) => deleteDoc(doc(db, 'extWorkers', id));
+
+/** End a worker's open entry (and free their lock) at `at`. */
+export async function closeWorkerEntry(entry, at = new Date(), note = '') {
+  const end = at < entry.checkIn ? entry.checkIn : at;
+  const b = writeBatch(db);
+  b.update(doc(db, 'workerAttendance', entry.id), {
+    checkOut: Timestamp.fromDate(end), durationMin: Math.round((end - entry.checkIn) / 60000), open: false,
+    ...(note ? { note } : {}),
+  });
+  const lk = store.workerLock(entry.workerId);
+  if (lk && lk.recordId === entry.id) b.delete(doc(db, 'workerLocks', lk.workerId));
+  await b.commit();
+}
+export async function closeWorkersForSession(sessionId, at) {
+  const snap = await getDocs(query(C('workerAttendance'), where('sessionId', '==', sessionId), where('open', '==', true)));
+  for (const d of snap.docs) await closeWorkerEntry(mapWorkerEntry(d), at, 'closed by management');
+}
+/** Free a lock whose entry is gone or already closed (e.g. phone lost connection). */
+export async function releaseWorkerLock(lock, at = new Date()) {
+  if (lock.recordId) {
+    const d = await getDoc(doc(db, 'workerAttendance', lock.recordId));
+    if (d.exists() && d.data().open === true) return closeWorkerEntry(mapWorkerEntry(d), at, 'released by management');
+  }
+  await deleteDoc(doc(db, 'workerLocks', lock.workerId));
+}
+export async function workerEntriesInRange(from, to) {
+  const snap = await getDocs(query(C('workerAttendance'), where('date', '>=', from), where('date', '<=', to)));
+  return snap.docs.map(mapWorkerEntry).sort((a, b) => a.checkIn - b.checkIn);
+}
+export const deleteWorkerEntry = (id) => deleteDoc(doc(db, 'workerAttendance', id));
+
+// ------------------------------------------------------------------ ID documents
+export const saveIdInfo = (ownerId, ownerType, data) =>
+  setDoc(doc(db, 'idInfo', ownerId), { ...data, ownerType, updatedAt: serverTimestamp() }, { merge: true });
+
+const CHUNK = 700000; // characters of base64 per Firestore doc (limit is 1 MiB)
+export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64 }) {
+  const ref = doc(C('idFiles'));
+  const n = Math.max(1, Math.ceil(base64.length / CHUNK));
+  const b = writeBatch(db);
+  for (let i = 0; i < n; i++) b.set(doc(db, 'idFiles', ref.id, 'chunks', String(i)), { d: base64.slice(i * CHUNK, (i + 1) * CHUNK) });
+  b.set(ref, {
+    ownerId, ownerType, ownerName, kind, name, mime, size: Math.round(base64.length * 0.75), chunks: n,
+    uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '',
+  });
+  await b.commit();
+  return ref.id;
+}
+export async function readIdFile(f) {
+  const snap = await getDocs(collection(db, 'idFiles', f.id, 'chunks'));
+  const parts = snap.docs.map((d) => [Number(d.id), d.data().d || '']).sort((a, b) => a[0] - b[0]);
+  return parts.map((p) => p[1]).join('');
+}
+export async function deleteIdFile(f) {
+  const snap = await getDocs(collection(db, 'idFiles', f.id, 'chunks'));
+  const b = writeBatch(db);
+  snap.docs.forEach((d) => b.delete(d.ref));
+  b.delete(doc(db, 'idFiles', f.id));
+  await b.commit();
+}
 
 export function addPetty({ emp, type, amount, category, note, site, me }) {
   const now = new Date();

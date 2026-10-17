@@ -2,8 +2,15 @@ name: Deploy web dashboard
 
 # Publishes the web/ folder to GitHub Pages.
 # One-time setup: repo Settings → Pages → Source: "GitHub Actions".
+# ROLLBACK: Actions → Deploy web dashboard → Run workflow → type a saved version
+# (e.g. stable-2026-10-17) in "version". Blank = latest.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (blank = latest). e.g. stable-2026-10-17'
+        required: false
+        default: ''
   push:
     branches: [main]
     paths: ['web/**', 'tools/gen_web_config.py', '.github/workflows/deploy-web.yml']
@@ -25,6 +32,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.ref }}
 
       - name: Write Firebase web config
         env:
