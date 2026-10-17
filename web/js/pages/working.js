@@ -1,6 +1,7 @@
 // Everyone working right now — staff and external workers together, grouped by site.
 import { store, staffStatuses, sessionMinutes, entryMinutes } from '../fb.js';
-import { esc, avatar, pill, fmtMins, fmtTime, timeAgo, atTz, STAFF_COLOR, EXT_COLOR } from '../util.js';
+import { logoutDialog } from '../admin-edit.js';
+import { esc, avatar, pill, fmtMins, fmtTime, timeAgo, atTz, STAFF_COLOR, EXT_COLOR, icon } from '../util.js';
 
 export function mount(el, _p, { setHeader }) {
   setHeader('Working now', 'Everyone on site right now — staff (blue) and external workers (orange), by site');
@@ -52,7 +53,8 @@ export function mount(el, _p, { setHeader }) {
           return `<a class="list-item" href="#/employees/${s.user.id}" style="color:inherit;border-left:3px solid ${STAFF_COLOR}">
             ${avatar(s.user.name, 32, STAFF_COLOR)}<div class="grow"><b>${esc(s.user.name)}</b>
             <div class="small muted">Staff · since ${fmtTime(s.open.inLocal)} · ${fmtMins(sessionMinutes(s.open))}${loc ? ` · GPS ${timeAgo(loc.at)}` : ''}</div></div>
-            ${mine.length ? `<span class="wf-chip ext">+${mine.length}</span>` : ''}</a>
+            ${mine.length ? `<span class="wf-chip ext">+${mine.length}</span>` : ''}
+            <button class="btn sm ghost" data-logout="${s.user.id}" title="Check out / sign out this employee">${icon('logout', 14)} Log out</button></a>
             ${mine.map((l) => ext(l, s.open.tz, true)).join('')}`;
         }).join('')}
         ${g.ext.filter((l) => !g.staff.some((s) => s.open.id === l.sessionId)).map((l) => ext(l, null, false)).join('')}
@@ -64,6 +66,9 @@ export function mount(el, _p, { setHeader }) {
         <div class="grow"><b>${esc(n)}</b> <span class="small muted">External · ${esc(e.siteName)} · with ${esc(e.employeeName)}</span></div><b>${fmtMins(workerMins(id))}</b></a>`; }).join('')}
     </div>` : ''}`;
 
+    el.querySelectorAll('[data-logout]').forEach((b) => {
+      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); logoutDialog(b.dataset.logout); };
+    });
     const qi = el.querySelector('#wn-q');
     qi.oninput = (e) => { q = e.target.value; draw(); const n = el.querySelector('#wn-q'); n.focus(); n.setSelectionRange(q.length, q.length); };
   }

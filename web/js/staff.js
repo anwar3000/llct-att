@@ -151,6 +151,13 @@ function start() {
   on(query(C('siteUpdates'), where('employeeId', '==', uid)), (s) => { S.myUpdates = s.docs.map(mapUpdate).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); draw(); });
   S.subs.push(onSnapshot(doc(db, 'idInfo', uid), (d) => { S.idInfo = d.exists() ? mapIdInfo(d) : {}; if (S.tab === 'me') draw(); }, () => {}));
   on(query(C('idFiles'), where('ownerId', '==', uid)), (s) => { S.idFiles = s.docs.map(mapIdFile); if (S.tab === 'me') draw(); });
+  // Signed out remotely by management?
+  S.subs.push(onSnapshot(doc(db, 'users', uid), (d) => {
+    const f = d.data()?.forceLogoutAt?.toDate?.();
+    const signedIn = auth.currentUser?.metadata?.lastSignInTime ? new Date(auth.currentUser.metadata.lastSignInTime) : null;
+    if (f && signedIn && f > signedIn) { loginError = 'You were signed out by management. Sign in again to continue.'; logout(); }
+    if (d.exists() && d.data().active === false) { loginError = 'Your account is disabled. Contact management.'; logout(); }
+  }, () => {}));
   watchMonth();
   // While the app is open and you're checked in: share location every 5 min and check the geofence.
   S._tick = setInterval(() => { tick(); if (S.tab === 'today') drawTimer(); }, 30000);

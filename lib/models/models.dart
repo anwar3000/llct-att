@@ -86,6 +86,8 @@ class AppUser {
   final List<int> weeklyOffDays;
   final int monthlyOffQuota;
   final DateTime? createdAt;
+  /// Set by management to sign this person out of every device.
+  final DateTime? forceLogoutAt;
   final LiveLocation? lastLocation;
 
   AppUser({
@@ -100,6 +102,7 @@ class AppUser {
     this.weeklyOffDays = const [],
     this.monthlyOffQuota = kDefaultMonthlyOffQuota,
     this.createdAt,
+    this.forceLogoutAt,
     this.lastLocation,
   });
 
@@ -130,6 +133,7 @@ class AppUser {
           : const [],
       monthlyOffQuota: _int(m['monthlyOffQuota'], kDefaultMonthlyOffQuota),
       createdAt: _ts(m['createdAt']),
+      forceLogoutAt: _ts(m['forceLogoutAt']),
       lastLocation: LiveLocation.fromMap(m['lastLocation']),
     );
   }

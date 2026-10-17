@@ -11,7 +11,7 @@ import { employeeSummary, pettySummary, flagText } from '../calc.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
 import { monthlySummaryReport, attendanceLogReport, downloadReport } from '../report-lib.js';
 import { docsPanel, ownerFromUser, exportMenu, docsSummaryHtml } from '../iddocs.js';
-import { editTimesDialog, deleteDayDialog } from '../admin-edit.js';
+import { editTimesDialog, deleteDayDialog, logoutDialog } from '../admin-edit.js';
 
 const STATE = { onDuty: ['On duty', 'green'], done: ['Checked out', 'teal'], off: ['Off day', 'amber'], notIn: ['Not checked in', 'gray'] };
 
@@ -211,8 +211,10 @@ function detail(root, id, { setHeader }) {
       `<a class="btn ghost" href="#/employees">← All employees</a>
        <button class="btn ghost" id="ed-xlsx">${icon('download', 16)} Month report</button>
        <button class="btn ghost" id="ed-ids">${icon('download', 16)} IDs</button>
+       ${store.open.some((x) => x.employeeId === u.id) || isAdmin() ? `<button class="btn ghost" id="ed-lo" style="color:#D64545">${icon('logout', 16)} Log out</button>` : ''}
        ${isAdmin() ? `<button class="btn" id="ed-edit">${icon('edit', 16)} Edit</button>` : ''}`);
     document.getElementById('ed-edit')?.addEventListener('click', () => editPerson(u));
+    document.getElementById('ed-lo')?.addEventListener('click', () => logoutDialog(u.id, load));
     document.getElementById('ed-ids').onclick = () => exportMenu([ownerFromUser(u)], `${u.name} IDs`);
     buildDocs();
     document.getElementById('ed-xlsx').onclick = async () => {

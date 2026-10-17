@@ -1,6 +1,7 @@
 import { store, staffStatuses } from '../fb.js';
 import { esc, avatar, fmtMins, fmtTime, timeAgo, pill, EXT_COLOR, STAFF_COLOR, atTz } from '../util.js';
 import { makeMap, siteLayer, employeeMarker, fitTo, workerMarker } from '../mapkit.js';
+import { logoutDialog } from '../admin-edit.js';
 
 export function mount(el, _p, { setHeader }) {
   setHeader('Live map', 'Checked-in staff (live GPS) and their external workers (shown at the employee’s location) · updates automatically',
@@ -60,7 +61,7 @@ export function mount(el, _p, { setHeader }) {
         Today: <b>${fmtMins(s.minutes)}</b><br>
         ${(() => { const ws = s.open ? store.extOnSite.filter((l) => l.sessionId === s.open.id) : []; return ws.length ? `<span style="color:${EXT_COLOR};font-weight:700">+ ${ws.length} external worker${ws.length === 1 ? '' : 's'}:</span> ${ws.map((l) => esc(store.worker(l.workerId)?.name || l.name || 'Worker')).join(', ')}<br>` : ''; })()}
         <span style="color:#6b7885">${loc.noGps ? '⚠ No GPS from phone yet — shown at the site. Check location permission / battery settings.' : `GPS ${timeAgo(loc.at)} · ±${Math.round(loc.accuracy || 0)} m`}</span><br>
-        <a href="#/employees/${s.user.id}">Open profile & route →</a>`);
+        <a href="#/employees/${s.user.id}">Open profile & route →</a>${s.state === 'onDuty' ? ` · <a href="javascript:void 0" data-lo="${s.user.id}" style="color:#D64545">Log out</a>` : ''}`);
       empGroup.addLayer(m);
       markers.set(s.user.id, m);
     });
@@ -107,6 +108,10 @@ export function mount(el, _p, { setHeader }) {
       ${avatar(store.worker(l.workerId)?.name || l.name || '?', 30, EXT_COLOR)}<div class="grow"><b>${esc(store.worker(l.workerId)?.name || l.name || 'Worker')}</b>
       <div class="small muted">External · ${esc(l.siteName)} · with ${esc(l.employeeName)}</div></div></a>`).join('')
       : '<div class="empty"><b>Nobody on duty</b>Staff appear here when they check in.</div>';
+    if (!el._loBound) {
+      el._loBound = true;
+      el.addEventListener('click', (e) => { const a = e.target.closest('[data-lo]'); if (a) logoutDialog(a.dataset.lo); });
+    }
     el.querySelectorAll('[data-focus]').forEach((row) => {
       row.onclick = () => {
         const m = markers.get(row.dataset.focus);

@@ -92,6 +92,18 @@ class _ProfileGateState extends State<_ProfileGate> {
             message: 'Your account has been deactivated. Please contact management.',
           );
         }
+        // Signed out remotely by management?
+        final signedInAt = FirebaseAuth.instance.currentUser?.metadata.lastSignInTime;
+        if (user.forceLogoutAt != null && signedInAt != null && user.forceLogoutAt!.isAfter(signedInAt)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await TrackingService.instance.stop(markStopped: true);
+            await AuthService.signOut();
+          });
+          return const _Blocked(
+            title: 'Signed out by management',
+            message: 'Your manager signed you out of this device. Sign in again to continue.',
+          );
+        }
         if (user.role == 'docs') {
           return const _Blocked(
             title: 'Documents Portal login',

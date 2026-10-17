@@ -1,6 +1,6 @@
 // Admin corrections: edit check-in / check-out times, delete a whole day.
-import { editSessionTimes, deleteWorkDay, editWorkerEntryTimes } from './fb.js';
-import { esc, modal, toast, confirmBox, friendlyError, dateKey, fmtDay, tzLabel, parseKey } from './util.js';
+import { editSessionTimes, deleteWorkDay, editWorkerEntryTimes, closeSession, forceLogout, store, isAdmin } from './fb.js';
+import { esc, modal, toast, confirmBox, friendlyError, dateKey, fmtDay, tzLabel, parseKey, fmtTime, fromTz } from './util.js';
 
 const hhmm = (d) => (d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '');
 const wall = (date, time) => {
@@ -54,4 +54,49 @@ export async function deleteDayDialog(employeeId, name, date, count, onDone) {
     `Delete all ${count} check-in${count === 1 ? '' : 's'} of ${name} on ${fmtDay(parseKey(date))}, including the external worker time logged with them? This cannot be undone.`,
     { ok: 'Delete day', danger: true })) return;
   try { const n = await deleteWorkDay(employeeId, date); toast(`Deleted ${n} check-in${n === 1 ? '' : 's'}`); onDone?.(); } catch (e) { toast(friendlyError(e), true); }
+}
+
+/**
+ * Log out an online employee: check them out (now or at a chosen time, closing their external
+ * workers too) and/or sign them out of the app on their phone.
+ */
+export function logoutDialog(userId, onDone) {
+  const u = store.user(userId);
+  const name = u?.name || 'employee';
+  const open = store.open.find((s) => s.employeeId === userId) || null;
+  const workers = open ? store.extOnSite.filter((l) => l.sessionId === open.id).length : 0;
+  modal({
+    title: `Log out ${name}`,
+    body: `${open ? `<p style="margin-top:0">On duty at <b>${esc(open.siteName)}</b> since ${fmtTime(open.inLocal)}${workers ? ` with <b>${workers}</b> external worker${workers === 1 ? '' : 's'}` : ''}.</p>` : '<p style="margin-top:0">Not checked in right now.</p>'}
+      ${open ? `<label class="f row" style="gap:8px"><input type="checkbox" id="lo-co" checked> <b>Check out</b>${workers ? ' (their external workers are checked out too)' : ''}</label>
+      <label class="f" style="margin-left:26px"><span>Check-out time (site local time) — blank = now</span><input type="time" id="lo-t"></label>` : ''}
+      ${isAdmin() ? `<label class="f row" style="gap:8px"><input type="checkbox" id="lo-so" ${open ? '' : 'checked'}> <b>Sign out of the app</b> on their phone (Android & iPhone)</label>` : ''}
+      <div class="small muted">They can sign in again with their login ID. To block them completely, deactivate the account in Employees → Edit.</div>
+      <div class="error" id="lo-e"></div>`,
+    foot: '<button class="btn ghost" data-x2>Cancel</button><button class="btn danger" data-ok>Log out</button>',
+    onMount: (m, close) => {
+      m.querySelector('[data-x2]').onclick = close;
+      m.querySelector('[data-ok]').onclick = async (ev) => {
+        const co = open && m.querySelector('#lo-co').checked;
+        const so = !!m.querySelector('#lo-so')?.checked;
+        if (!co && !so) { m.querySelector('#lo-e').textContent = 'Choose at least one option.'; return; }
+        let at = new Date();
+        if (co) {
+          const t = m.querySelector('#lo-t').value;
+          if (t) {
+            const [h, mi] = t.split(':').map(Number);
+            at = fromTz(new Date(open.inLocal.getFullYear(), open.inLocal.getMonth(), open.inLocal.getDate(), h, mi), open.tz);
+            if (at <= open.checkIn) { m.querySelector('#lo-e').textContent = 'Check-out must be after check-in.'; return; }
+          }
+        }
+        ev.currentTarget.disabled = true;
+        try {
+          if (co) await closeSession(open, at);
+          if (so) await forceLogout(userId);
+          toast(`${name}: ${[co ? 'checked out' : '', so ? 'signed out of the app' : ''].filter(Boolean).join(' & ')}`);
+          close(); onDone?.();
+        } catch (e) { m.querySelector('#lo-e').textContent = friendlyError(e); ev.currentTarget.disabled = false; }
+      };
+    },
+  });
 }

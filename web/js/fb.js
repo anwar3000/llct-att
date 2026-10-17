@@ -49,6 +49,7 @@ export function mapUser(d) {
     weeklyOffDays: Array.isArray(m.weeklyOffDays) ? m.weeklyOffDays.filter((x) => typeof x === 'number') : [],
     monthlyOffQuota: num(m.monthlyOffQuota, 4),
     createdAt: toDate(m.createdAt),
+    forceLogoutAt: toDate(m.forceLogoutAt),
     lastLocation: ll && typeof ll.lat === 'number' && typeof ll.lng === 'number'
       ? { lat: ll.lat, lng: ll.lng, accuracy: num(ll.accuracy), at: toDate(ll.at), checkedIn: ll.checkedIn === true, siteName: ll.siteName || '' }
       : null,
@@ -433,6 +434,12 @@ export async function deleteSession(id) {
   });
   await b.commit();
 }
+
+// ------------------------------------------------------------------ log out an online employee
+/** Sign this person out of the app on every phone (Android + iPhone web app). */
+export const forceLogout = (uid) => updateDoc(doc(db, 'users', uid), {
+  forceLogoutAt: serverTimestamp(), forceLogoutBy: store.me?.name || 'management',
+});
 
 // ------------------------------------------------------------------ admin corrections
 /**
