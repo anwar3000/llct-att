@@ -23,6 +23,8 @@ class AdminLive extends ChangeNotifier {
   List<Schedule> schedules = [];
   List<PettyTxn> pendingPetty = [];
   List<GeoAlert> alerts = [];
+  /// Set when external-worker data can't be read (usually: Firestore rules not published).
+  String? externalError;
   List<WorkerEntry> _wToday = [];
   List<WorkerEntry> _wOpen = [];
 
@@ -98,14 +100,20 @@ class AdminLive extends ChangeNotifier {
       alerts = v;
       notifyListeners();
     }, onError: onErr));
+    void extErr(Object e) {
+      externalError = '$e';
+      notifyListeners();
+    }
+
     _subs.add(Db.workersForDate(dateKey(now)).listen((v) {
       _wToday = v;
+      externalError = null;
       notifyListeners();
-    }, onError: (_) {}));
+    }, onError: extErr));
     _subs.add(Db.openWorkerEntries().listen((v) {
       _wOpen = v;
       notifyListeners();
-    }, onError: (_) {}));
+    }, onError: extErr));
     if (canSeeAccounts) _subs.add(Db.pettyPending().listen((v) {
       pendingPetty = v;
       notifyListeners();

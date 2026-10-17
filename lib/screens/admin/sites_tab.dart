@@ -91,7 +91,11 @@ class _SitesList extends StatelessWidget {
               final s = sites[i];
               final onSite = live.open.where((x) => x.siteId == s.id).toList();
               final today = live.today.where((x) => x.siteId == s.id);
-              final hoursToday = totalWorked(today);
+              final extOn = live.externalOnSite.where((e) => e.siteId == s.id).toList();
+              final extToday = live.workersToday.where((e) => e.siteId == s.id).toList();
+              final extIds = extToday.map((e) => e.workerId).toSet();
+              final staffIds = {...today.map((x) => x.employeeId), ...onSite.map((x) => x.employeeId)};
+              final hoursToday = totalWorked(today) + extToday.fold(Duration.zero, (a, e) => a + e.worked());
               return Card(
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
@@ -138,10 +142,12 @@ class _SitesList extends StatelessWidget {
                       ]),
                       const SizedBox(height: 10),
                       Wrap(spacing: 8, runSpacing: 6, children: [
-                        Pill('${onSite.length} on site now',
-                            color: onSite.isEmpty ? AppColors.muted : AppColors.success,
+                        Pill('${onSite.length + extOn.length} on site now (${onSite.length} staff · ${extOn.length} ext)',
+                            color: onSite.isEmpty && extOn.isEmpty ? AppColors.muted : AppColors.success,
                             icon: Icons.person),
-                        Pill('${fmtDuration(hoursToday)} today',
+                        Pill('Workforce today ${staffIds.length + extIds.length}',
+                            color: AppColors.accentDark, icon: Icons.groups),
+                        Pill('${fmtDuration(hoursToday)} man-hours today',
                             color: AppColors.info, icon: Icons.timer_outlined),
                         Pill('Geofence ${s.radius.round()} m',
                             color: AppColors.primary, icon: Icons.radar),
@@ -152,9 +158,9 @@ class _SitesList extends StatelessWidget {
                           const Pill('Awaiting approval · tap to review & save',
                               color: AppColors.danger, icon: Icons.pending_actions),
                       ]),
-                      if (onSite.isNotEmpty) ...[
+                      if (onSite.isNotEmpty || extOn.isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        Text(onSite.map((x) => x.employeeName).join(', '),
+                        Text([...onSite.map((x) => x.employeeName), ...extOn.map((e) => '${e.workerName} (ext)')].join(', '),
                             style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                       ],
                     ]),

@@ -159,11 +159,13 @@ function list(el, { setHeader }) {
     const list = all.filter((s) => !q || s.name.toLowerCase().includes(q) || s.address.toLowerCase().includes(q));
     el.querySelector('#s-count').textContent = `${list.length} of ${all.length}`;
     el.querySelector('#s-table').innerHTML = list.length ? `<table class="t">
-      <tr><th>Site</th><th>Project</th><th>Status</th><th>Progress</th><th class="num">On site now</th><th class="num">Today</th><th class="num">Radius</th></tr>
+      <tr><th>Site</th><th>Project</th><th>Status</th><th>Progress</th><th class="num">On site now</th><th class="num">Workforce today</th><th class="num">Man-hours today</th><th class="num">Radius</th></tr>
       ${list.map((s) => {
         const proj = s.projectId ? store.project(s.projectId) : null;
         const onSite = store.open.filter((x) => x.siteId === s.id).length;
         const extOn = store.extOnSite.filter((l) => l.siteId === s.id).length;
+        const staffToday = new Set([...store.today, ...store.open].filter((x) => x.siteId === s.id).map((x) => x.employeeId)).size;
+        const extToday = new Set(store.workersToday.filter((x) => x.siteId === s.id).map((x) => x.workerId)).size;
         const mins = store.today.filter((x) => x.siteId === s.id).reduce((a, x) => a + ((x.checkOut || new Date()) - x.checkIn) / 60000, 0)
           + store.workersToday.filter((x) => x.siteId === s.id).reduce((a, x) => a + entryMinutes(x), 0);
         return `<tr class="click" data-id="${s.id}">
@@ -172,6 +174,7 @@ function list(el, { setHeader }) {
           <td>${s.active ? pill(cap(s.status), { active: 'green', planned: 'blue', 'on hold': 'amber', completed: 'teal' }[s.status] || 'gray') : pill('Inactive', 'gray')}</td>
           <td style="min-width:120px"><div class="row" style="gap:8px;flex-wrap:nowrap"><div style="flex:1">${progressBar(s.progress)}</div><b class="small">${s.progress}%</b></div></td>
           <td class="num nowrap">${onSite || extOn ? `<span class="wf-chip staff" title="Staff">${onSite}</span> <span class="wf-chip ext" title="External workers">${extOn}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="num nowrap">${staffToday + extToday ? `<b>${staffToday + extToday}</b> <span class="small muted">(${staffToday} staff · ${extToday} ext)</span>` : '<span class="muted">—</span>'}</td>
           <td class="num">${mins ? fmtMins(mins) : '—'}</td>
           <td class="num">${Math.round(s.radius)} m</td></tr>`;
       }).join('')}</table>` : `<div class="empty"><b>No sites</b>Add a site to start scheduling and check-ins.</div>`;

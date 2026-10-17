@@ -89,6 +89,7 @@ function renderShell() {
         <div class="title"><h1 id="page-title"></h1><div class="muted" id="page-sub"></div></div>
         <div id="page-actions" class="row"></div>
       </div>
+      <div id="data-warn"></div>
       <div class="content" id="content"></div>
     </div>
   </div>`;
@@ -149,7 +150,16 @@ function currentPath() {
   return { base: base || '', params: rest.map(decodeURIComponent) };
 }
 
+function renderWarn() {
+  const box = document.getElementById('data-warn');
+  if (!box) return;
+  const errs = Object.values(store.errors || {});
+  box.innerHTML = errs.length ? `<div class="data-warn">${icon('warn', 18)}<div><b>Some data could not be loaded</b> — ${esc(errs.join(' · '))}
+    ${errs.some((e) => /permission/i.test(e)) ? '<br>This usually means the latest <b>Firestore rules are not published</b>. Copy them from <a href="https://raw.githubusercontent.com/anwar3000/llct-att/main/firestore.rules" target="_blank" rel="noopener">firestore.rules</a> → Firebase → Firestore Database → Rules → Publish, then reload.' : ''}</div></div>` : '';
+}
+
 function renderNav() {
+  renderWarn();
   const nav = document.getElementById('nav');
   if (!nav) return;
   const { base } = currentPath();

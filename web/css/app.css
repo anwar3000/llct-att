@@ -376,3 +376,5 @@ tr.short-day td { background: #fdf1f1; }
 .nav a .badge.green { background: #2E9E6A; }
 .emp-pin.ext-pin { background: #D98A1A !important; width: 24px; height: 24px; font-size: 9.5px; border-width: 2px; }
 .pin-label.ext-label { color: #a8640f; font-size: 10px; }
+.data-warn { display: flex; gap: 10px; margin: 0 28px 12px; padding: 12px 14px; border-radius: 12px; background: #fbe6e6; color: #8f2a2a; border: 1px solid #f1c9c9; font-size: 13.5px; }
+.data-warn a { color: #8f2a2a; text-decoration: underline; }

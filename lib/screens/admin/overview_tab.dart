@@ -89,6 +89,19 @@ class _OverviewTabState extends State<OverviewTab> {
               Text(fmtDate(DateTime.now()),
                   style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
+              if (live.externalError != null)
+                Card(
+                  color: const Color(0xFFFBE6E6),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      'External workers can\'t be loaded: ${live.externalError}\n'
+                      '${live.externalError!.contains('permission') ? 'Publish the latest Firestore rules (Firebase → Firestore → Rules → Publish).' : ''}',
+                      style: const TextStyle(color: Color(0xFF8F2A2A), fontSize: 12.5),
+                    ),
+                  ),
+                ),
               StatGrid(children: [
                 StatTile(
                   label: 'On duty now',

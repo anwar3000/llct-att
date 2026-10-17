@@ -204,19 +204,22 @@ export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
   workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8 }, rates: {},
-  _subs: [], _listeners: new Set(), _day: null,
+  _subs: [], _listeners: new Set(), _day: null, errors: {},
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
   start() {
     this.stop();
     const now = new Date();
     this._day = dateKey(now);
-    const err = (e) => { console.error(e); this.error = e; this.emit(); };
+    this.errors = {};
+    const LABELS = { _wToday: 'external worker attendance', _wOpen: 'external workers on site', workerLocks: 'external worker locks',
+      workers: 'external workers', requests: 'change requests', idInfo: 'ID details', idFiles: 'ID copies' };
     const sub = (q, key, mapper, after) => this._subs.push(onSnapshot(q, (snap) => {
       this[key] = snap.docs.map(mapper);
+      delete this.errors[key];
       if (after) after(this[key]);
       this.emit();
-    }, err));
+    }, (e) => { console.error(key, e); this.error = e; this.errors[key] = `${LABELS[key] || key}: ${e.code || e.message}`; this.emit(); }));
     const byName = (a, b) => a.name.localeCompare(b.name);
     sub(C('users'), 'users', mapUser, (l) => { l.sort(byName); this.loaded = true; });
     sub(C('sites'), 'sites', mapSite, (l) => l.sort(byName));
