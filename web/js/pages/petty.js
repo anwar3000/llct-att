@@ -37,7 +37,7 @@ export function mount(el, _p, { setHeader }) {
     </div>
     ${pending.length ? `<div class="card mt"><div class="card-head"><h2>Waiting for approval</h2><span class="muted small">${pending.length}</span></div>
       <div class="table-wrap"><table class="t"><tr><th>Employee</th><th>Type</th><th>Details</th><th>Receipt</th><th class="num">Amount</th><th></th></tr>
-      ${pending.map((t) => `<tr><td><div class="person">${avatar(t.employeeName, 28)}<span class="nm">${esc(t.employeeName)}</span></div><div class="small muted">${fmtDateTime(t.createdAt)}</div></td>
+      ${pending.map((t) => `<tr><td><div class="person">${avatar(t.employeeName, 28)}<span class="nm">${esc(t.employeeName)}</span></div><div class="small muted">${fmtDateTime(t.createdLocal)}</div></td>
         <td>${esc(t.type === 'credit' ? 'Cash received' : t.category)}</td><td class="small">${esc(t.note)}${t.siteName ? `<div class="muted">${esc(t.siteName)}</div>` : ''}</td>
         <td>${t.receipt ? `<img src="${b64img(t.receipt)}" data-photo style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:zoom-in">` : '<span class="muted small">—</span>'}</td>
         <td class="num"><b style="color:${t.type === 'credit' ? '#2E9E6A' : '#D64545'}">${t.type === 'credit' ? '+' : '−'}${fmtMoney(t.amount)}</b></td>
@@ -55,7 +55,7 @@ export function mount(el, _p, { setHeader }) {
           .map(([v, l]) => `<span class="chip ${type === v ? 'on' : ''}" data-t="${v}">${l}</span>`).join('')}</div></div>
         <div class="table-wrap" style="margin-top:10px"><table class="t"><tr><th>Date</th><th>Employee</th><th>Item</th><th class="num">Amount</th><th>Status</th><th></th></tr>
         ${filtered.slice(0, 300).map((t) => `<tr>
-          <td class="small nowrap">${fmtDateTime(t.createdAt)}</td><td>${esc(t.employeeName)}</td>
+          <td class="small nowrap">${fmtDateTime(t.createdLocal)}</td><td>${esc(t.employeeName)}</td>
           <td>${esc(t.type === 'credit' ? 'Cash given' : t.category)}<div class="small muted">${esc([t.siteName, t.note].filter(Boolean).join(' · '))}</div></td>
           <td class="num" style="color:${t.type === 'credit' ? '#2E9E6A' : '#D64545'}">${t.type === 'credit' ? '+' : '−'}${fmtMoney(t.amount)}</td>
           <td>${statusPill(t.status)}${t.reviewNote ? `<div class="small muted">${esc(t.reviewNote)}</div>` : ''}</td>

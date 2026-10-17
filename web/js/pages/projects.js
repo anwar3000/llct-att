@@ -202,7 +202,7 @@ function detail(el, id, { setHeader }) {
     <div class="grid cols-2 mt">
       <div class="card"><div class="card-head"><h2>Site updates</h2><span class="muted small">${updates ? updates.length : '…'}</span></div>
         ${updates && updates.length ? updates.slice(0, 12).map((u) => `<div class="update">
-          <div class="row"><b>${esc(u.employeeName)}</b><span class="muted small">· ${esc(u.siteName)} · ${fmtDateTime(u.createdAt)}</span><span class="spacer"></span>
+          <div class="row"><b>${esc(u.employeeName)}</b><span class="muted small">· ${esc(u.siteName)} · ${fmtDateTime(u.createdLocal)}</span><span class="spacer"></span>
             ${pill(u.category, { Issue: 'red', Material: 'blue', Safety: 'amber' }[u.category] || 'green')}</div>
           ${u.note ? `<div style="margin-top:4px">${esc(u.note)}</div>` : ''}
           ${u.progress != null ? `<div class="small muted" style="margin-top:4px">Progress → <b>${u.progress}%</b></div>` : ''}
@@ -211,7 +211,7 @@ function detail(el, id, { setHeader }) {
       </div>
       ${!isAdmin() ? '' : `<div class="card"><div class="card-head"><h2>Petty cash on this project</h2><span class="muted small">${fmtMoney(spent)} approved</span></div>
         ${petty.length ? `<div class="table-wrap"><table class="t"><tr><th>Date</th><th>Employee</th><th>Item</th><th class="num">Amount</th><th>Status</th></tr>
-        ${petty.slice(0, 25).map((t) => `<tr><td class="small nowrap">${fmtDate(t.createdAt)}</td><td>${esc(t.employeeName)}</td>
+        ${petty.slice(0, 25).map((t) => `<tr><td class="small nowrap">${fmtDate(t.createdLocal)}</td><td>${esc(t.employeeName)}</td>
           <td>${esc(t.type === 'credit' ? 'Cash given' : t.category)}<div class="small muted">${esc(t.note)}</div></td>
           <td class="num" style="color:${t.type === 'credit' ? '#2E9E6A' : '#D64545'}">${t.type === 'credit' ? '+' : '−'}${fmtMoney(t.amount)}</td>
           <td>${pill(cap(t.status), { approved: 'green', rejected: 'red', pending: 'amber' }[t.status])}</td></tr>`).join('')}

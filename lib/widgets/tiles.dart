@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/db.dart';
+import '../services/photo_service.dart';
 import 'common.dart';
 
 /// Ticking hh:mm:ss timer. Isolated so only this widget rebuilds every second.
@@ -82,11 +84,11 @@ class SessionTile extends StatelessWidget {
               Row(children: [
                 const Icon(Icons.login, size: 14, color: AppColors.success),
                 const SizedBox(width: 4),
-                Text(fmtTime(s.checkIn), style: const TextStyle(fontSize: 13)),
+                Text(fmtTime(s.inLocal), style: const TextStyle(fontSize: 13)),
                 const SizedBox(width: 12),
                 const Icon(Icons.logout, size: 14, color: AppColors.danger),
                 const SizedBox(width: 4),
-                Text(s.isOpen ? 'In progress' : fmtTime(s.checkOut),
+                Text(s.isOpen ? 'In progress' : fmtTime(s.outLocal),
                     style: TextStyle(
                         fontSize: 13,
                         color: s.isOpen ? AppColors.success : null,
@@ -332,6 +334,35 @@ class UpdateCard extends StatelessWidget {
     }
   }
 
+  bool get _canEdit {
+    final me = CurrentUser.me;
+    return onDelete != null || (me != null && (me.isManagement || me.id == u.employeeId));
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    if (onDelete != null) {
+      onDelete!();
+      return;
+    }
+    if (!await confirm(context, 'Delete update?', 'This update and its photos will be removed.',
+        danger: true, ok: 'Delete')) {
+      return;
+    }
+    try {
+      await Db.deleteSiteUpdate(u.id);
+      if (context.mounted) showSnack(context, 'Update deleted');
+    } catch (e) {
+      if (context.mounted) showSnack(context, 'Could not delete: $e', error: true);
+    }
+  }
+
+  void _edit(BuildContext context) => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => _UpdateEditSheet(u),
+      );
+
   @override
   Widget build(BuildContext context) {
     final color = colorFor(u.category);
@@ -349,16 +380,30 @@ class UpdateCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
-                Text(fmtDateTime(u.createdAt),
+                Text(
+                    '${fmtDateTime(u.createdLocal)}${u.tz != null ? ' (${tzLabel(u.tz)})' : ''}'
+                    '${u.editedAt != null ? ' · edited' : ''}',
                     style: const TextStyle(fontSize: 12, color: AppColors.muted)),
               ]),
             ),
             Pill(u.category, color: color, icon: iconFor(u.category)),
-            if (onDelete != null)
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.delete_outline, size: 20),
-                onPressed: onDelete,
+            if (_canEdit)
+              PopupMenuButton<String>(
+                tooltip: 'Edit or delete',
+                icon: const Icon(Icons.more_vert, size: 20),
+                onSelected: (v) => v == 'edit' ? _edit(context) : _delete(context),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                      value: 'edit',
+                      child: ListTile(
+                          dense: true, leading: Icon(Icons.edit_outlined), title: Text('Edit'))),
+                  PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.delete_outline, color: AppColors.danger),
+                          title: Text('Delete'))),
+                ],
               ),
           ]),
           if (u.note.isNotEmpty) ...[
@@ -386,6 +431,159 @@ class UpdateCard extends StatelessWidget {
             const SizedBox(height: 10),
             PhotoStrip(u.photos, size: 84),
           ],
+        ]),
+      ),
+    );
+  }
+}
+
+
+/// Edit an existing site update: category, note, progress and photos.
+class _UpdateEditSheet extends StatefulWidget {
+  final SiteUpdate u;
+  const _UpdateEditSheet(this.u);
+
+  @override
+  State<_UpdateEditSheet> createState() => _UpdateEditSheetState();
+}
+
+class _UpdateEditSheetState extends State<_UpdateEditSheet> {
+  static const _categories = ['Progress', 'Issue', 'Material', 'Safety'];
+  late String _category = _categories.contains(widget.u.category) ? widget.u.category : 'Progress';
+  late final _note = TextEditingController(text: widget.u.note);
+  late double? _progress = widget.u.progress?.toDouble();
+  late final List<String> _photos = [...widget.u.photos];
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addPhoto(bool camera) async {
+    try {
+      final p = await PhotoService.pick(camera: camera);
+      if (p != null && mounted) setState(() => _photos.add(p));
+    } catch (e) {
+      if (mounted) showSnack(context, '$e', error: true);
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await Db.editSiteUpdate(
+        widget.u.id,
+        category: _category,
+        note: _note.text.trim(),
+        progress: _progress?.round(),
+        photos: _photos,
+        editedBy: CurrentUser.me?.name ?? '',
+      );
+      if (mounted) {
+        Navigator.pop(context);
+        showSnack(context, 'Update saved');
+      }
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not save: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+      child: SingleChildScrollView(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text('Edit update · ${widget.u.siteName}',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final c in _categories)
+              ChoiceChip(
+                label: Text(c),
+                avatar: Icon(UpdateCard.iconFor(c), size: 16, color: UpdateCard.colorFor(c)),
+                selected: _category == c,
+                onSelected: (_) => setState(() => _category = c),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _note,
+            maxLines: 4,
+            minLines: 2,
+            decoration: const InputDecoration(labelText: 'Note'),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            const Text('Progress'),
+            Expanded(
+              child: Slider(
+                value: _progress ?? 0,
+                min: 0,
+                max: 100,
+                divisions: 20,
+                label: _progress == null ? 'not set' : '${_progress!.round()}%',
+                onChanged: (v) => setState(() => _progress = v),
+              ),
+            ),
+            SizedBox(
+                width: 64,
+                child: Text(_progress == null ? '—' : '${_progress!.round()}%',
+                    textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.w700))),
+            if (_progress != null)
+              IconButton(
+                  tooltip: 'Clear',
+                  onPressed: () => setState(() => _progress = null),
+                  icon: const Icon(Icons.close, size: 18)),
+          ]),
+          if (_photos.isNotEmpty)
+            SizedBox(
+              height: 86,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _photos.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => Stack(children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(width: 86, height: 86, child: Base64Image(_photos[i], fit: BoxFit.cover)),
+                  ),
+                  Positioned(
+                    right: 2,
+                    top: 2,
+                    child: InkWell(
+                      onTap: () => setState(() => _photos.removeAt(i)),
+                      child: Container(
+                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                        padding: const EdgeInsets.all(3),
+                        child: const Icon(Icons.close, size: 16, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          const SizedBox(height: 6),
+          Row(children: [
+            TextButton.icon(
+                onPressed: _photos.length >= 3 ? null : () => _addPhoto(true),
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Camera')),
+            TextButton.icon(
+                onPressed: _photos.length >= 3 ? null : () => _addPhoto(false),
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Gallery')),
+          ]),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: const Icon(Icons.check),
+            label: Text(_saving ? 'Saving…' : 'Save changes'),
+          ),
         ]),
       ),
     );

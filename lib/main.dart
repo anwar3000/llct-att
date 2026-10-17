@@ -92,6 +92,7 @@ class _ProfileGateState extends State<_ProfileGate> {
             message: 'Your account has been deactivated. Please contact management.',
           );
         }
+        CurrentUser.me = user;
         return user.isManagement ? AdminShell(me: user) : EmployeeShell(me: user);
       },
     );

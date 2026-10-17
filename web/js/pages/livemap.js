@@ -48,7 +48,7 @@ export function mount(el, _p, { setHeader }) {
       const loc = s.user.lastLocation;
       const m = employeeMarker(s.user, loc).bindPopup(`
         <b>${esc(s.user.name)}</b><br>
-        ${s.open ? `${esc(s.open.siteName)} · since ${fmtTime(s.open.checkIn)}<br>` : 'Checked out<br>'}
+        ${s.open ? `${esc(s.open.siteName)} · since ${fmtTime(s.open.inLocal)}<br>` : 'Checked out<br>'}
         Today: <b>${fmtMins(s.minutes)}</b><br>
         <span style="color:#6b7885">GPS ${timeAgo(loc.at)} · ±${Math.round(loc.accuracy || 0)} m</span><br>
         <a href="#/employees/${s.user.id}">Open profile & route →</a>`);

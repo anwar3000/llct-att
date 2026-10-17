@@ -12,6 +12,18 @@ export const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDa
 export const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 export const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
+// ------------------------------------------------------------------ time zones
+// Times are stored as instants plus the phone's UTC offset (minutes) at that moment,
+// so a check-in in Dubai shows 08:00 even when the manager is in India.
+/** Shift an instant so the browser's local getters show the wall-clock time at offset `tz`. Display only. */
+export const atTz = (d, tz) => (d && tz != null ? new Date(d.getTime() + (tz + d.getTimezoneOffset()) * 60000) : d);
+/** Inverse of atTz: a wall-clock Date (entered in a form) at offset `tz` → real instant. */
+export const fromTz = (wall, tz) => (wall && tz != null ? new Date(wall.getTime() - (tz + wall.getTimezoneOffset()) * 60000) : wall);
+export const tzLabel = (tz) => {
+  if (tz == null) return '';
+  const a = Math.abs(tz);
+  return `UTC${tz < 0 ? '−' : '+'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
+};
 export const fmtTime = (d) => (d ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—');
 export const fmtDate = (d) => (d ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 export const fmtDay = (d) => (d ? d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '—');

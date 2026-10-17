@@ -147,7 +147,7 @@ class _OverviewTabState extends State<OverviewTab> {
                           leading: const Icon(Icons.warning_amber, color: AppColors.danger),
                           title: Text('${s.employeeName} never checked out'),
                           subtitle: Text(
-                              '${s.siteName} · checked in ${fmtDateTime(s.checkIn)}'),
+                              '${s.siteName} · checked in ${fmtDateTime(s.inLocal)} ${tzLabel(s.tz)}'),
                           trailing: TextButton(
                               onPressed: () => _closeForgotten(s), child: const Text('Close')),
                         ),
@@ -160,7 +160,7 @@ class _OverviewTabState extends State<OverviewTab> {
                         child: ListTile(
                           leading: const Icon(Icons.wrong_location, color: AppColors.accentDark),
                           title: Text('${a.employeeName}: ${a.label}'),
-                          subtitle: Text(fmtDateTime(a.at) +
+                          subtitle: Text(fmtDateTime(a.at == null ? null : atZone(a.at!, a.tz)) +
                               (a.lat == null ? '' : ' · GPS ${a.lat!.toStringAsFixed(5)}, ${a.lng!.toStringAsFixed(5)}')),
                           onTap: () {
                             final u = live.userById(a.employeeId);
@@ -375,10 +375,10 @@ class _StaffRow extends StatelessWidget {
     String sub;
     switch (s.state) {
       case StaffState.onDuty:
-        sub = '${s.open!.siteName} · since ${fmtTime(s.open!.checkIn)}';
+        sub = '${s.open!.siteName} · since ${fmtTime(s.open!.inLocal)}';
         break;
       case StaffState.done:
-        sub = '${s.today.length} site${s.today.length == 1 ? '' : 's'} · last out ${fmtTime(s.today.last.checkOut)}';
+        sub = '${s.today.length} site${s.today.length == 1 ? '' : 's'} · last out ${fmtTime(s.today.last.outLocal)}';
         break;
       case StaffState.off:
         sub = 'Scheduled off';

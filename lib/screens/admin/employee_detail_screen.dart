@@ -198,13 +198,13 @@ void showSessionSheet(BuildContext context, AttendanceSession s, AdminLive live)
               ),
             ),
           const SizedBox(height: 12),
-          InfoRow(Icons.login, 'Check-in', fmtDateTime(s.checkIn), color: AppColors.success),
+          InfoRow(Icons.login, 'Check-in', '${fmtDateTime(s.inLocal)} ${tzLabel(s.tz)}', color: AppColors.success),
           InfoRow(Icons.social_distance_outlined, 'Distance',
               '${fmtDistance(s.inDistance)} from site · ±${(s.inAccuracy ?? 0).round()} m GPS'),
           if (s.inLat != null)
             InfoRow(Icons.pin_drop_outlined, 'Coordinates', latLngLabel(s.inLat!, s.inLng!)),
           const Divider(),
-          InfoRow(Icons.logout, 'Check-out', s.isOpen ? 'Still checked in' : fmtDateTime(s.checkOut),
+          InfoRow(Icons.logout, 'Check-out', s.isOpen ? 'Still checked in' : fmtDateTime(s.outLocal),
               color: AppColors.danger),
           if (!s.isOpen) ...[
             InfoRow(Icons.social_distance_outlined, 'Distance', '${fmtDistance(s.outDistance)} from site'),

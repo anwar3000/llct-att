@@ -11,6 +11,25 @@ DateTime? _ts(dynamic v) {
 double? _dbl(dynamic v) => v is num ? v.toDouble() : null;
 int _int(dynamic v, [int fallback = 0]) => v is num ? v.toInt() : fallback;
 String _str(dynamic v, [String fallback = '']) => v is String ? v : fallback;
+int? _tz(dynamic v) => v is num ? v.toInt() : null;
+
+/// Wall-clock time at the place where something happened, using the UTC offset
+/// (minutes) the phone had at that moment. Falls back to this phone's local time.
+DateTime atZone(DateTime t, int? tz) => tz == null ? t : t.toUtc().add(Duration(minutes: tz));
+
+/// The signed-in user (set once their profile loads) — used by shared widgets
+/// to decide what the viewer may edit.
+class CurrentUser {
+  CurrentUser._();
+  static AppUser? me;
+}
+
+/// "UTC+04:00" style label.
+String tzLabel(int? tz) {
+  if (tz == null) return '';
+  final a = tz.abs();
+  return 'UTC${tz < 0 ? '-' : '+'}${(a ~/ 60).toString().padLeft(2, '0')}:${(a % 60).toString().padLeft(2, '0')}';
+}
 
 // ---------------------------------------------------------------------------
 // Users
@@ -278,6 +297,8 @@ class AttendanceSession {
   final bool outOutside;
   final bool mocked;
   final String note;
+  final int? tz;
+  final int? outTz;
 
   AttendanceSession({
     required this.id,
@@ -299,9 +320,15 @@ class AttendanceSession {
     this.outOutside = false,
     this.mocked = false,
     this.note = '',
+    this.tz,
+    this.outTz,
   });
 
   bool get isOpen => checkOut == null;
+
+  /// Check-in / check-out as local time at the site.
+  DateTime get inLocal => atZone(checkIn, tz);
+  DateTime? get outLocal => checkOut == null ? null : atZone(checkOut!, outTz ?? tz);
   bool get flagged => inOutside || outOutside || mocked;
 
   Duration worked([DateTime? now]) =>
@@ -329,6 +356,8 @@ class AttendanceSession {
       outOutside: m['outOutside'] == true,
       mocked: m['mocked'] == true,
       note: _str(m['note']),
+      tz: _tz(m['tz']),
+      outTz: _tz(m['outTz']),
     );
   }
 }
@@ -353,6 +382,9 @@ class SiteUpdate {
   final double? lat;
   final double? lng;
   final DateTime? createdAt;
+  final int? tz;
+  final DateTime? editedAt;
+  final String editedBy;
 
   SiteUpdate({
     required this.id,
@@ -367,7 +399,12 @@ class SiteUpdate {
     this.lat,
     this.lng,
     this.createdAt,
+    this.tz,
+    this.editedAt,
+    this.editedBy = '',
   });
+
+  DateTime? get createdLocal => createdAt == null ? null : atZone(createdAt!, tz);
 
   factory SiteUpdate.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -384,6 +421,9 @@ class SiteUpdate {
       lat: _dbl(m['lat']),
       lng: _dbl(m['lng']),
       createdAt: _ts(m['createdAt']),
+      tz: _tz(m['tz']),
+      editedAt: _ts(m['editedAt']),
+      editedBy: _str(m['editedBy']),
     );
   }
 }
@@ -536,6 +576,7 @@ class GeoAlert {
   final double? lng;
   final double? distance;
   final DateTime? at;
+  final int? tz;
   final bool resolved;
   final String resolvedBy;
 
@@ -551,6 +592,7 @@ class GeoAlert {
     this.lng,
     this.distance,
     this.at,
+    this.tz,
     this.resolved = false,
     this.resolvedBy = '',
   });
@@ -569,6 +611,7 @@ class GeoAlert {
       lng: _dbl(m['lng']),
       distance: _dbl(m['distance']),
       at: _ts(m['at']),
+      tz: _tz(m['tz']),
       resolved: m['resolved'] == true,
       resolvedBy: _str(m['resolvedBy']),
     );
@@ -742,6 +785,7 @@ class WorkerEntry {
   final DateTime checkIn;
   final DateTime? checkOut;
   final bool open;
+  final int? tz;
 
   WorkerEntry({
     required this.id,
@@ -752,7 +796,10 @@ class WorkerEntry {
     required this.checkIn,
     this.checkOut,
     this.open = false,
+    this.tz,
   });
+
+  DateTime get inLocal => atZone(checkIn, tz);
 
   Duration worked([DateTime? now]) => (checkOut ?? now ?? DateTime.now()).difference(checkIn);
 
@@ -767,6 +814,7 @@ class WorkerEntry {
       checkIn: _ts(m['checkIn']) ?? DateTime.now(),
       checkOut: _ts(m['checkOut']),
       open: m['open'] == true,
+      tz: _tz(m['tz']),
     );
   }
 }

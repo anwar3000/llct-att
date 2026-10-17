@@ -3,7 +3,7 @@ import {
   store, isAdmin, alertsInRange, workerEntriesInRange, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
-  dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
+  tzLabel, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
 } from './util.js';
 import { employeeSummary, employeeDays, pettySummary, flagText } from './calc.js';
 
@@ -71,7 +71,7 @@ export async function attendanceLogReport(from, to, empId = null, siteId = null)
   const all = await sessionsInRange(from, to);
   const list = all.filter((s) => (!empId || s.employeeId === empId) && (!siteId || s.siteId === siteId));
   const rows = list.map((s) => [
-    s.date, s.employeeName, s.siteName, t2(s.checkIn), s.checkOut ? t2(s.checkOut) : 'OPEN', fmtMins(sessionMinutes(s)),
+    s.date, s.employeeName, s.siteName, t2(s.inLocal), s.checkOut ? t2(s.outLocal) : 'OPEN', tzLabel(s.tz) || 'viewer time', fmtMins(sessionMinutes(s)),
     hoursDec(sessionMinutes(s)), round(s.inDistance), round(s.outDistance), round(s.inAccuracy), sessionFlagged(s) ? flagText(s) : 'OK',
     s.inLat != null ? `${s.inLat.toFixed(6)}, ${s.inLng.toFixed(6)}` : '', s.outLat != null ? `${s.outLat.toFixed(6)}, ${s.outLng.toFixed(6)}` : '', s.note,
   ]);
@@ -80,26 +80,26 @@ export async function attendanceLogReport(from, to, empId = null, siteId = null)
   const where = siteId ? store.site(siteId)?.name : null;
   return {
     title: `Attendance log${who ? ` — ${who}` : ''}${where ? ` — ${where}` : ''}`,
-    subtitle: `${from} to ${to} · ${list.length} check-ins · ${fmtMins(mins)} total`,
+    subtitle: `${from} to ${to} · ${list.length} check-ins · ${fmtMins(mins)} total · times are local at each site`,
     filename: `attendance-log-${from}-to-${to}`,
     orientation: 'landscape',
     sheets: [{
       name: 'Attendance log',
-      columns: ['Date', 'Employee', 'Site', 'Check-in', 'Check-out', 'Duration', 'Hours', 'In dist (m)', 'Out dist (m)', 'GPS ± (m)', 'GPS check', 'Check-in location', 'Check-out location', 'Note'],
-      widths: [11, 20, 20, 9, 10, 9, 7, 10, 11, 9, 22, 22, 22, 20],
+      columns: ['Date', 'Employee', 'Site', 'Check-in (local)', 'Check-out (local)', 'Time zone', 'Duration', 'Hours', 'In dist (m)', 'Out dist (m)', 'GPS ± (m)', 'GPS check', 'Check-in location', 'Check-out location', 'Note'],
+      widths: [11, 20, 20, 10, 11, 11, 9, 7, 10, 11, 9, 22, 22, 22, 20],
       rows,
-      totals: ['TOTAL', '', '', '', '', fmtMins(mins), hoursDec(mins), '', '', '', '', '', '', ''],
-      pdfColumns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 10],
+      totals: ['TOTAL', '', '', '', '', '', fmtMins(mins), hoursDec(mins), '', '', '', '', '', '', ''],
+      pdfColumns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11],
     }],
   };
 }
 
 export async function pettyReport(from, to, empId = null) {
   if (!isAdmin()) throw new Error('Only admins can export accounts.');
-  const inRange = (t) => { const k = t.date || d2(t.createdAt); return k >= from && k <= to; };
+  const inRange = (t) => { const k = t.date || d2(t.createdLocal); return k >= from && k <= to; };
   const list = store.petty.filter((t) => inRange(t) && (!empId || t.employeeId === empId)).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const rows = list.map((t) => [
-    t.date || d2(t.createdAt), t.employeeName, t.type === 'credit' ? 'Cash given' : 'Expense', t.type === 'credit' ? 'Cash advance' : t.category,
+    t.date || d2(t.createdLocal), t.employeeName, t.type === 'credit' ? 'Cash given' : 'Expense', t.type === 'credit' ? 'Cash advance' : t.category,
     t.siteName, t.note, t.type === 'credit' ? t.amount : '', t.type !== 'credit' ? t.amount : '', cap(t.status), t.reviewedBy || t.createdByName, t.reviewNote,
   ]);
   const byEmp = new Map();
@@ -148,7 +148,7 @@ export async function updatesReport(from, to, siteId = null) {
       name: 'Site updates',
       columns: ['Date', 'Time', 'Site', 'Employee', 'Category', 'Progress %', 'Note', 'Photos', 'Location'],
       widths: [11, 7, 20, 20, 11, 10, 60, 7, 22],
-      rows: list.map((u) => [u.date || d2(u.createdAt), t2(u.createdAt), u.siteName, u.employeeName, u.category, u.progress ?? '', u.note, u.photos.length,
+      rows: list.map((u) => [u.date || d2(u.createdLocal), t2(u.createdLocal), u.siteName, u.employeeName, u.category, u.progress ?? '', u.note, u.photos.length,
         u.lat != null ? `${u.lat.toFixed(6)}, ${u.lng.toFixed(6)}` : '']),
     }],
   };
@@ -165,7 +165,7 @@ export async function alertsReport(from, to, empId = null) {
       name: 'Alerts',
       columns: ['Date', 'Time', 'Employee', 'Site', 'Alert', 'Distance (m)', 'GPS location', 'Status', 'Resolved by'],
       widths: [11, 7, 20, 20, 40, 12, 24, 10, 16],
-      rows: list.map((a) => [a.date || d2(a.at), t2(a.at), a.employeeName, a.siteName, alertLabel(a), round(a.distance),
+      rows: list.map((a) => [a.date || d2(a.atLocal), t2(a.atLocal), a.employeeName, a.siteName, alertLabel(a), round(a.distance),
         a.lat != null ? `${a.lat.toFixed(6)}, ${a.lng.toFixed(6)}` : '', a.resolved ? 'Resolved' : 'Open', a.resolvedBy]),
     }],
   };
@@ -204,11 +204,11 @@ export async function projectReport(p) {
     },
     {
       name: 'Attendance', columns: ['Date', 'Employee', 'Site', 'In', 'Out', 'Hours', 'GPS check'], widths: [11, 20, 20, 8, 8, 8, 24],
-      rows: sessions.map((s) => [s.date, s.employeeName, s.siteName, t2(s.checkIn), s.checkOut ? t2(s.checkOut) : 'OPEN', hoursDec(sessionMinutes(s)), sessionFlagged(s) ? flagText(s) : 'OK']),
+      rows: sessions.map((s) => [s.date, s.employeeName, s.siteName, t2(s.inLocal), s.checkOut ? t2(s.outLocal) : 'OPEN', hoursDec(sessionMinutes(s)), sessionFlagged(s) ? flagText(s) : 'OK']),
     },
     {
       name: 'Site updates', columns: ['Date', 'Site', 'Employee', 'Category', 'Progress %', 'Note'], widths: [11, 20, 18, 11, 10, 60],
-      rows: updates.map((u) => [u.date || d2(u.createdAt), u.siteName, u.employeeName, u.category, u.progress ?? '', u.note]),
+      rows: updates.map((u) => [u.date || d2(u.createdLocal), u.siteName, u.employeeName, u.category, u.progress ?? '', u.note]),
     },
   ];
   if (isAdmin()) {
@@ -218,7 +218,7 @@ export async function projectReport(p) {
       ['Budget used', p.budget ? `${Math.round((ps.spent / p.budget) * 100)}%` : '']);
     sheets.push({
       name: 'Expenses', columns: ['Date', 'Employee', 'Type', 'Category', 'Site', 'Note', 'Amount (₹)', 'Status'], widths: [11, 18, 11, 12, 18, 30, 12, 10],
-      rows: petty.map((t) => [t.date || d2(t.createdAt), t.employeeName, t.type === 'credit' ? 'Cash given' : 'Expense', t.category, t.siteName, t.note, t.amount, cap(t.status)]),
+      rows: petty.map((t) => [t.date || d2(t.createdLocal), t.employeeName, t.type === 'credit' ? 'Cash given' : 'Expense', t.category, t.siteName, t.note, t.amount, cap(t.status)]),
     });
   }
   return {
@@ -326,7 +326,7 @@ export async function workerAttendanceReport(from, to, workerId = null, siteId =
   const mins = (e) => Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000));
   const log = list.map((e) => {
     const w = workerInfo(e.workerId, e);
-    return [e.date, w.name, w.company, w.trade, e.siteName, e.employeeName, t2(e.checkIn), e.checkOut ? t2(e.checkOut) : 'ON SITE',
+    return [e.date, w.name, w.company, w.trade, e.siteName, e.employeeName, t2(e.inLocal), e.checkOut ? t2(e.outLocal) : 'ON SITE', tzLabel(e.tz) || 'viewer time',
       fmtMins(mins(e)), hoursDec(mins(e)), e.note];
   });
   const dayMins = workerDayMinutes(list);
@@ -357,10 +357,10 @@ export async function workerAttendanceReport(from, to, workerId = null, siteId =
       },
       {
         name: 'Daily log',
-        columns: ['Date', 'Worker', 'Company', 'Trade', 'Site', 'Added by (employee)', 'In', 'Out', 'Duration', 'Hours', 'Note'],
-        widths: [11, 22, 18, 13, 22, 20, 7, 9, 9, 7, 20],
+        columns: ['Date', 'Worker', 'Company', 'Trade', 'Site', 'Added by (employee)', 'In (local)', 'Out (local)', 'Time zone', 'Duration', 'Hours', 'Note'],
+        widths: [11, 22, 18, 13, 22, 20, 9, 10, 11, 9, 7, 20],
         rows: log,
-        pdfColumns: [0, 1, 2, 4, 5, 6, 7, 8, 9],
+        pdfColumns: [0, 1, 2, 4, 5, 6, 7, 8, 9, 10],
       },
     ],
   };

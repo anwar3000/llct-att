@@ -96,6 +96,9 @@ String initials(String name) {
   return (parts.first.substring(0, 1) + parts.last.substring(0, 1)).toUpperCase();
 }
 
+/// Shown in the profile sheet so staff can confirm they have the latest app.
+const kAppVersion = '1.2.0';
+
 void showSnack(BuildContext context, String msg, {bool error = false}) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()

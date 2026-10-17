@@ -10,7 +10,7 @@ import {
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
-import { dateKey, monthKey } from './util.js';
+import { dateKey, monthKey, atTz } from './util.js';
 
 export const LOGIN_DOMAIN = 'staff.attendance.app';
 export const loginToEmail = (l) => {
@@ -30,6 +30,7 @@ export const logout = () => signOut(auth);
 
 const C = (name) => collection(db, name);
 const toDate = (v) => (v && typeof v.toDate === 'function' ? v.toDate() : v instanceof Date ? v : null);
+const tzOf = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : null);
 const num = (v, d = 0) => (typeof v === 'number' && !Number.isNaN(v) ? v : d);
 
 // ------------------------------------------------------------------ mappers
@@ -74,15 +75,18 @@ export function mapProject(d) {
 }
 export function mapSession(d) {
   const m = d.data() || {};
-  return {
+  return localise({
     id: d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', siteId: m.siteId || '',
     siteName: m.siteName || '', date: m.date || '', month: m.month || '',
     checkIn: toDate(m.checkIn) || new Date(), checkOut: toDate(m.checkOut),
     inLat: m.inLat ?? null, inLng: m.inLng ?? null, inAccuracy: m.inAccuracy ?? null, inDistance: m.inDistance ?? null,
     inOutside: m.inOutside === true, outLat: m.outLat ?? null, outLng: m.outLng ?? null, outDistance: m.outDistance ?? null,
     outOutside: m.outOutside === true, mocked: m.mocked === true, note: m.note || '', status: m.status || '',
-  };
+    tz: tzOf(m.tz), outTz: tzOf(m.outTz) ?? tzOf(m.tz),
+  });
 }
+/** Adds inLocal/outLocal (site wall-clock) to a session or worker entry. */
+const localise = (o) => Object.assign(o, { inLocal: atTz(o.checkIn, o.tz), outLocal: atTz(o.checkOut, o.outTz ?? o.tz) });
 export function mapPetty(d) {
   const m = d.data() || {};
   return {
@@ -90,6 +94,7 @@ export function mapPetty(d) {
     amount: num(m.amount), category: m.category || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '',
     receipt: m.receipt || '', status: m.status || 'pending', reviewNote: m.reviewNote || '', reviewedBy: m.reviewedBy || '',
     createdByName: m.createdByName || '', createdAt: toDate(m.createdAt), date: m.date || '',
+    tz: tzOf(m.tz), createdLocal: atTz(toDate(m.createdAt), tzOf(m.tz)),
   };
 }
 export function mapUpdate(d) {
@@ -99,6 +104,8 @@ export function mapUpdate(d) {
     employeeName: m.employeeName || '', category: m.category || 'Progress', note: m.note || '',
     progress: typeof m.progress === 'number' ? m.progress : null, photos: Array.isArray(m.photos) ? m.photos : [],
     lat: m.lat ?? null, lng: m.lng ?? null, createdAt: toDate(m.createdAt), date: m.date || '',
+    tz: tzOf(m.tz), createdLocal: atTz(toDate(m.createdAt), tzOf(m.tz)),
+    editedAt: toDate(m.editedAt), editedBy: m.editedBy || '',
   };
 }
 export function mapOff(d) {
@@ -115,6 +122,7 @@ export function mapAlert(d) {
     siteName: m.siteName || '', sessionId: m.sessionId || '', type: m.type || 'left_site',
     lat: m.lat ?? null, lng: m.lng ?? null, distance: m.distance ?? null, at: toDate(m.at), date: m.date || '',
     resolved: m.resolved === true, resolvedBy: m.resolvedBy || '',
+    tz: tzOf(m.tz), atLocal: atTz(toDate(m.at), tzOf(m.tz)),
   };
 }
 export const alertLabel = (a) => (a.type === 'gps_off'
@@ -144,12 +152,13 @@ export function mapWorkerLock(d) {
 }
 export function mapWorkerEntry(d) {
   const m = d.data() || {};
-  return {
+  return localise({
     id: d.id, workerId: m.workerId || '', workerName: m.workerName || '', company: m.company || '', trade: m.trade || '',
     sessionId: m.sessionId || '', employeeId: m.employeeId || '', employeeName: m.employeeName || '',
     siteId: m.siteId || '', siteName: m.siteName || '', date: m.date || '', month: m.month || '',
     checkIn: toDate(m.checkIn) || new Date(), checkOut: toDate(m.checkOut), open: m.open === true, note: m.note || '',
-  };
+    tz: tzOf(m.tz),
+  });
 }
 export function mapIdInfo(d) {
   const m = d.data() || {};
@@ -364,7 +373,7 @@ export const deleteSchedule = (id) => deleteDoc(doc(db, 'schedules', id));
 export async function closeSession(s, at) {
   await updateDoc(doc(db, 'attendance', s.id), {
     checkOut: Timestamp.fromDate(at), durationMin: Math.round((at - s.checkIn) / 60000), status: 'closed',
-    note: `${s.note} [closed by management]`.trim(),
+    note: `${s.note} [closed by management]`.trim(), ...(s.tz != null ? { outTz: s.tz } : {}),
   });
   await closeWorkersForSession(s.id, at);
 }
@@ -429,7 +438,8 @@ export async function addWorkersToSession(session, workers) {
     b.set(rec, {
       workerId: w.id, workerName: w.name, company: w.company, trade: w.trade, sessionId: session.id,
       employeeId: session.employeeId, employeeName: session.employeeName, siteId: session.siteId, siteName: session.siteName,
-      date: dateKey(start), month: monthKey(start), checkIn: Timestamp.fromDate(start), open: true,
+      date: dateKey(atTz(start, session.tz) || start), month: monthKey(atTz(start, session.tz) || start),
+      checkIn: Timestamp.fromDate(start), open: true, ...(session.tz != null ? { tz: session.tz } : {}),
       note: `added by ${store.me?.name || 'management'}`, createdAt: serverTimestamp(),
     });
     b.set(lockRef, {
@@ -491,3 +501,6 @@ export const reviewPetty = (id, approve, reviewer, note = '') => updateDoc(doc(d
 export const deletePetty = (id) => deleteDoc(doc(db, 'petty', id));
 export const reviewOff = (id, approve) => updateDoc(doc(db, 'offDays', id), { status: approve ? 'approved' : 'rejected' });
 export const deleteUpdate = (id) => deleteDoc(doc(db, 'siteUpdates', id));
+export const editUpdate = (id, data) => updateDoc(doc(db, 'siteUpdates', id), {
+  ...data, editedAt: serverTimestamp(), editedBy: store.me?.name || '',
+});

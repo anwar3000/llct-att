@@ -16,7 +16,8 @@ import 'worker_picker_screen.dart';
 class HomeTab extends StatefulWidget {
   final AppUser me;
   final AttendanceSession? open;
-  const HomeTab({super.key, required this.me, required this.open});
+  final ValueChanged<int>? onNavigate;
+  const HomeTab({super.key, required this.me, required this.open, this.onNavigate});
 
   @override
   State<HomeTab> createState() => _HomeTabState();
@@ -486,6 +487,8 @@ class _HomeTabState extends State<HomeTab> {
             _actionButton(open),
             const SizedBox(height: 12),
             open != null ? _workersCard(open) : _workersHint(),
+            const SizedBox(height: 12),
+            _quickActions(open),
             if (_isOffToday) ...[
               const SizedBox(height: 12),
               Card(
@@ -601,7 +604,7 @@ class _HomeTabState extends State<HomeTab> {
         if (open != null)
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 4),
-            child: Text('Since ${fmtTime(open.checkIn)}',
+            child: Text('Since ${fmtTime(open.inLocal)}',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12.5)),
           ),
         const SizedBox(height: 14),
@@ -626,6 +629,48 @@ class _HomeTabState extends State<HomeTab> {
                     fontFeatures: [FontFeature.tabularFigures()])),
       ]),
     );
+  }
+
+  Widget _quickActions(AttendanceSession? open) {
+    Widget tile(IconData icon, String label, VoidCallback onTap) => Expanded(
+          child: Card(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Column(children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                        color: AppColors.accentSoft, borderRadius: BorderRadius.circular(11)),
+                    child: Icon(icon, color: AppColors.accentDark, size: 21),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(label,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ),
+        );
+    return Row(children: [
+      tile(Icons.engineering_outlined, 'Workers', () {
+        if (open != null) {
+          _openWorkers(open);
+        } else {
+          showSnack(context, 'Check in first, then add the workers with you.');
+        }
+      }),
+      const SizedBox(width: 8),
+      tile(Icons.add_a_photo_outlined, 'Site update', () => widget.onNavigate?.call(2)),
+      const SizedBox(width: 8),
+      tile(Icons.calendar_month_outlined, 'History', () => widget.onNavigate?.call(1)),
+      const SizedBox(width: 8),
+      tile(Icons.receipt_long_outlined, 'Expense', () => widget.onNavigate?.call(3)),
+    ]);
   }
 
   Widget _workersHint() => Container(

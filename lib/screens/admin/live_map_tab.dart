@@ -85,7 +85,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
             const SizedBox(height: 12),
             if (s.open != null) ...[
               InfoRow(Icons.location_city_outlined, 'Site', s.open!.siteName),
-              InfoRow(Icons.login, 'Checked in', fmtDateTime(s.open!.checkIn)),
+              InfoRow(Icons.login, 'Checked in', '${fmtDateTime(s.open!.inLocal)} ${tzLabel(s.open!.tz)}'),
             ],
             InfoRow(Icons.timer_outlined, 'Today', fmtDuration(s.worked)),
             InfoRow(Icons.gps_fixed, 'Last GPS', lastSeenLabel(l)),

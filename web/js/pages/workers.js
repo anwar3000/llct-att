@@ -5,10 +5,10 @@ import {
   closeWorkerEntry, deleteWorkerEntry, isAdmin, addWorkersToSession,
 } from '../fb.js';
 import {
-  esc, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtMonth, dateKey, monthKey, startOfMonth, endOfMonth,
+  esc, fromTz, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtMonth, dateKey, monthKey, startOfMonth, endOfMonth,
   toast, modal, confirmBox, promptBox, friendlyError,
 } from '../util.js';
-import { docsPanel, ownerFromWorker, docsSummaryHtml, exportMenu, ownerExpiry, prepareFile } from '../iddocs.js';
+import { docsPanel, ownerFromWorker, docsSummaryHtml, exportMenu, ownerExpiry, prepareFile, DOC_KINDS } from '../iddocs.js';
 import { workerAttendanceReport, downloadReport } from '../report-lib.js';
 
 export function mount(el, params, ctx) {
@@ -67,16 +67,17 @@ function list(el, { setHeader }) {
     </div>
     <div class="card"><div class="table-wrap"><table class="t">
       <tr><th style="width:34px"><input type="checkbox" id="w-all" ${rows.length && rows.every((w) => sel.has(w.id)) ? 'checked' : ''}></th>
-        <th>Worker</th><th>Company</th><th>Trade</th><th>Phone</th><th>ID documents</th><th>Today</th></tr>
+        <th>Worker</th><th>Company</th><th>Trade</th><th>Phone</th><th>Passport / Emirates ID</th><th>Copies</th><th>Today</th></tr>
       ${rows.length ? rows.map((w) => {
         const lk = store.workerLock(w.id);
         return `<tr class="click" data-id="${w.id}">
         <td><input type="checkbox" data-sel="${w.id}" ${sel.has(w.id) ? 'checked' : ''}></td>
         <td><div class="person">${avatar(w.name, 30)}<div><div class="nm">${esc(w.name)}</div><div class="small muted">${esc(w.code || '')}${w.active ? '' : ' · inactive'}</div></div></div></td>
         <td>${esc(w.company)}</td><td>${esc(w.trade)}</td><td class="nowrap">${esc(w.phone)}</td>
+        <td class="small mono">${(() => { const i = store.info(w.id) || {}; return `${esc(i.passportNo || '—')}<br>${esc(i.eidNo || '—')}`; })()}</td>
         <td>${docsSummaryHtml(w.id)}</td>
         <td>${lk ? `${pill('On site', 'green', true)}<div class="small muted">${esc(lk.siteName)}</div>` : '<span class="muted">—</span>'}</td></tr>`;
-      }).join('') : `<tr><td colspan="7"><div class="empty">${store.workers.length ? 'No matching workers' : 'No external workers yet — click “Register worker”.'}</div></td></tr>`}
+      }).join('') : `<tr><td colspan="8"><div class="empty">${store.workers.length ? 'No matching workers' : 'No external workers yet — click “Register worker”.'}</div></td></tr>`}
     </table></div></div>`;
 
     const qi = el.querySelector('#w-q');
@@ -112,7 +113,7 @@ export function checkInWorkers(presetSessionId = '') {
     title: 'Check in external workers',
     wide: true,
     body: `<label class="f"><span>With employee (checked in now)</span><select id="ci-s">${sessions.map((s) =>
-      `<option value="${s.id}" ${s.id === presetSessionId ? 'selected' : ''}>${esc(s.employeeName)} — ${esc(s.siteName)} (since ${fmtTime(s.checkIn)})</option>`).join('')}</select></label>
+      `<option value="${s.id}" ${s.id === presetSessionId ? 'selected' : ''}>${esc(s.employeeName)} — ${esc(s.siteName)} (since ${fmtTime(s.inLocal)})</option>`).join('')}</select></label>
       <input id="ci-q" placeholder="Search workers…" style="margin:4px 0 10px">
       <div id="ci-list" style="max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:10px"></div>
       <div class="small muted" style="margin-top:8px">Workers' hours follow this employee's check-in until removed or until the employee checks out. A worker can be on only one site at a time.</div>`,
@@ -175,7 +176,7 @@ export function registerWorker(w = null) {
   const i = (w && store.info(w.id)) || {};
   modal({
     title: editing ? `Edit ${w.name}` : 'Register external worker',
-    wide: !editing,
+    wide: true,
     body: `<form id="wf"><div class="fields">
       <label class="f"><span>Full name (as on passport) *</span><input name="name" required value="${esc(w?.name)}"></label>
       <label class="f"><span>Phone *</span><input name="phone" required value="${esc(w?.phone)}" placeholder="+971 5x xxx xxxx"></label>
@@ -183,15 +184,15 @@ export function registerWorker(w = null) {
       <label class="f"><span>Trade</span><input name="trade" value="${esc(w?.trade)}" list="w-trades" placeholder="Helper, Mason, Electrician…"></label>
       <label class="f"><span>Worker code (optional)</span><input name="code" value="${esc(w?.code)}"></label>
       <label class="f"><span>Nationality</span><input name="nationality" value="${esc(i.nationality || w?.nationality || '')}"></label>
-      ${editing ? `<label class="f row full" style="gap:8px"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Active — can be selected at check-in</label>` : `
-      <div class="full"><h3 style="margin:8px 0 10px">Passport *</h3></div>
-      <label class="f"><span>Passport number *</span><input name="passportNo" required></label>
-      <label class="f"><span>Passport expiry</span><input name="passportExpiry" type="date"></label>
-      <label class="f full"><span>Passport copy * (photo or PDF)</span><input name="ppFile" type="file" accept="image/*,application/pdf" multiple></label>
-      <div class="full"><h3 style="margin:8px 0 10px">Emirates ID *</h3></div>
-      <label class="f"><span>Emirates ID number *</span><input name="eidNo" required placeholder="784-xxxx-xxxxxxx-x"></label>
-      <label class="f"><span>EID expiry</span><input name="eidExpiry" type="date"></label>
-      <label class="f full"><span>Emirates ID copy * (front & back)</span><input name="eidFile" type="file" accept="image/*,application/pdf" multiple></label>`}
+      ${editing ? `<label class="f row full" style="gap:8px"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Active — can be selected at check-in</label>` : ''}
+      <div class="full reg-docs-head"><h3>ID documents <span class="muted small" style="font-weight:500">— optional, can be added later</span></h3></div>
+      ${DOC_KINDS.filter((k) => k.num).map((k) => `<div class="full reg-doc">
+        <div class="reg-doc-title">${esc(k.label)}</div>
+        <label class="f"><span>Number</span><input name="${k.num}" value="${esc(i[k.num] || '')}"></label>
+        <label class="f"><span>Expiry</span><input name="${k.exp}" type="date" value="${esc(i[k.exp] || '')}"></label>
+        ${editing ? '' : `<label class="f"><span>Copy (photo / PDF)</span><input name="file_${k.k}" type="file" accept="image/*,application/pdf" multiple></label>`}
+      </div>`).join('')}
+      ${editing ? '<div class="full small muted">Upload or replace copies on the worker’s page.</div>' : ''}
     </div>
     <datalist id="w-companies">${[...new Set(store.workers.map((x) => x.company).filter(Boolean))].map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
     <datalist id="w-trades">${[...new Set(['Helper', 'Mason', 'Carpenter', 'Electrician', 'Plumber', 'Painter', 'Steel fixer', 'Welder', 'Driver', 'Foreman',
@@ -213,18 +214,10 @@ export function registerWorker(w = null) {
           name: f.name.value.trim(), phone: f.phone.value.trim(), company: f.company.value.trim(), trade: f.trade.value.trim(),
           code: f.code.value.trim(), nationality: f.nationality.value.trim(),
         };
-        const info = editing ? { nationality: data.nationality } : {
-          nationality: data.nationality, passportNo: f.passportNo.value.trim(), passportExpiry: f.passportExpiry.value,
-          eidNo: f.eidNo.value.trim(), eidExpiry: f.eidExpiry.value,
-        };
+        const info = { nationality: data.nationality };
+        DOC_KINDS.filter((k) => k.num).forEach((k) => { info[k.num] = f[k.num].value.trim(); info[k.exp] = f[k.exp].value; });
         if (!data.name) { err.textContent = 'Name is required.'; return; }
         if (!data.phone) { err.textContent = 'Phone number is required.'; return; }
-        if (!editing) {
-          if (!info.passportNo) { err.textContent = 'Passport number is required.'; return; }
-          if (!f.ppFile.files.length) { err.textContent = 'Attach the passport copy.'; return; }
-          if (!info.eidNo) { err.textContent = 'Emirates ID number is required.'; return; }
-          if (!f.eidFile.files.length) { err.textContent = 'Attach the Emirates ID copy.'; return; }
-        }
         const dup = duplicateOf(data, info, w?.id);
         if (dup) { err.textContent = `Already registered: ${dup}.`; return; }
         btn.disabled = true; btn.textContent = 'Saving…';
@@ -233,11 +226,11 @@ export function registerWorker(w = null) {
           const id = await saveWorker(w?.id, data);
           await saveIdInfo(id, 'worker', { ...info, name: data.name });
           if (!editing) {
-            for (const [inp, kind] of [[f.ppFile, 'passport'], [f.eidFile, 'eid']]) {
-              for (const file of inp.files) {
+            for (const k of DOC_KINDS.filter((x) => x.num)) {
+              for (const file of f[`file_${k.k}`].files) {
                 btn.textContent = `Uploading ${file.name}…`;
                 const p = await prepareFile(file);
-                await uploadIdFile({ ownerId: id, ownerType: 'worker', ownerName: data.name, kind, ...p });
+                await uploadIdFile({ ownerId: id, ownerType: 'worker', ownerName: data.name, kind: k.k, ...p });
               }
             }
           }
@@ -311,8 +304,8 @@ function detail(el, id, { setHeader }) {
     box.innerHTML = `<div class="row card-pad" style="gap:18px;padding-top:0"><span><b>${days}</b> days</span><span><b>${fmtMins(mins)}</b> total</span>
       <span><b>${new Set(list.map((e) => e.siteId)).size}</b> sites</span></div>
       <div class="table-wrap"><table class="t"><tr><th>Date</th><th>Site</th><th>Added by</th><th>In</th><th>Out</th><th class="num">Hours</th><th></th></tr>
-      ${list.length ? [...list].reverse().map((e) => `<tr><td class="nowrap">${fmtDay(e.checkIn)}</td><td><b>${esc(e.siteName)}</b></td>
-        <td>${esc(e.employeeName)}</td><td>${fmtTime(e.checkIn)}</td><td>${e.checkOut ? fmtTime(e.checkOut) : pill('On site', 'green', true)}</td>
+      ${list.length ? [...list].reverse().map((e) => `<tr><td class="nowrap">${fmtDay(e.inLocal)}</td><td><b>${esc(e.siteName)}</b></td>
+        <td>${esc(e.employeeName)}</td><td>${fmtTime(e.inLocal)}</td><td>${e.checkOut ? fmtTime(e.outLocal) : pill('On site', 'green', true)}</td>
         <td class="num"><b>${fmtMins(Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000))}</b></td>
         <td class="right nowrap">${e.open ? `<button class="btn sm ghost" data-close="${e.id}">End</button>` : ''}
           <button class="btn sm ghost icon" data-del="${e.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')
@@ -321,10 +314,10 @@ function detail(el, id, { setHeader }) {
     box.querySelectorAll('[data-close]').forEach((b) => {
       b.onclick = async () => {
         const e = entries.find((x) => x.id === b.dataset.close);
-        const t = await promptBox('End time', `Time ${store.worker(id)?.name || 'worker'} left on ${fmtDay(e.checkIn)}`, { ok: 'Save', value: '18:00', type: 'time' });
+        const t = await promptBox('End time', `Time ${store.worker(id)?.name || 'worker'} left on ${fmtDay(e.inLocal)}`, { ok: 'Save', value: '18:00', type: 'time' });
         if (!t) return;
         const [h, mi] = t.split(':').map(Number);
-        const at = new Date(e.checkIn.getFullYear(), e.checkIn.getMonth(), e.checkIn.getDate(), h, mi);
+        const at = fromTz(new Date(e.inLocal.getFullYear(), e.inLocal.getMonth(), e.inLocal.getDate(), h, mi), e.tz);
         if (at <= e.checkIn) return toast('End must be after start', true);
         try { await closeWorkerEntry(e, at, 'ended by management'); toast('Saved'); load(); } catch (er) { toast(friendlyError(er), true); }
       };

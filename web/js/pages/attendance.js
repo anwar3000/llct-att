@@ -1,6 +1,6 @@
 import { store, sessionsInRange, sessionMinutes, sessionFlagged, closeSession, deleteSession, isAdmin } from '../fb.js';
 import {
-  esc, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtDist, dateKey, addDays, startOfMonth, toast, confirmBox, promptBox, fmtDate,
+  esc, fromTz, tzLabel, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtDist, dateKey, addDays, startOfMonth, toast, confirmBox, promptBox, fmtDate,
 } from '../util.js';
 import { flagText } from '../calc.js';
 import { attendanceLogReport, downloadReport } from '../report-lib.js';
@@ -45,12 +45,12 @@ export function mount(el, _p, { setHeader }) {
     <div class="row mt" style="gap:18px"><span><b>${list.length}</b> check-ins</span><span><b>${people}</b> people</span><span><b>${fmtMins(mins)}</b> total</span>
       ${rows ? '' : '<span class="muted">Loading…</span>'}</div>
     <div class="card mt"><div class="table-wrap"><table class="t">
-      <tr><th>Date</th><th>Employee</th><th>Site</th><th>In</th><th>Out</th><th class="num">Hours</th><th>Distance</th><th>Check</th><th></th></tr>
+      <tr><th>Date</th><th>Employee</th><th>Site</th><th>In (site time)</th><th>Out</th><th class="num">Hours</th><th>Distance</th><th>Check</th><th></th></tr>
       ${list.length ? [...list].reverse().map((s) => `<tr>
-        <td class="nowrap">${fmtDay(s.checkIn)}</td>
+        <td class="nowrap">${fmtDay(s.inLocal)}</td>
         <td><a href="#/employees/${s.employeeId}" class="person" style="color:inherit">${avatar(s.employeeName, 26)}<span class="nm">${esc(s.employeeName)}</span></a></td>
-        <td>${esc(s.siteName)}</td><td class="nowrap">${fmtTime(s.checkIn)}</td>
-        <td class="nowrap">${s.checkOut ? fmtTime(s.checkOut) : pill('Open', 'green', true)}</td>
+        <td>${esc(s.siteName)}</td><td class="nowrap">${fmtTime(s.inLocal)}${s.tz != null ? `<div class="small muted">${tzLabel(s.tz)}</div>` : ''}</td>
+        <td class="nowrap">${s.checkOut ? fmtTime(s.outLocal) : pill('Open', 'green', true)}</td>
         <td class="num"><b>${fmtMins(sessionMinutes(s))}</b></td>
         <td class="small nowrap">${fmtDist(s.inDistance)}${s.outDistance != null ? ` / ${fmtDist(s.outDistance)}` : ''}</td>
         <td>${sessionFlagged(s) ? `<span class="pill red" title="${esc(flagText(s))}">${esc(flagText(s))}</span>` : pill('OK', 'green')}</td>
@@ -77,10 +77,10 @@ export function mount(el, _p, { setHeader }) {
     el.querySelectorAll('[data-close]').forEach((b) => {
       b.onclick = async () => {
         const s = rows.find((x) => x.id === b.dataset.close);
-        const t = await promptBox('Close session', `Check-out time on ${fmtDate(s.checkIn)}`, { ok: 'Close', value: '18:00', type: 'time' });
+        const t = await promptBox('Close session', `Check-out time on ${fmtDate(s.inLocal)}`, { ok: 'Close', value: '18:00', type: 'time' });
         if (!t) return;
         const [h, mi] = t.split(':').map(Number);
-        const at = new Date(s.checkIn.getFullYear(), s.checkIn.getMonth(), s.checkIn.getDate(), h, mi);
+        const at = fromTz(new Date(s.inLocal.getFullYear(), s.inLocal.getMonth(), s.inLocal.getDate(), h, mi), s.tz);
         if (at <= s.checkIn) return toast('Check-out must be after check-in', true);
         await closeSession(s, at); toast('Closed'); load();
       };

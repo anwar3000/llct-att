@@ -235,7 +235,7 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
                               busy != null
                                   ? 'With ${busy.employeeName} at ${busy.siteName}'
                                   : entry != null
-                                      ? 'On site since ${fmtTime(entry.checkIn)}${w.subtitle.isEmpty ? '' : ' · ${w.subtitle}'}'
+                                      ? 'On site since ${fmtTime(entry.inLocal)}${w.subtitle.isEmpty ? '' : ' · ${w.subtitle}'}'
                                       : (w.subtitle.isEmpty ? w.phone : w.subtitle),
                               style: TextStyle(
                                   color: busy != null ? AppColors.danger : AppColors.muted, fontSize: 12.5),

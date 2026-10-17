@@ -5,7 +5,7 @@ import { createPlacePicker } from '../placepicker.js';
 
 const STATUSES = ['planned', 'active', 'on hold', 'completed'];
 
-export function mount(el, _p, { setHeader }) {
+export function mount(el, params, { setHeader }) {
   setHeader('Sites', 'Work locations with geofence radius used for check-in',
     `<button class="btn" id="s-new">${icon('plus', 16)} Add site</button>`);
   document.getElementById('s-new').onclick = () => editSite(null);
@@ -53,6 +53,10 @@ export function mount(el, _p, { setHeader }) {
 
   draw();
   const off = store.on(draw);
+  if (params[0]) {
+    const openIt = () => { const x = store.site(params[0]); if (x) { editSite(x); return true; } return false; };
+    if (!openIt()) { const off = store.on(() => { if (openIt()) off(); }); }
+  }
   return () => { off(); map.remove(); };
 }
 

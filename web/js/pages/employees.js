@@ -3,7 +3,7 @@ import {
   sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL,
 } from '../fb.js';
 import {
-  esc, icon, avatar, pill, cap, fmtMins, fmtTime, fmtDate, fmtDay, fmtDateTime, fmtMoney, fmtDist, fmtMonth, timeAgo,
+  esc, fromTz, icon, avatar, pill, cap, fmtMins, fmtTime, fmtDate, fmtDay, fmtDateTime, fmtMoney, fmtDist, fmtMonth, timeAgo,
   dateKey, monthKey, parseKey, startOfMonth, endOfMonth, addDays, WEEKDAYS, WEEKDAYS_LONG, toast, modal, confirmBox,
   promptBox, friendlyError, statusPill,
 } from '../util.js';
@@ -208,8 +208,8 @@ function detail(root, id, { setHeader }) {
     <div class="card mt"><div class="card-head"><h2>Check-ins</h2><span class="muted small">${sessions ? `${sessions.length} this month` : ''}</span></div>
       <div class="table-wrap"><table class="t"><tr><th>Date</th><th>Site</th><th>In</th><th>Out</th><th class="num">Duration</th><th>GPS check</th><th></th></tr>
       ${sessions && sessions.length ? [...sessions].reverse().map((s) => `<tr>
-        <td class="nowrap">${fmtDay(s.checkIn)}</td><td><b>${esc(s.siteName)}</b></td><td>${fmtTime(s.checkIn)}</td>
-        <td>${s.checkOut ? fmtTime(s.checkOut) : pill('Open', 'green', true)}</td><td class="num"><b>${fmtMins(sessionMinutes(s))}</b></td>
+        <td class="nowrap">${fmtDay(s.inLocal)}</td><td><b>${esc(s.siteName)}</b></td><td>${fmtTime(s.inLocal)}</td>
+        <td>${s.checkOut ? fmtTime(s.outLocal) : pill('Open', 'green', true)}</td><td class="num"><b>${fmtMins(sessionMinutes(s))}</b></td>
         <td class="small">${sessionFlagged(s) ? `<span style="color:#D64545">${esc(flagText(s))}</span>` : `<span class="muted">OK · ${fmtDist(s.inDistance)}</span>`}</td>
         <td class="right nowrap">${!s.checkOut ? `<button class="btn sm ghost" data-close="${s.id}">Close</button>` : ''}
           ${isAdmin() ? `<button class="btn sm ghost" data-del="${s.id}" title="Delete">${icon('trash', 14)}</button>` : ''}</td></tr>`).join('')
@@ -219,7 +219,7 @@ function detail(root, id, { setHeader }) {
       ${offDays.map((o) => `<div class="list-item"><div class="grow"><b>${fmtDate(parseKey(o.date))}</b> <span class="muted">${esc(o.reason)}</span></div>${statusPill(o.status)}</div>`).join('')}</div>` : ''}
     ${isAdmin() && petty.length ? `<div class="card mt"><div class="card-head"><h2>Petty cash</h2><a class="small" href="#/petty">Open petty cash →</a></div>
       <div class="table-wrap"><table class="t"><tr><th>Date</th><th>Type</th><th>Note</th><th class="num">Amount</th><th>Status</th></tr>
-      ${petty.slice(0, 15).map((t) => `<tr><td class="small">${fmtDate(t.createdAt)}</td><td>${esc(t.type === 'credit' ? 'Cash given' : t.category)}</td>
+      ${petty.slice(0, 15).map((t) => `<tr><td class="small">${fmtDate(t.createdLocal)}</td><td>${esc(t.type === 'credit' ? 'Cash given' : t.category)}</td>
         <td class="small">${esc(t.note)}</td><td class="num" style="color:${t.type === 'credit' ? '#2E9E6A' : '#D64545'}">${t.type === 'credit' ? '+' : '−'}${fmtMoney(t.amount)}</td><td>${statusPill(t.status)}</td></tr>`).join('')}
       </table></div></div>` : ''}`;
 
@@ -229,10 +229,10 @@ function detail(root, id, { setHeader }) {
     el.querySelectorAll('[data-close]').forEach((b) => {
       b.onclick = async () => {
         const s = sessions.find((x) => x.id === b.dataset.close);
-        const t = await promptBox('Close session', `Check-out time on ${fmtDate(s.checkIn)}`, { ok: 'Close', value: '18:00', type: 'time' });
+        const t = await promptBox('Close session', `Check-out time on ${fmtDate(s.inLocal)}`, { ok: 'Close', value: '18:00', type: 'time' });
         if (!t) return;
         const [h, mi] = t.split(':').map(Number);
-        const at = new Date(s.checkIn.getFullYear(), s.checkIn.getMonth(), s.checkIn.getDate(), h, mi);
+        const at = fromTz(new Date(s.inLocal.getFullYear(), s.inLocal.getMonth(), s.inLocal.getDate(), h, mi), s.tz);
         if (at <= s.checkIn) return toast('Check-out must be after check-in', true);
         await closeSession(s, at); toast('Closed'); load();
       };
@@ -257,8 +257,8 @@ function detail(root, id, { setHeader }) {
     daySessions.forEach((s) => {
       const site = store.site(s.siteId);
       if (site) mapLayer.addLayer(siteLayer(site));
-      if (s.inLat != null) { window.L.circleMarker([s.inLat, s.inLng], { radius: 7, color: '#fff', weight: 2, fillColor: '#2E9E6A', fillOpacity: 1 }).bindTooltip(`In ${fmtTime(s.checkIn)} · ${s.siteName}`).addTo(mapLayer); pts.push([s.inLat, s.inLng]); }
-      if (s.outLat != null) { window.L.circleMarker([s.outLat, s.outLng], { radius: 7, color: '#fff', weight: 2, fillColor: '#D64545', fillOpacity: 1 }).bindTooltip(`Out ${fmtTime(s.checkOut)}`).addTo(mapLayer); pts.push([s.outLat, s.outLng]); }
+      if (s.inLat != null) { window.L.circleMarker([s.inLat, s.inLng], { radius: 7, color: '#fff', weight: 2, fillColor: '#2E9E6A', fillOpacity: 1 }).bindTooltip(`In ${fmtTime(s.inLocal)} · ${s.siteName}`).addTo(mapLayer); pts.push([s.inLat, s.inLng]); }
+      if (s.outLat != null) { window.L.circleMarker([s.outLat, s.outLng], { radius: 7, color: '#fff', weight: 2, fillColor: '#D64545', fillOpacity: 1 }).bindTooltip(`Out ${fmtTime(s.outLocal)}`).addTo(mapLayer); pts.push([s.outLat, s.outLng]); }
     });
     try {
       const track = await trackForDay(id, day);

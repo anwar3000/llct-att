@@ -73,7 +73,7 @@ service cloud.firestore {
                       && request.resource.data.status == 'closed'
                       && request.resource.data.employeeId == resource.data.employeeId
                       && onlyChanges(['checkOut', 'checkOutServer', 'outLat', 'outLng', 'outAccuracy',
-                                      'outDistance', 'outOutside', 'durationMin', 'status', 'mocked', 'note']));
+                                      'outDistance', 'outOutside', 'durationMin', 'status', 'mocked', 'note', 'outTz']));
       allow delete: if isAdmin();
     }
 
@@ -89,7 +89,10 @@ service cloud.firestore {
     match /siteUpdates/{id} {
       allow read: if isActive();
       allow create: if isManagement() || createsOwn();
-      allow update, delete: if isManagement();
+      // The person who posted it can edit or delete it; so can admins/managers.
+      allow update: if isManagement() || (owns() && request.resource.data.employeeId == request.auth.uid
+                      && onlyChanges(['note', 'category', 'progress', 'photos', 'editedAt', 'editedBy']));
+      allow delete: if isManagement() || owns();
     }
 
     // ---------------------------------------------------------------- petty (accounts: admin only)

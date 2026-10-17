@@ -27,7 +27,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
   StreamSubscription<AttendanceSession?>? _openSub;
   AttendanceSession? _open;
 
-  static const _titles = ['Today', 'My Attendance', 'Site Update', 'Petty Cash'];
+  static const _titles = ['Today', 'My Attendance', 'Site Updates', 'Petty Cash'];
 
   @override
   void initState() {
@@ -80,6 +80,10 @@ class _EmployeeShellState extends State<EmployeeShell> {
             InfoRow(Icons.event_busy_outlined, 'Off days', me.offDayLabel),
             InfoRow(Icons.calendar_month_outlined, 'Monthly quota', '${me.monthlyOffQuota} days'),
             const SizedBox(height: 16),
+            const SizedBox(height: 4),
+            const Text('LLCT Attendance v$kAppVersion',
+                style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: () {
                 Navigator.pop(c);
@@ -99,7 +103,21 @@ class _EmployeeShellState extends State<EmployeeShell> {
     final me = widget.me;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_titles[_index]),
+        titleSpacing: 16,
+        title: Row(children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: Image.asset('assets/icon.png', width: 34, height: 34),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_titles[_index], maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(fmtDate(DateTime.now()),
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w500)),
+            ]),
+          ),
+        ]),
         actions: [
           if (_open != null)
             const Padding(
@@ -116,7 +134,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          HomeTab(me: me, open: _open),
+          HomeTab(me: me, open: _open, onNavigate: (i) => setState(() => _index = i)),
           HistoryTab(me: me),
           SiteUpdateTab(me: me, open: _open),
           PettyTab(me: me),
@@ -135,7 +153,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
           NavigationDestination(
               icon: Icon(Icons.construction_outlined),
               selectedIcon: Icon(Icons.construction),
-              label: 'Site Update'),
+              label: 'Updates'),
           NavigationDestination(
               icon: Icon(Icons.account_balance_wallet_outlined),
               selectedIcon: Icon(Icons.account_balance_wallet),

@@ -1,6 +1,6 @@
 import { store, isAdmin, alertLabel, resolveAlert, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates } from '../fb.js';
 import {
-  esc, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
+  esc, fromTz, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
 } from '../util.js';
 
@@ -38,6 +38,14 @@ export function mount(el, _params, { setHeader }) {
     const activeProjects = store.projects.filter((p) => p.status === 'active');
 
     body.innerHTML = `
+    <div class="quick">
+      <a href="#/workers" data-qa="checkin">${icon('check', 16)} Check in workers</a>
+      <a href="#/workers" data-qa="register">${icon('worker', 16)} Register worker</a>
+      <a href="#/sites" data-qa="site">${icon('site', 16)} Add site</a>
+      <a href="#/schedule">${icon('calendar', 16)} Schedule</a>
+      <a href="#/documents">${icon('idcard', 16)} ID documents</a>
+      <a href="#/reports">${icon('report', 16)} Reports</a>
+    </div>
     <div class="grid kpis">
       ${kpi('On duty now', `${count('onDuty')} / ${st.length}`, 'Tap for live map', 'pin', '#2E9E6A', 'map')}
       ${kpi('Present today', present, `${count('notIn')} not in · ${count('off')} off`, 'people', '#D98A1A', 'attendance')}
@@ -55,16 +63,16 @@ export function mount(el, _params, { setHeader }) {
       <div class="card-head">${icon('warn', 18, '#D64545')}<h2>Needs attention</h2></div>
       ${store.alerts.map((a) => `<div class="list-item">${avatar(a.employeeName, 32, '#E08E2B')}
         <div class="grow"><b>${esc(a.employeeName)}</b> — ${esc(alertLabel(a))}
-        <div class="small muted">${fmtDateTime(a.at)}${a.lat != null ? ` · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lng}#map=17/${a.lat}/${a.lng}">GPS ${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}</a>` : ''}</div></div>
+        <div class="small muted">${fmtDateTime(a.atLocal)}${a.lat != null ? ` · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lng}#map=17/${a.lat}/${a.lng}">GPS ${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}</a>` : ''}</div></div>
         ${pill(a.type === 'gps_off' ? 'GPS off' : 'Left site', 'amber')}
         <button class="btn sm ghost" data-resolve="${a.id}">Resolve</button></div>`).join('')}
       ${forgot.map((s) => `<div class="list-item">${avatar(s.employeeName, 32, '#D64545')}
         <div class="grow"><b>${esc(s.employeeName)}</b> never checked out
-        <div class="small muted">${esc(s.siteName)} · in ${fmtDateTime(s.checkIn)}</div></div>
+        <div class="small muted">${esc(s.siteName)} · in ${fmtDateTime(s.inLocal)}</div></div>
         <button class="btn sm ghost" data-close="${s.id}">Close session</button></div>`).join('')}
       ${flagged.map((s) => `<div class="list-item">${avatar(s.employeeName, 32, '#E08E2B')}
         <div class="grow"><b>${esc(s.employeeName)}</b> · ${esc(s.siteName)}
-        <div class="small muted">${fmtTime(s.checkIn)} – ${s.checkOut ? fmtTime(s.checkOut) : 'now'}</div></div>
+        <div class="small muted">${fmtTime(s.inLocal)} – ${s.checkOut ? fmtTime(s.outLocal) : 'now'}</div></div>
         ${s.inOutside ? pill(`In ${Math.round(s.inDistance || 0)} m away`, 'amber') : ''}
         ${s.outOutside ? pill(`Out ${Math.round(s.outDistance || 0)} m away`, 'amber') : ''}
         ${s.mocked ? pill('Fake GPS', 'red') : ''}</div>`).join('')}
@@ -123,8 +131,8 @@ export function mount(el, _params, { setHeader }) {
   }
 
   function statusLine(s) {
-    if (s.state === 'onDuty') return `${s.open.siteName} · since ${fmtTime(s.open.checkIn)}${s.user.lastLocation ? ` · GPS ${timeAgo(s.user.lastLocation.at)}` : ''}`;
-    if (s.state === 'done') return `${s.sessions.length} site${s.sessions.length === 1 ? '' : 's'} · out ${fmtTime(s.sessions[s.sessions.length - 1].checkOut)}`;
+    if (s.state === 'onDuty') return `${s.open.siteName} · since ${fmtTime(s.open.inLocal)}${s.user.lastLocation ? ` · GPS ${timeAgo(s.user.lastLocation.at)}` : ''}`;
+    if (s.state === 'done') return `${s.sessions.length} site${s.sessions.length === 1 ? '' : 's'} · out ${fmtTime(s.sessions[s.sessions.length - 1].outLocal)}`;
     if (s.state === 'off') return 'Scheduled off';
     return s.user.designation || 'No check-in yet';
   }
@@ -147,6 +155,14 @@ export function mount(el, _params, { setHeader }) {
   }
 
   function wire() {
+    body.querySelectorAll('[data-qa]').forEach((a) => {
+      a.onclick = async (e) => {
+        e.preventDefault();
+        if (a.dataset.qa === 'checkin') (await import('./workers.js')).checkInWorkers();
+        if (a.dataset.qa === 'register') (await import('./workers.js')).registerWorker();
+        if (a.dataset.qa === 'site') (await import('./sites.js')).editSite(null);
+      };
+    });
     body.querySelectorAll('[data-nav]').forEach((k) => { k.onclick = () => { location.hash = `#/${k.dataset.nav}`; }; });
     body.querySelectorAll('[data-off-yes]').forEach((b) => { b.onclick = () => reviewOff(b.dataset.offYes, true).then(() => toast('Off day approved')); });
     body.querySelectorAll('[data-off-no]').forEach((b) => { b.onclick = () => reviewOff(b.dataset.offNo, false).then(() => toast('Off day rejected')); });
@@ -163,10 +179,10 @@ export function mount(el, _params, { setHeader }) {
       b.onclick = async () => {
         const s = store.open.find((x) => x.id === b.dataset.close);
         if (!s) return;
-        const t = await promptBox('Close session', `Check-out time on ${fmtDate(s.checkIn)} (HH:MM, 24h)`, { ok: 'Close', value: '18:00', type: 'time' });
+        const t = await promptBox('Close session', `Check-out time on ${fmtDate(s.inLocal)} (HH:MM, 24h)`, { ok: 'Close', value: '18:00', type: 'time' });
         if (!t) return;
         const [h, m] = t.split(':').map(Number);
-        const at = new Date(s.checkIn.getFullYear(), s.checkIn.getMonth(), s.checkIn.getDate(), h, m);
+        const at = fromTz(new Date(s.inLocal.getFullYear(), s.inLocal.getMonth(), s.inLocal.getDate(), h, m), s.tz);
         if (at <= s.checkIn) { toast('Check-out must be after check-in', true); return; }
         try { await closeSession(s, at); toast('Session closed'); } catch (e) { toast(friendlyError(e), true); }
       };

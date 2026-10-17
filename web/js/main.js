@@ -73,6 +73,8 @@ function renderShell() {
   <div class="shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand"><img class="mark" src="img/icon-192.png" alt="LLCT"><div><b>LLCT Attendance</b><span>Management</span></div></div>
+      <div class="gsearch"><span class="gs-ico">${icon('search', 15)}</span><input id="gs" placeholder="Search…   ( / )" title="Search people, workers, sites, projects, pages" autocomplete="off"><kbd>/</kbd>
+        <div class="gs-list" id="gs-list"></div></div>
       <nav class="nav" id="nav"></nav>
       <div class="me">${avatar(me.name, 32)}<div class="who"><b>${esc(me.name)}</b><span class="small">${ROLE_LABEL[me.role] || ''}</span></div>
         <button id="logout" title="Sign out">${icon('logout')}</button></div>
@@ -88,11 +90,54 @@ function renderShell() {
   </div>`;
   document.getElementById('logout').onclick = () => logout();
   document.getElementById('menu').onclick = () => document.getElementById('sidebar').classList.toggle('open');
+  wireSearch();
   renderNav();
   if (navSub) navSub();
   navSub = store.on(renderNav);
   route();
 }
+
+// ------------------------------------------------------------------ global search
+function wireSearch() {
+  const input = document.getElementById('gs');
+  const list = document.getElementById('gs-list');
+  let hits = [], sel = 0;
+  const go = (h) => { if (!h) return; location.hash = h.href; input.value = ''; list.classList.remove('open'); input.blur(); };
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { list.classList.remove('open'); return; }
+    const has = (...v) => v.join(' ').toLowerCase().includes(q);
+    hits = [
+      ...store.users.filter((u) => has(u.name, u.loginId, u.phone, u.designation)).map((u) => ({ t: u.name, s: `${ROLE_LABEL[u.role] || 'Staff'} · ${u.loginId}`, href: `#/employees/${u.id}`, k: 'Staff' })),
+      ...store.workers.filter((w) => has(w.name, w.phone, w.company, w.trade, w.code, store.info(w.id)?.passportNo, store.info(w.id)?.eidNo))
+        .map((w) => ({ t: w.name, s: [w.company, w.trade].filter(Boolean).join(' · ') || 'External worker', href: `#/workers/${w.id}`, k: 'Worker' })),
+      ...store.sites.filter((x) => has(x.name, x.address)).map((x) => ({ t: x.name, s: x.address || 'Site', href: `#/sites/${x.id}`, k: 'Site' })),
+      ...store.projects.filter((x) => has(x.name, x.code, x.client)).map((x) => ({ t: x.name, s: x.client || 'Project', href: `#/projects/${x.id}`, k: 'Project' })),
+      ...NAV.filter((n) => !n.sep && (!n.adminOnly || isAdmin()) && has(n.label)).map((n) => ({ t: n.label, s: 'Page', href: `#/${n.path}`, k: 'Page' })),
+    ].slice(0, 12);
+    sel = 0;
+    list.innerHTML = hits.length ? hits.map((h, i) => `<a href="${h.href}" class="${i === sel ? 'on' : ''}" data-i="${i}"><span class="k">${h.k}</span><b>${esc(h.t)}</b><span class="s">${esc(h.s)}</span></a>`).join('')
+      : '<div class="none">No matches</div>';
+    list.classList.add('open');
+    list.querySelectorAll('a').forEach((a) => { a.onmousedown = (e) => { e.preventDefault(); go(hits[Number(a.dataset.i)]); }; });
+  };
+  input.oninput = draw;
+  input.onfocus = draw;
+  input.onblur = () => setTimeout(() => list.classList.remove('open'), 150);
+  input.onkeydown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % Math.max(1, hits.length);
+      list.querySelectorAll('a').forEach((a, i) => a.classList.toggle('on', i === sel));
+    } else if (e.key === 'Enter') { e.preventDefault(); go(hits[sel]); } else if (e.key === 'Escape') { input.value = ''; draw(); input.blur(); }
+  };
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) {
+    const i = document.getElementById('gs');
+    if (i) { e.preventDefault(); document.getElementById('sidebar')?.classList.add('open'); i.focus(); }
+  }
+});
 
 function currentPath() {
   const h = location.hash.replace(/^#\/?/, '');

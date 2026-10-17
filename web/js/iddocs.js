@@ -133,31 +133,31 @@ function b64ToBlob(b64, mime) {
 export function docsPanel(el, owner) {
   const info = store.info(owner.id) || {};
   el.innerHTML = `
-    <div class="idgrid">
-      ${DOC_KINDS.map((k) => `<div class="idcard" data-kind="${k.k}">
-        <div class="idhead"><b>${esc(k.label)}</b><span data-exp="${k.k}">${k.exp ? expiryPill(info[k.exp]) : ''}</span></div>
-        ${k.num ? `<div class="idfields">
-          <label class="f"><span>Number</span><input data-field="${k.num}" value="${esc(info[k.num] || '')}"></label>
-          <label class="f"><span>Expiry</span><input type="date" data-field="${k.exp}" value="${esc(info[k.exp] || '')}"></label></div>` : ''}
+    <div class="idrows">
+      <div class="idrow idrow-head"><span>Document</span><span>Number</span><span>Expiry</span><span>Status</span><span>Copies</span><span></span></div>
+      ${DOC_KINDS.map((k) => `<div class="idrow" data-kind="${k.k}">
+        <span class="idlbl">${esc(k.label)}</span>
+        ${k.num ? `<input data-field="${k.num}" value="${esc(info[k.num] || '')}" placeholder="Number" aria-label="${esc(k.label)} number">
+          <input type="date" data-field="${k.exp}" value="${esc(info[k.exp] || '')}" aria-label="${esc(k.label)} expiry">
+          <span data-exp="${k.k}">${expiryPill(info[k.exp])}</span>` : '<span></span><span></span><span></span>'}
         <div class="idfiles" data-files="${k.k}"></div>
-        <label class="btn sm ghost upl">${icon('plus', 14)} Upload copy<input type="file" multiple accept="image/*,application/pdf" data-up="${k.k}" hidden></label>
+        <label class="btn sm ghost upl" title="Upload a photo or PDF">${icon('plus', 14)} Upload<input type="file" multiple accept="image/*,application/pdf" data-up="${k.k}" hidden></label>
       </div>`).join('')}
     </div>
-    <div class="fields" style="margin-top:12px">
-      <label class="f"><span>Nationality</span><input data-field="nationality" value="${esc(info.nationality || '')}"></label>
-      <label class="f"><span>Notes</span><input data-field="idNotes" value="${esc(info.idNotes || '')}"></label>
+    <div class="row" style="margin-top:12px;gap:12px;align-items:flex-end">
+      <label class="f" style="margin:0;flex:1;min-width:160px"><span>Nationality</span><input data-field="nationality" value="${esc(info.nationality || '')}"></label>
+      <label class="f" style="margin:0;flex:2;min-width:200px"><span>Notes</span><input data-field="idNotes" value="${esc(info.idNotes || '')}"></label>
+      <button class="btn" data-save-info>${icon('check', 16)} Save ID details</button>
     </div>
-    <div class="row" style="margin-top:12px"><span class="small muted">Copies upload straight away. Numbers and dates are saved with the button.</span>
-      <span class="spacer"></span><button class="btn" data-save-info>${icon('check', 16)} Save ID details</button></div>`;
+    <div class="small muted" style="margin-top:6px">Copies upload straight away. Numbers and dates are saved with the button.</div>`;
 
   const drawFiles = () => {
     el.querySelectorAll('[data-files]').forEach((box) => {
       const files = store.files(owner.id).filter((f) => f.kind === box.dataset.files);
-      box.innerHTML = files.length ? files.map((f) => `<div class="idfile" data-fid="${f.id}">
-        <div class="thumb">${isImg(f) ? '<span class="muted small">…</span>' : '<b>PDF</b>'}</div>
-        <div class="grow"><div class="nm">${esc(f.name)}</div><div class="small muted">${sizeTxt(f.size)}${f.uploadedAt ? ` · ${fmtDate(f.uploadedAt)}` : ''}</div></div>
-        <button class="btn sm ghost icon" data-del="${f.id}" title="Delete">${icon('trash', 14)}</button></div>`).join('')
-        : '<div class="small muted" style="padding:6px 0">No copy uploaded</div>';
+      box.innerHTML = files.length ? files.map((f) => `<div class="idfile" data-fid="${f.id}" title="${esc(f.name)} · ${sizeTxt(f.size)} — click to view">
+        <div class="thumb">${isImg(f) ? '' : '<b>PDF</b>'}</div>
+        <button class="x" data-del="${f.id}" title="Delete">${icon('close', 11)}</button></div>`).join('')
+        : '<span class="small muted">—</span>';
       files.filter(isImg).forEach(async (f) => {
         try {
           const b64 = await fileData(f);

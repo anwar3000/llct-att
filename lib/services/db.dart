@@ -126,6 +126,7 @@ class Db {
         'distance': distance,
         'date': dateKey(DateTime.now()),
         'at': FieldValue.serverTimestamp(),
+        'tz': DateTime.now().timeZoneOffset.inMinutes,
         'resolved': false,
       });
 
@@ -242,6 +243,9 @@ class Db {
       'month': monthKey(now),
       'checkIn': Timestamp.fromDate(now),
       'checkInServer': FieldValue.serverTimestamp(),
+      // UTC offset of the phone at check-in → reports show the site's local time.
+      'tz': now.timeZoneOffset.inMinutes,
+      'tzName': now.timeZoneName,
       'inLat': lat,
       'inLng': lng,
       'inAccuracy': accuracy,
@@ -268,6 +272,7 @@ class Db {
     await attendance.doc(session.id).update({
       'checkOut': Timestamp.fromDate(now),
       'checkOutServer': FieldValue.serverTimestamp(),
+      'outTz': now.timeZoneOffset.inMinutes,
       'outLat': lat,
       'outLng': lng,
       'outAccuracy': accuracy,
@@ -361,6 +366,7 @@ class Db {
           'date': dateKey(start),
           'month': monthKey(start),
           'checkIn': Timestamp.fromDate(start),
+          'tz': start.timeZoneOffset.inMinutes,
           'open': true,
           'createdAt': FieldValue.serverTimestamp(),
         });
@@ -466,11 +472,30 @@ class Db {
       'lng': lng,
       'date': dateKey(now),
       'month': monthKey(now),
+      'tz': now.timeZoneOffset.inMinutes,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
   static Future<void> deleteSiteUpdate(String id) => siteUpdates.doc(id).delete();
+
+  /// Edit an update (by the person who posted it, or management).
+  static Future<void> editSiteUpdate(
+    String id, {
+    required String category,
+    required String note,
+    required int? progress,
+    required List<String> photos,
+    required String editedBy,
+  }) =>
+      siteUpdates.doc(id).update({
+        'category': category,
+        'note': note,
+        'progress': progress,
+        'photos': photos,
+        'editedAt': FieldValue.serverTimestamp(),
+        'editedBy': editedBy,
+      });
 
   // ---------------------------------------------------------------- petty
   static Stream<List<PettyTxn>> pettyForEmployee(String uid) => petty
@@ -520,6 +545,7 @@ class Db {
       'createdByName': createdByName,
       'date': dateKey(now),
       'month': monthKey(now),
+      'tz': now.timeZoneOffset.inMinutes,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
