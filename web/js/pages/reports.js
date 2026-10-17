@@ -1,14 +1,15 @@
-import { store, isAdmin } from '../fb.js';
+import { store, isAdmin, saveSettings } from '../fb.js';
 import { esc, icon, dateKey, startOfMonth, toast, friendlyError, monthKey, parseKey, modal } from '../util.js';
 import {
   monthlySummaryReport, dailyMatrixReport, attendanceLogReport, pettyReport, updatesReport, projectReport, alertsReport,
-  projectsOverviewReport, downloadReport, filterReport, keywordTerms, workerAttendanceReport, workerRegisterReport, workforceBySiteReport, siteWorkforceReport,
+  projectsOverviewReport, downloadReport, filterReport, keywordTerms, workerAttendanceReport, workerRegisterReport, workforceBySiteReport, siteWorkforceReport, workerPayReport,
 } from '../report-lib.js';
 
 const REPORTS = [
   { id: 'summary', name: 'Monthly attendance summary', desc: 'One row per employee: days worked, off days, absences, total hours, average start time, flagged check-ins.', inputs: ['month'], tags: 'attendance hours payroll monthly employee' },
   { id: 'matrix', name: 'Daily attendance register', desc: 'Payroll-style grid — employees × days of the month with hours, OFF and A (absent).', inputs: ['month'], tags: 'attendance register payroll muster daily absent off' },
   { id: 'log', name: 'Attendance log (detailed)', desc: 'Every check-in / check-out with times, duration, GPS distance and location coordinates.', inputs: ['range', 'employee', 'site'], tags: 'attendance check in out gps location log detailed' },
+  { id: 'workerpay', name: 'External workers — days & pay', desc: 'Per worker for any period: days worked, full and short days (below the minimum hours), total hours — plus daily rate and amount for admins. Includes an attendance sheet with short days marked.', inputs: ['range', 'company'], tags: 'external workers labour days pay salary rate invoice timesheet short minimum hours' },
   { id: 'workforce', name: 'Workforce by site (staff + external)', desc: 'Per site: staff and external worker headcount and man-hours, consolidated, plus everyone’s days and hours.', inputs: ['range'], tags: 'workforce manpower man-hours site staff external labour consolidated' },
   { id: 'siteworkforce', name: 'Site workforce', desc: 'Everyone who worked at one site — staff and external workers — with days, hours and a daily log.', inputs: ['range', 'site1'], tags: 'site workforce manpower staff external labour' },
   { id: 'workers', name: 'External workers attendance', desc: 'Per worker: days and hours on site, plus every entry with date, site, time in/out and the employee who added them.', inputs: ['range', 'worker', 'site'], tags: 'external workers labour manpower hours timesheet' },
@@ -29,6 +30,12 @@ export function mount(el, _p, { setHeader }) {
   const visible = () => REPORTS.filter((r) => !r.admin || isAdmin());
 
   el.innerHTML = `
+    ${isAdmin() ? `<div class="card card-pad row" style="margin-bottom:14px;gap:12px">
+      <b>Minimum working hours per day</b>
+      <input id="min-h" type="number" min="1" max="24" step="0.5" value="${store.settings.minDailyHours}" style="width:90px">
+      <button class="btn sm" id="min-save">Save</button>
+      <span class="small muted">Days below this are marked as <b style="color:#b23535">short</b> on attendance sheets and reports (staff and external workers).</span>
+    </div>` : ''}
     <div class="card card-pad">
       <div class="searchbar">${icon('search', 18)}<input id="rq" placeholder="Search reports by keywords — employee, site, project, category, note…  (e.g. “Rahul fuel”, “Marina”, “absent”)"></div>
       <div class="small muted" style="margin-top:8px">All words must match (any column). The keywords filter the rows of whichever report you preview or download. Leave empty for the full report.</div>
@@ -46,6 +53,7 @@ export function mount(el, _p, { setHeader }) {
         ${r.inputs.includes('range') ? `<label class="f"><span>From</span><input type="date" data-k="from" value="${defaults.from}"></label>
           <label class="f"><span>To</span><input type="date" data-k="to" value="${defaults.to}"></label>` : ''}
         ${r.inputs.includes('employee') ? `<label class="f"><span>Employee</span><select data-k="employee"><option value="">All</option>${store.employees.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>` : ''}
+        ${r.inputs.includes('company') ? `<label class="f"><span>Company / agency</span><select data-k="company"><option value="">All</option>${[...new Set(store.workers.map((w) => w.company).filter(Boolean))].sort().map((c) => `<option>${esc(c)}</option>`).join('')}</select></label>` : ''}
         ${r.inputs.includes('site1') ? `<label class="f"><span>Site</span><select data-k="site1">${store.sites.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">No sites</option>'}</select></label>` : ''}
         ${r.inputs.includes('worker') ? `<label class="f"><span>Worker</span><select data-k="worker"><option value="">All</option>${store.workers.map((w) => `<option value="${w.id}">${esc(w.name)}${w.company ? ` (${esc(w.company)})` : ''}</option>`).join('')}</select></label>` : ''}
         ${r.inputs.includes('site') ? `<label class="f"><span>Site</span><select data-k="site"><option value="">All</option>${store.sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>` : ''}
@@ -60,6 +68,11 @@ export function mount(el, _p, { setHeader }) {
       </div>
     </div>`).join('');
 
+  el.querySelector('#min-save')?.addEventListener('click', async () => {
+    const v = Number(el.querySelector('#min-h').value);
+    if (!(v > 0 && v <= 24)) { toast('Enter hours between 1 and 24', true); return; }
+    try { await saveSettings({ minDailyHours: v }); toast(`Minimum set to ${v} h per day`); } catch (e) { toast(friendlyError(e), true); }
+  });
   const rq = el.querySelector('#rq');
   rq.oninput = () => { query = rq.value; };
 
@@ -70,6 +83,7 @@ export function mount(el, _p, { setHeader }) {
       if (id === 'summary') return monthlySummaryReport(parseKey(`${val('month')}-01`));
       if (id === 'matrix') return dailyMatrixReport(parseKey(`${val('month')}-01`));
       if (id === 'log') return attendanceLogReport(val('from'), val('to'), val('employee') || null, val('site') || null);
+      if (id === 'workerpay') return workerPayReport(val('from'), val('to'), val('company'));
       if (id === 'workforce') return workforceBySiteReport(val('from'), val('to'));
       if (id === 'siteworkforce') { const st = store.site(val('site1')); if (!st) throw new Error('Choose a site.'); return siteWorkforceReport(st, val('from'), val('to')); }
       if (id === 'workers') return workerAttendanceReport(val('from'), val('to'), val('worker') || null, val('site') || null);

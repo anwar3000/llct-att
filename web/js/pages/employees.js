@@ -1,6 +1,6 @@
 import {
   store, isAdmin, staffStatuses, createStaff, updateUser, sessionsInRange, offDaysInRange, trackForDay,
-  sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL, deleteEmployee,
+  sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL, deleteEmployee, isShortDay, minDayMins,
 } from '../fb.js';
 import {
   esc, fromTz, icon, avatar, pill, cap, fmtMins, fmtTime, fmtDate, fmtDay, fmtDateTime, fmtMoney, fmtDist, fmtMonth, timeAgo,
@@ -311,10 +311,10 @@ function detail(root, id, { setHeader }) {
     const lead = (sum.days[0].day.getDay() + 6) % 7;
     return `<div class="cal">${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => `<div class="h">${d}</div>`).join('')}
       ${'<div></div>'.repeat(lead)}
-      ${sum.days.map((d) => `<div data-day="${d.date}" title="${d.kind}${d.minutes ? ` · ${fmtMins(d.minutes)}` : ''}" style="cursor:pointer;background:${color[d.kind]}${d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '55' : '22'};color:${d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '#8a96a0' : color[d.kind]};${d.date === day ? 'outline:2px solid #1c2a33' : ''}">
-        ${d.day.getDate()}${d.minutes ? `<div style="font-size:9.5px;font-weight:500">${(d.minutes / 60).toFixed(1)}h</div>` : ''}</div>`).join('')}</div>
+      ${sum.days.map((d) => { const sh = d.sessions.length && isShortDay(d.date, d.minutes, d.sessions.some((x) => !x.checkOut)); return `<div data-day="${d.date}" title="${sh ? `SHORT DAY — ${fmtMins(d.minutes)} (min ${minDayMins() / 60} h)` : `${d.kind}${d.minutes ? ` · ${fmtMins(d.minutes)}` : ''}`}" style="cursor:pointer;background:${sh ? '#D6454522' : `${color[d.kind]}${d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '55' : '22'}`};color:${sh ? '#b23535' : d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '#8a96a0' : color[d.kind]};${sh ? 'box-shadow:inset 0 0 0 2px #D64545;' : ''}${d.date === day ? 'outline:2px solid #1c2a33' : ''}">
+        ${d.day.getDate()}${d.minutes ? `<div style="font-size:9.5px;font-weight:500">${(d.minutes / 60).toFixed(1)}h</div>` : ''}</div>`; }).join('')}</div>
       <div class="row small muted" style="margin-top:10px;gap:14px">
-        <span style="color:#2E9E6A">■ Present</span><span style="color:#E08E2B">■ Off</span><span style="color:#D64545">■ Absent</span><span style="color:#3A7BD5">■ Today</span></div>`;
+        <span style="color:#2E9E6A">■ Present</span><span style="color:#E08E2B">■ Off</span><span style="color:#D64545">■ Absent</span><span style="color:#3A7BD5">■ Today</span><span style="color:#b23535">▣ Short day (&lt; ${minDayMins() / 60} h)</span></div>`;
   }
 
   load();

@@ -2,7 +2,7 @@
 // per-worker attendance, and ID downloads for customers.
 import {
   store, saveWorker, deleteWorker, saveIdInfo, uploadIdFile, releaseWorkerLock, workerEntriesInRange,
-  closeWorkerEntry, deleteWorkerEntry, isAdmin, addWorkersToSession,
+  closeWorkerEntry, deleteWorkerEntry, isAdmin, addWorkersToSession, saveWorkerRate, isShortDay, minDayMins, entryMinutes,
 } from '../fb.js';
 import {
   esc, fromTz, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtMonth, dateKey, monthKey, startOfMonth, endOfMonth,
@@ -69,7 +69,7 @@ function list(el, { setHeader }) {
     </div>
     <div class="card"><div class="table-wrap"><table class="t">
       <tr><th style="width:34px"><input type="checkbox" id="w-all" ${rows.length && rows.every((w) => sel.has(w.id)) ? 'checked' : ''}></th>
-        <th>Worker</th><th>Company</th><th>Trade</th><th>Phone</th><th>Passport / Emirates ID</th><th>Copies</th><th>Today</th></tr>
+        <th>Worker</th><th>Company</th><th>Trade</th><th>Phone</th><th>Passport / Emirates ID</th><th>Copies</th>${isAdmin() ? '<th class="num">Daily rate</th>' : ''}<th>Today</th></tr>
       ${rows.length ? rows.map((w) => {
         const lk = store.workerLock(w.id);
         return `<tr class="click" data-id="${w.id}">
@@ -78,8 +78,9 @@ function list(el, { setHeader }) {
         <td>${esc(w.company)}</td><td>${esc(w.trade)}</td><td class="nowrap">${esc(w.phone)}</td>
         <td class="small mono">${(() => { const i = store.info(w.id) || {}; return `${esc(i.passportNo || '—')}<br>${esc(i.eidNo || '—')}`; })()}</td>
         <td>${docsSummaryHtml(w.id)}</td>
+        ${isAdmin() ? `<td class="num nowrap">${store.rates[w.id] ? `AED ${store.rates[w.id]}` : '<span class="muted">—</span>'}</td>` : ''}
         <td>${lk ? `${pill('On site', 'green', true)}<div class="small muted">${esc(lk.siteName)}</div>` : '<span class="muted">—</span>'}</td></tr>`;
-      }).join('') : `<tr><td colspan="8"><div class="empty">${store.workers.length ? 'No matching workers' : 'No external workers yet — click “Register worker”.'}</div></td></tr>`}
+      }).join('') : `<tr><td colspan="9"><div class="empty">${store.workers.length ? 'No matching workers' : 'No external workers yet — click “Register worker”.'}</div></td></tr>`}
     </table></div></div>`;
 
     const qi = el.querySelector('#w-q');
@@ -186,6 +187,7 @@ export function registerWorker(w = null) {
       <label class="f"><span>Trade</span><input name="trade" value="${esc(w?.trade)}" list="w-trades" placeholder="Helper, Mason, Electrician…"></label>
       <label class="f"><span>Worker code (optional)</span><input name="code" value="${esc(w?.code)}"></label>
       <label class="f"><span>Nationality</span><input name="nationality" value="${esc(i.nationality || w?.nationality || '')}"></label>
+      ${isAdmin() ? `<label class="f"><span>Daily rate (AED) — admin only</span><input name="rate" type="number" min="0" step="0.01" value="${w ? (store.rates[w.id] ?? '') : ''}" placeholder="e.g. 120"></label>` : ''}
       ${editing ? `<label class="f row full" style="gap:8px"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Active — can be selected at check-in</label>` : ''}
       <div class="full reg-docs-head"><h3>ID documents <span class="muted small" style="font-weight:500">— optional, can be added later</span></h3></div>
       ${DOC_KINDS.filter((k) => k.num).map((k) => `<div class="full reg-doc">
@@ -226,6 +228,7 @@ export function registerWorker(w = null) {
         try {
           if (editing) data.active = f.active.checked;
           const id = await saveWorker(w?.id, data);
+          if (isAdmin() && f.rate && f.rate.value !== '' && Number(f.rate.value) !== (store.rates[id] ?? null)) await saveWorkerRate(id, Number(f.rate.value));
           await saveIdInfo(id, 'worker', { ...info, name: data.name });
           if (!editing) {
             for (const k of DOC_KINDS.filter((x) => x.num)) {
@@ -303,10 +306,16 @@ function detail(el, id, { setHeader }) {
     const list = entries || [];
     const mins = list.reduce((a, e) => a + Math.max(0, Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000)), 0);
     const days = new Set(list.map((e) => e.date)).size;
-    box.innerHTML = `<div class="row card-pad" style="gap:18px;padding-top:0"><span><b>${days}</b> days</span><span><b>${fmtMins(mins)}</b> total</span>
+    const dayTot = new Map();
+    list.forEach((e) => dayTot.set(e.date, (dayTot.get(e.date) || 0) + entryMinutes(e)));
+    const shortDays = [...dayTot].filter(([d, m]) => isShortDay(d, m, list.some((e) => e.date === d && e.open))).map(([d]) => d);
+    const rate = store.rates[id];
+    box.innerHTML = `<div class="row card-pad" style="gap:18px;padding-top:0"><span><b>${days}</b> days</span>
+      <span style="color:${shortDays.length ? '#b23535' : 'inherit'}"><b>${shortDays.length}</b> short (&lt; ${minDayMins() / 60} h)</span><span><b>${fmtMins(mins)}</b> total</span>
+      ${isAdmin() && rate ? `<span>Rate <b>AED ${rate}</b>/day · <b>AED ${Math.round(rate * days * 100) / 100}</b> this month</span>` : ''}
       <span><b>${new Set(list.map((e) => e.siteId)).size}</b> sites</span></div>
       <div class="table-wrap"><table class="t"><tr><th>Date</th><th>Site</th><th>Added by</th><th>In</th><th>Out</th><th class="num">Hours</th><th></th></tr>
-      ${list.length ? [...list].reverse().map((e) => `<tr><td class="nowrap">${fmtDay(e.inLocal)}</td><td><b>${esc(e.siteName)}</b></td>
+      ${list.length ? [...list].reverse().map((e) => `<tr class="${shortDays.includes(e.date) ? 'short-day' : ''}"><td class="nowrap">${fmtDay(e.inLocal)}${shortDays.includes(e.date) ? ` <span class="pill red" title="Day total ${fmtMins(dayTot.get(e.date))} — below ${minDayMins() / 60} h">Short day</span>` : ''}</td><td><b>${esc(e.siteName)}</b></td>
         <td>${esc(e.employeeName)}</td><td>${fmtTime(e.inLocal)}</td><td>${e.checkOut ? fmtTime(e.outLocal) : pill('On site', 'green', true)}</td>
         <td class="num"><b>${fmtMins(Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000))}</b></td>
         <td class="right nowrap">${e.open ? `<button class="btn sm ghost" data-close="${e.id}">End</button>` : ''}

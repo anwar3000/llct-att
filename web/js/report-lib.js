@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, alertsInRange, workerEntriesInRange, workerEntriesForSites, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, alertsInRange, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   fmtMoney, tzLabel, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -18,22 +18,23 @@ export async function monthlySummaryReport(month, onlyIds = null) {
   const users = store.employees.filter((u) => (onlyIds ? onlyIds.includes(u.id) : u.active || sessions.some((s) => s.employeeId === u.id)));
   const rows = users.map((u) => {
     const s = employeeSummary(u, sessions, offs, from, to);
-    return [u.name, u.loginId, u.designation, s.workedDays, s.offDays, s.absentDays, fmtMins(s.minutes), hoursDec(s.minutes),
+    const short = s.days.filter((d) => d.sessions.length && isShortDay(d.date, d.minutes, d.sessions.some((x) => !x.checkOut))).length;
+    return [u.name, u.loginId, u.designation, s.workedDays, short, s.offDays, s.absentDays, fmtMins(s.minutes), hoursDec(s.minutes),
       fmtMins(s.avgMinutes), s.visits, s.sites.join(', '), s.flagged, s.avgStart,
       u.weeklyOffDays.length ? u.weeklyOffDays.map((w) => WEEKDAYS[w]).join('/') : 'Flexible'];
   });
-  const tot = rows.reduce((a, r) => { a[0] += r[3]; a[1] += r[4]; a[2] += r[5]; a[3] += r[7]; a[4] += r[9]; a[5] += r[11]; return a; }, [0, 0, 0, 0, 0, 0]);
+  const tot = rows.reduce((a, r) => { a[0] += r[3]; a[6] += r[4]; a[1] += r[5]; a[2] += r[6]; a[3] += r[8]; a[4] += r[10]; a[5] += r[12]; return a; }, [0, 0, 0, 0, 0, 0, 0]);
   return {
     title: `Monthly attendance summary — ${fmtMonth(month)}`,
     subtitle: `${users.length} employees · period ${from} to ${to}`,
     filename: `attendance-summary-${from.slice(0, 7)}`,
     sheets: [{
       name: 'Summary',
-      columns: ['Employee', 'Login ID', 'Designation', 'Days worked', 'Off days', 'Absent', 'Total time', 'Hours (decimal)',
+      columns: ['Employee', 'Login ID', 'Designation', 'Days worked', `Short days (<${minDayMins() / 60}h)`, 'Off days', 'Absent', 'Total time', 'Hours (decimal)',
         'Avg / day', 'Site visits', 'Sites', 'Flagged', 'Avg start', 'Weekly off'],
-      widths: [22, 12, 16, 11, 9, 8, 11, 13, 10, 10, 30, 8, 10, 12],
+      widths: [22, 12, 16, 11, 13, 9, 8, 11, 13, 10, 10, 30, 8, 10, 12],
       rows,
-      totals: ['TOTAL', '', '', tot[0], tot[1], tot[2], fmtMins(tot[3] * 60), Math.round(tot[3] * 100) / 100, '', tot[4], '', tot[5], '', ''],
+      totals: ['TOTAL', '', '', tot[0], tot[6], tot[1], tot[2], fmtMins(tot[3] * 60), Math.round(tot[3] * 100) / 100, '', tot[4], '', tot[5], '', ''],
     }],
   };
 }
@@ -45,7 +46,8 @@ export async function dailyMatrixReport(month) {
   const users = store.employees.filter((u) => u.active || sessions.some((s) => s.employeeId === u.id));
   const rows = users.map((u) => {
     const days = employeeDays(u, sessions, offs, from, to);
-    const cells = days.map((d) => (d.kind === 'worked' || (d.kind === 'today' && d.minutes) ? hoursDec(d.minutes)
+    const cells = days.map((d) => (d.kind === 'worked' || (d.kind === 'today' && d.minutes)
+      ? (isShortDay(d.date, d.minutes, d.sessions.some((x) => !x.checkOut)) ? `${hoursDec(d.minutes)}*` : hoursDec(d.minutes))
       : d.kind === 'off' ? 'OFF' : d.kind === 'absent' ? 'A' : ''));
     const worked = days.filter((d) => d.sessions.length).length;
     const mins = days.reduce((a, d) => a + d.minutes, 0);
@@ -59,7 +61,7 @@ export async function dailyMatrixReport(month) {
   cols.push('Worked', 'Off', 'Absent', 'Hours');
   return {
     title: `Daily attendance register — ${fmtMonth(month)}`,
-    subtitle: 'Numbers are hours worked · OFF = off day · A = absent',
+    subtitle: `Numbers are hours worked · * = short day (under ${minDayMins() / 60} h) · OFF = off day · A = absent`,
     filename: `attendance-register-${from.slice(0, 7)}`,
     orientation: 'landscape',
     pdfFont: 6,
@@ -378,28 +380,100 @@ export async function workerRegisterReport(month) {
   const ids = [...new Set([...store.workers.filter((w) => w.active).map((w) => w.id), ...list.map((e) => e.workerId)])];
   const rows = ids.map((id) => {
     const w = workerInfo(id, list.find((e) => e.workerId === id));
-    let days = 0, mins = 0;
+    let days = 0, mins = 0, short = 0;
     const cells = [];
     for (let i = 1; i <= n; i++) {
-      const m = dayMins.get(`${id}|${dateKey(new Date(month.getFullYear(), month.getMonth(), i))}`) || 0;
-      if (m) { days++; mins += m; }
-      cells.push(m ? hoursDec(m) : '');
+      const dk = dateKey(new Date(month.getFullYear(), month.getMonth(), i));
+      const m = dayMins.get(`${id}|${dk}`) || 0;
+      const sh = isShortDay(dk, m, list.some((e) => e.workerId === id && e.date === dk && e.open));
+      if (m) { days++; mins += m; if (sh) short++; }
+      cells.push(m ? (sh ? `${hoursDec(m)}*` : hoursDec(m)) : '');
     }
-    return [w.name, w.company, ...cells, days, hoursDec(mins)];
+    return [w.name, w.company, ...cells, days, short, hoursDec(mins)];
   }).sort((a, b) => a[0].localeCompare(b[0]));
   const cols = ['Worker', 'Company'];
   for (let i = 1; i <= n; i++) {
     const d = new Date(month.getFullYear(), month.getMonth(), i);
     cols.push(`${i} ${WEEKDAYS[d.getDay() === 0 ? 7 : d.getDay()][0]}`);
   }
-  cols.push('Days', 'Hours');
+  cols.push('Days', 'Short', 'Hours');
   return {
     title: `External workers register — ${fmtMonth(month)}`,
-    subtitle: 'Numbers are hours on site each day',
+    subtitle: `Numbers are hours on site each day · * = short day (under ${minDayMins() / 60} h)`,
     filename: `workers-register-${from.slice(0, 7)}`,
     orientation: 'landscape',
     pdfFont: 6,
-    sheets: [{ name: 'Register', columns: cols, widths: [22, 16, ...Array(n).fill(5), 6, 8], rows }],
+    sheets: [{ name: 'Register', columns: cols, widths: [22, 16, ...Array(n).fill(5), 6, 6, 8], rows }],
+  };
+}
+
+// ================================================================== external workers: days, short days & pay
+/**
+ * Per worker for a period: days worked, full / short days (minimum hours setting), hours,
+ * plus daily rate and amount for admins. Includes a day-by-day attendance sheet with short days marked.
+ */
+export async function workerPayReport(from, to, onlyCompany = '') {
+  const all = await workerEntriesInRange(from, to);
+  const list = all.filter((e) => !onlyCompany || workerInfo(e.workerId, e).company === onlyCompany);
+  const dayMins = workerDayMinutes(list);
+  const minM = minDayMins();
+  const admin = isAdmin();
+  const ids = [...new Set(list.map((e) => e.workerId))];
+  const dates = [];
+  for (let d = parseKey(from); dateKey(d) <= to; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) dates.push(dateKey(d));
+  const open = (id, dk) => list.some((e) => e.workerId === id && e.date === dk && e.open);
+  let gDays = 0, gFull = 0, gShort = 0, gMins = 0, gAmt = 0, gPro = 0;
+  const summary = ids.map((id) => {
+    const w = workerInfo(id, list.find((e) => e.workerId === id));
+    const ds = dates.filter((dk) => dayMins.get(`${id}|${dk}`));
+    const mins = ds.reduce((a, dk) => a + dayMins.get(`${id}|${dk}`), 0);
+    const short = ds.filter((dk) => isShortDay(dk, dayMins.get(`${id}|${dk}`), open(id, dk))).length;
+    const rate = store.rates[id] || 0;
+    const amount = rate * ds.length;
+    const pro = Math.round(ds.reduce((a, dk) => a + rate * Math.min(1, dayMins.get(`${id}|${dk}`) / minM), 0) * 100) / 100;
+    gDays += ds.length; gFull += ds.length - short; gShort += short; gMins += mins; gAmt += amount; gPro += pro;
+    const row = [w.name, w.code, w.company, w.trade, ds.length, ds.length - short, short ? `SHORT ${short}` : 0, hoursDec(mins), ds.length ? hoursDec(mins / ds.length) : 0];
+    if (admin) row.push(rate || '', rate ? amount : '', rate ? pro : '');
+    return row;
+  }).sort((a, b) => a[0].localeCompare(b[0]));
+  const cols = ['Worker', 'Code', 'Company', 'Trade', 'Days worked', `Full days (≥${minM / 60}h)`, `Short days (<${minM / 60}h)`, 'Total hours', 'Avg h / day'];
+  const totals = ['TOTAL', '', '', `${ids.length} workers`, gDays, gFull, gShort, hoursDec(gMins), gDays ? hoursDec(gMins / gDays) : 0];
+  if (admin) { cols.push('Daily rate (AED)', 'Amount — days × rate (AED)', 'Pro-rata for short days (AED)'); totals.push('', Math.round(gAmt * 100) / 100, Math.round(gPro * 100) / 100); }
+
+  const sheetCols = ['Worker', 'Company', ...dates.map((d) => d.slice(5)), 'Days', 'Short', 'Hours'];
+  const sheetRows = ids.map((id) => {
+    const w = workerInfo(id, list.find((e) => e.workerId === id));
+    let days = 0, short = 0, mins = 0;
+    const cells = dates.map((dk) => {
+      const m = dayMins.get(`${id}|${dk}`) || 0;
+      if (!m) return '';
+      days++; mins += m;
+      if (isShortDay(dk, m, open(id, dk))) { short++; return `${hoursDec(m)}*`; }
+      return hoursDec(m);
+    });
+    return [w.name, w.company, ...cells, days, short, hoursDec(mins)];
+  }).sort((a, b) => a[0].localeCompare(b[0]));
+
+  const log = list.map((e) => {
+    const w = workerInfo(e.workerId, e);
+    const dm = dayMins.get(`${e.workerId}|${e.date}`) || 0;
+    const sh = isShortDay(e.date, dm, open(e.workerId, e.date));
+    return [e.date, w.name, w.company, e.siteName, e.employeeName, t2(e.inLocal), e.checkOut ? t2(e.outLocal) : 'ON SITE',
+      hoursDec(Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000))), hoursDec(dm), sh ? `SHORT by ${hoursDec(minM - dm)} h` : 'OK'];
+  }).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+
+  return {
+    title: `External workers — days${admin ? ' & pay' : ''}${onlyCompany ? ` — ${onlyCompany}` : ''}`,
+    subtitle: `${from} to ${to} · minimum ${minM / 60} h per day · * / SHORT = below minimum${admin ? ` · amount AED ${Math.round(gAmt * 100) / 100}` : ''}`,
+    filename: `external-workers-days${admin ? '-pay' : ''}-${from}-to-${to}`,
+    orientation: 'landscape',
+    pdfFont: dates.length > 16 ? 6 : 7.5,
+    sheets: [
+      { name: 'Summary', columns: cols, widths: [24, 9, 20, 13, 11, 13, 14, 11, 10, 14, 20, 22], rows: summary, totals },
+      { name: 'Attendance sheet', columns: sheetCols, widths: [22, 16, ...dates.map(() => 6), 6, 6, 7], rows: sheetRows },
+      { name: 'Daily log', columns: ['Date', 'Worker', 'Company', 'Site', 'Added by', 'In', 'Out', 'Hours', 'Day total', 'Minimum check'],
+        widths: [11, 22, 18, 20, 18, 7, 9, 7, 9, 18], rows: log },
+    ],
   };
 }
 
@@ -619,6 +693,9 @@ async function toPdf(rep) {
       footStyles: { fillColor: [237, 242, 244], textColor: [28, 42, 51], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 250, 251] },
       didParseCell: (d) => {
+        if (d.section === 'body' && typeof d.cell.raw === 'string' && (/\d\*$/.test(d.cell.raw) || d.cell.raw.startsWith('SHORT'))) {
+          d.cell.styles.textColor = [178, 53, 53]; d.cell.styles.fillColor = [251, 230, 230]; d.cell.styles.fontStyle = 'bold';
+        }
         if (d.section === 'body' && rep.pdfFont && typeof d.cell.raw === 'string') {
           if (d.cell.raw === 'A') d.cell.styles.textColor = [214, 69, 69];
           if (d.cell.raw === 'OFF') d.cell.styles.textColor = [224, 142, 43];

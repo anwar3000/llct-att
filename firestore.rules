@@ -172,5 +172,15 @@ service cloud.firestore {
         allow delete: if isManagement() || ownsFile(fileId);
       }
     }
+
+    // ------------------------------------------------ settings & pay rates
+    match /settings/{id} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+    // Daily rate per external worker (accounts → admin only).
+    match /workerRates/{workerId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

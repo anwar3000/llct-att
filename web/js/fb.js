@@ -179,6 +179,14 @@ export function mapIdFile(d) {
 export const ID_FIELDS = ['nationality', 'passportNo', 'passportExpiry', 'eidNo', 'eidExpiry', 'siraNo', 'siraExpiry',
   'visaNo', 'visaExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes'];
 
+/** Minimum working minutes per day (admin setting, default 8 h). */
+export const minDayMins = () => Math.round((store.settings?.minDailyHours || 8) * 60);
+/** A finished day (not today with someone still on site) that is below the minimum. */
+export const isShortDay = (date, mins, stillOpen = false) => mins > 0 && mins < minDayMins() && !(stillOpen && date === dateKey(new Date()));
+export const saveSettings = (data) => setDoc(doc(db, 'settings', 'general'), data, { merge: true });
+export const saveWorkerRate = (workerId, dailyRate) =>
+  setDoc(doc(db, 'workerRates', workerId), { dailyRate, updatedAt: serverTimestamp(), updatedBy: store.me?.name || '' });
+
 export const sessionMinutes = (s, now = new Date()) =>
   Math.max(0, Math.round(((s.checkOut || now) - s.checkIn) / 60000));
 export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked;
@@ -195,7 +203,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [], workersToday: [],
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], workersToday: [], settings: { minDailyHours: 8 }, rates: {},
   _subs: [], _listeners: new Set(), _day: null,
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -223,6 +231,17 @@ export const store = {
     if (isAdmin()) sub(query(C('petty'), orderBy('createdAt', 'desc'), limit(3000)), 'petty', mapPetty);
     sub(C('extWorkers'), 'workers', mapWorker, (l) => l.sort(byName));
     sub(C('workerLocks'), 'workerLocks', mapWorkerLock);
+    this._subs.push(onSnapshot(doc(db, 'settings', 'general'), (d) => {
+      const m = (d.exists() ? d.data() : null) || {};
+      this.settings = { minDailyHours: typeof m.minDailyHours === 'number' && m.minDailyHours > 0 ? m.minDailyHours : 8 };
+      this.emit();
+    }, () => {}));
+    if (isAdmin()) {
+      this._subs.push(onSnapshot(C('workerRates'), (snap) => {
+        this.rates = Object.fromEntries(snap.docs.map((d) => [d.id, num(d.data().dailyRate)]));
+        this.emit();
+      }, () => {}));
+    }
     sub(query(C('workerAttendance'), where('date', '==', this._day)), 'workersToday', mapWorkerEntry);
     sub(C('idInfo'), 'idInfo', mapIdInfo);
     sub(C('idFiles'), 'idFiles', mapIdFile, (l) => l.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0)));
