@@ -92,6 +92,13 @@ class _ProfileGateState extends State<_ProfileGate> {
             message: 'Your account has been deactivated. Please contact management.',
           );
         }
+        if (user.role == 'docs') {
+          return const _Blocked(
+            title: 'Documents Portal login',
+            message: 'This login is for the LLCT Documents Portal on the web, not the attendance app. '
+                'Open https://anwar3000.github.io/llct-att/portal.html in a browser.',
+          );
+        }
         CurrentUser.me = user;
         return user.isManagement ? AdminShell(me: user) : EmployeeShell(me: user);
       },

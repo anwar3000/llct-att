@@ -17,6 +17,8 @@ service cloud.firestore {
     function role() { return me().get('role', 'employee'); }
     function isAdmin() { return isActive() && role() == 'admin'; }
     function isManagement() { return isActive() && (role() == 'admin' || role() == 'manager'); }
+    // Document clerk: uses the Documents Portal only — can view/download IDs and submit changes for admin approval.
+    function isDocs() { return isActive() && role() == 'docs'; }
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
     function owns() { return isActive() && resource.data.employeeId == request.auth.uid; }
     function createsOwn() { return isActive() && request.resource.data.employeeId == request.auth.uid; }
@@ -24,7 +26,7 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------- users
     match /users/{uid} {
-      allow read: if isSelf(uid) || isManagement();
+      allow read: if isSelf(uid) || isManagement() || isDocs();
       allow create, delete: if isAdmin();
       // Admins edit profiles; staff may only update their own live location.
       allow update: if isAdmin() || (isSelf(uid) && isActive() && onlyChanges(['lastLocation']));
@@ -147,7 +149,7 @@ service cloud.firestore {
     // Passport / Emirates ID / SIRA numbers & expiry for staff and external workers.
     // Management sees everything; each employee can view and update their own.
     match /idInfo/{ownerId} {
-      allow read: if isManagement() || (isSelf(ownerId) && isActive());
+      allow read: if isManagement() || isDocs() || (isSelf(ownerId) && isActive());
       allow write: if isManagement() || (isSelf(ownerId) && isActive()
                       && request.resource.data.ownerType == 'staff'
                       && request.resource.data.keys().hasOnly(['ownerType', 'name', 'updatedAt', 'nationality',
@@ -158,19 +160,40 @@ service cloud.firestore {
     function ownsFile(fileId) {
       return isActive() && get(/databases/$(database)/documents/idFiles/$(fileId)).data.ownerId == request.auth.uid;
     }
+    // Portal uploads are saved with pending == true and only become official when an admin approves.
+    function pendingByMe(fileId) {
+      return isDocs() && get(/databases/$(database)/documents/idFiles/$(fileId)).data.pending == true
+        && get(/databases/$(database)/documents/idFiles/$(fileId)).data.uploadedById == request.auth.uid;
+    }
     match /idFiles/{fileId} {
-      allow read: if isManagement() || (isActive() && resource.data.ownerId == request.auth.uid);
-      allow create: if isManagement() || (isActive() && request.resource.data.ownerId == request.auth.uid
-                      && request.resource.data.ownerType == 'staff' && request.resource.data.size <= 2097152);
+      allow read: if isManagement() || isDocs() || (isActive() && resource.data.ownerId == request.auth.uid);
+      allow create: if isManagement()
+                    || (isActive() && request.resource.data.ownerId == request.auth.uid
+                        && request.resource.data.ownerType == 'staff' && request.resource.data.size <= 2097152)
+                    || (isDocs() && request.resource.data.pending == true
+                        && request.resource.data.uploadedById == request.auth.uid && request.resource.data.size <= 2097152);
       allow update: if isManagement();
-      allow delete: if isManagement() || (isActive() && resource.data.ownerId == request.auth.uid);
+      allow delete: if isManagement() || (isActive() && resource.data.ownerId == request.auth.uid)
+                    || (isDocs() && resource.data.pending == true && resource.data.uploadedById == request.auth.uid);
       match /chunks/{n} {
-        allow read: if isManagement() || ownsFile(fileId);
+        allow read: if isManagement() || isDocs() || ownsFile(fileId);
         allow create: if isManagement() || (isActive()
-                        && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.ownerId == request.auth.uid);
+                        && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.ownerId == request.auth.uid)
+                      || (isDocs() && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.uploadedById == request.auth.uid
+                        && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.pending == true);
         allow update: if isManagement();
-        allow delete: if isManagement() || ownsFile(fileId);
+        allow delete: if isManagement() || ownsFile(fileId) || pendingByMe(fileId);
       }
+    }
+
+    // ------------------------------------------- change requests from the Documents Portal
+    // New people / name & ID changes wait here until an admin approves them.
+    match /changeRequests/{id} {
+      allow read: if isManagement() || (isActive() && resource.data.submittedById == request.auth.uid);
+      allow create: if (isDocs() || isManagement()) && request.resource.data.submittedById == request.auth.uid
+                    && request.resource.data.status == 'pending';
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isActive() && resource.data.submittedById == request.auth.uid && resource.data.status == 'pending');
     }
 
     // ------------------------------------------------ settings & pay rates

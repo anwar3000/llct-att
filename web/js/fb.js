@@ -172,7 +172,7 @@ export function mapIdFile(d) {
   return {
     id: d.id, ownerId: m.ownerId || '', ownerType: m.ownerType || '', kind: m.kind || 'other', name: m.name || 'file',
     mime: m.mime || 'application/octet-stream', size: num(m.size), chunks: num(m.chunks, 1), uploadedAt: toDate(m.uploadedAt),
-    uploadedBy: m.uploadedBy || '',
+    uploadedBy: m.uploadedBy || '', pending: m.pending === true, requestId: m.requestId || '', ownerName: m.ownerName || '',
   };
 }
 /** Text fields kept in idInfo/{ownerId}. */
@@ -196,14 +196,14 @@ export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked;
 // manager = everything operational, but no accounts and no staff-login admin
 export const isAdmin = () => store.me?.role === 'admin';
 export const isManagerOrAdmin = () => ['admin', 'manager'].includes(store.me?.role);
-export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Employee' };
+export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Employee', docs: 'Document clerk' };
 
 // ------------------------------------------------------------------ live store
 // One set of listeners shared by every page. Pages subscribe with store.on().
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [], workersToday: [], settings: { minDailyHours: 8 }, rates: {},
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], workersToday: [], requests: [], settings: { minDailyHours: 8 }, rates: {},
   _subs: [], _listeners: new Set(), _day: null,
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -231,6 +231,7 @@ export const store = {
     if (isAdmin()) sub(query(C('petty'), orderBy('createdAt', 'desc'), limit(3000)), 'petty', mapPetty);
     sub(C('extWorkers'), 'workers', mapWorker, (l) => l.sort(byName));
     sub(C('workerLocks'), 'workerLocks', mapWorkerLock);
+    sub(query(C('changeRequests'), where('status', '==', 'pending')), 'requests', mapRequest, (l) => l.sort((a, b) => (a.submittedAt || 0) - (b.submittedAt || 0)));
     this._subs.push(onSnapshot(doc(db, 'settings', 'general'), (d) => {
       const m = (d.exists() ? d.data() : null) || {};
       this.settings = { minDailyHours: typeof m.minDailyHours === 'number' && m.minDailyHours > 0 ? m.minDailyHours : 8 };
@@ -261,7 +262,7 @@ export const store = {
   worker(id) { return this.workers.find((w) => w.id === id) || null; },
   workerLock(id) { return this.workerLocks.find((l) => l.workerId === id) || null; },
   info(ownerId) { return this.idInfo.find((i) => i.id === ownerId) || null; },
-  files(ownerId) { return this.idFiles.filter((f) => f.ownerId === ownerId); },
+  files(ownerId) { return this.idFiles.filter((f) => f.ownerId === ownerId && !f.pending); },
   get pendingSites() { return this.sites.filter((s) => !s.approved && s.status !== 'rejected'); },
 };
 
@@ -584,14 +585,15 @@ export const saveIdInfo = (ownerId, ownerType, data) =>
   setDoc(doc(db, 'idInfo', ownerId), { ...data, ownerType, updatedAt: serverTimestamp() }, { merge: true });
 
 const CHUNK = 700000; // characters of base64 per Firestore doc (limit is 1 MiB)
-export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64 }) {
+export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64, pending = false, requestId = '' }) {
   const ref = doc(C('idFiles'));
   const n = Math.max(1, Math.ceil(base64.length / CHUNK));
   const b = writeBatch(db);
   for (let i = 0; i < n; i++) b.set(doc(db, 'idFiles', ref.id, 'chunks', String(i)), { d: base64.slice(i * CHUNK, (i + 1) * CHUNK) });
   b.set(ref, {
     ownerId, ownerType, ownerName, kind, name, mime, size: Math.round(base64.length * 0.75), chunks: n,
-    uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '',
+    uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '', uploadedById: store.me?.id || '',
+    ...(pending ? { pending: true, requestId } : {}),
   });
   await b.commit();
   return ref.id;
@@ -626,3 +628,71 @@ export const deleteUpdate = (id) => deleteDoc(doc(db, 'siteUpdates', id));
 export const editUpdate = (id, data) => updateDoc(doc(db, 'siteUpdates', id), {
   ...data, editedAt: serverTimestamp(), editedBy: store.me?.name || '',
 });
+
+// ------------------------------------------------------------------ Documents Portal: change requests
+export function mapRequest(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, type: m.type || 'update', targetType: m.targetType || 'worker', targetId: m.targetId || '', targetName: m.targetName || '',
+    fields: m.fields || {}, info: m.info || {}, newFileIds: Array.isArray(m.newFileIds) ? m.newFileIds : [],
+    deleteFileIds: Array.isArray(m.deleteFileIds) ? m.deleteFileIds : [], note: m.note || '', status: m.status || 'pending',
+    submittedBy: m.submittedBy || '', submittedById: m.submittedById || '', submittedAt: toDate(m.submittedAt),
+    reviewedBy: m.reviewedBy || '', reviewNote: m.reviewNote || '', reviewedAt: toDate(m.reviewedAt), resultId: m.resultId || '',
+  };
+}
+/** Live listener for any collection/query (used by the portal, which has its own small store). */
+export function watch(name, mapper, cb, filters = []) {
+  const q = filters.length ? query(C(name), ...filters.map(([f, op, v]) => where(f, op, v))) : C(name);
+  return onSnapshot(q, (snap) => cb(snap.docs.map(mapper)), (e) => { console.error(e); cb(null, e); });
+}
+export const newRequestId = () => doc(C('changeRequests')).id;
+export const submitRequest = (id, data) => setDoc(doc(db, 'changeRequests', id), {
+  ...data, status: 'pending', submittedBy: store.me?.name || '', submittedById: store.me?.id || '', submittedAt: serverTimestamp(),
+});
+export const withdrawRequest = async (r) => {
+  for (const f of store.idFiles.filter((x) => x.requestId === r.id && x.pending)) await deleteIdFile(f);
+  await deleteDoc(doc(db, 'changeRequests', r.id));
+};
+
+/**
+ * Admin approves a portal request: creates/updates the person, saves ID numbers,
+ * makes uploaded copies official and removes the copies marked for deletion.
+ * `login` = { loginId, password } is needed only for a new LLCT staff member.
+ */
+export async function approveRequest(r, login = null) {
+  let id = r.targetId;
+  const f = r.fields || {};
+  if (r.type === 'new' && r.targetType === 'worker') {
+    id = await saveWorker(null, { name: f.name || r.targetName, phone: f.phone || '', company: f.company || '', trade: f.trade || '', code: f.code || '' });
+  } else if (r.type === 'new' && r.targetType === 'staff') {
+    if (!login?.loginId || !login?.password) throw new Error('Enter a login ID and password for the new staff member.');
+    id = await createStaff({ loginId: login.loginId, password: login.password, name: f.name || r.targetName, phone: f.phone || '',
+      designation: f.designation || '', role: 'employee', weeklyOffDays: [], monthlyOffQuota: 4 });
+  } else if (r.targetType === 'worker') {
+    const upd = {};
+    ['name', 'phone', 'company', 'trade', 'code'].forEach((k) => { if (f[k] !== undefined) upd[k] = f[k]; });
+    if (Object.keys(upd).length) await saveWorker(id, upd);
+  } else {
+    const upd = {};
+    ['name', 'phone', 'designation'].forEach((k) => { if (f[k] !== undefined) upd[k] = f[k]; });
+    if (Object.keys(upd).length) await updateUser(id, upd);
+  }
+  const name = f.name || r.targetName;
+  if (r.info && Object.keys(r.info).length) await saveIdInfo(id, r.targetType, { ...r.info, name });
+  for (const fid of r.newFileIds) {
+    await updateDoc(doc(db, 'idFiles', fid), { pending: false, ownerId: id, ownerType: r.targetType, ownerName: name, approvedBy: store.me?.name || '' });
+  }
+  for (const fid of r.deleteFileIds) {
+    const file = store.idFiles.find((x) => x.id === fid);
+    if (file) await deleteIdFile(file);
+  }
+  await updateDoc(doc(db, 'changeRequests', r.id), { status: 'approved', reviewedBy: store.me?.name || '', reviewedAt: serverTimestamp(), resultId: id });
+  return id;
+}
+export async function rejectRequest(r, note = '') {
+  for (const fid of r.newFileIds) {
+    const file = store.idFiles.find((x) => x.id === fid);
+    if (file) await deleteIdFile(file);
+  }
+  await updateDoc(doc(db, 'changeRequests', r.id), { status: 'rejected', reviewNote: note, reviewedBy: store.me?.name || '', reviewedAt: serverTimestamp() });
+}

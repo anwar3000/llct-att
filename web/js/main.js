@@ -12,6 +12,7 @@ import * as updates from './pages/updates.js';
 import * as reports from './pages/reports.js';
 import * as workers from './pages/workers.js';
 import * as documents from './pages/documents.js';
+import * as requests from './pages/requests.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -29,6 +30,7 @@ const NAV = [
   { path: 'workers', label: 'External workers', icon: 'worker', page: workers },
   { path: 'attendance', label: 'Attendance', icon: 'clock', page: attendance },
   { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
+  { path: 'requests', label: 'Change requests', icon: 'pending', page: requests, badge: () => store.requests.length },
   { path: 'petty', label: 'Petty cash', icon: 'wallet', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
   { sep: 'Output' },
   { path: 'reports', label: 'Reports', icon: 'report', page: reports },
@@ -195,7 +197,7 @@ onAuthStateChanged(auth, async (user) => {
       return;
     }
     if (!['admin', 'manager'].includes(me.role) || !me.active) {
-      loginError = 'This dashboard is for managers only. Staff should use the mobile app.';
+      loginError = me.role === 'docs' ? 'Document clerks use the Documents Portal: open portal.html on this site.' : 'This dashboard is for managers only. Staff should use the mobile app.';
       await logout();
       return;
     }

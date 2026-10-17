@@ -53,11 +53,11 @@ function list(el, { setHeader }) {
         <td class="small muted">${s.user.lastLocation ? timeAgo(s.user.lastLocation.at) : '—'}</td></tr>`).join('')
         : '<tr><td colspan="8"><div class="empty">No matching employees</div></td></tr>'}
     </table></div></div>
-    ${staffMgr.length ? `<h2 class="mt2" style="margin-bottom:10px">Admins & managers</h2>
+    ${staffMgr.length ? `<h2 class="mt2" style="margin-bottom:10px">Admins, managers & document clerks</h2>
     <div class="card"><div class="table-wrap"><table class="t"><tr><th>Name</th><th>Role</th><th>Login ID</th><th>Access</th><th></th></tr>
       ${staffMgr.map((u) => `<tr><td><a class="person" href="#/employees/${u.id}" style="color:inherit">${avatar(u.name, 30)}<span class="nm">${esc(u.name)}</span></a></td>
-        <td>${pill(ROLE_LABEL[u.role] || u.role, u.role === 'admin' ? 'purple' : 'blue')}</td><td class="mono">${esc(u.loginId)}</td>
-        <td class="small muted">${u.role === 'admin' ? 'Everything incl. accounts & logins' : 'Everything except accounts'}${u.active ? '' : ' · <b style="color:#D64545">disabled</b>'}</td>
+        <td>${pill(ROLE_LABEL[u.role] || u.role, u.role === 'admin' ? 'purple' : u.role === 'docs' ? 'amber' : 'blue')}</td><td class="mono">${esc(u.loginId)}</td>
+        <td class="small muted">${u.role === 'admin' ? 'Everything incl. accounts & logins' : u.role === 'docs' ? 'Documents Portal only — changes need admin approval' : 'Everything except accounts'}${u.active ? '' : ' · <b style="color:#D64545">disabled</b>'}</td>
         <td class="right">${isAdmin() && u.id !== store.me.id ? `<button class="btn sm ghost" data-edit="${u.id}">${icon('edit', 14)} Edit</button>` : ''}</td></tr>`).join('')}
     </table></div></div>` : ''}
     ${inactive.length ? `<h2 class="mt2" style="margin-bottom:10px">Deactivated</h2>
@@ -88,7 +88,8 @@ export function editPerson(u) {
       <label class="f full"><span>Role</span><select name="role">
         <option value="employee" ${(!u || u.role === 'employee') ? 'selected' : ''}>Employee — uses the mobile app to check in</option>
         <option value="manager" ${u?.role === 'manager' ? 'selected' : ''}>Manager — sees everything except accounts</option>
-        <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Admin — full access incl. petty cash & logins</option></select></label>
+        <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Admin — full access incl. petty cash & logins</option>
+        <option value="docs" ${u?.role === 'docs' ? 'selected' : ''}>Document clerk — Documents Portal only (view / download IDs, send changes for approval)</option></select></label>
       <div class="full" id="ef-off"><label class="f" style="margin-bottom:6px"><span>Weekly off day(s) — none selected = flexible</span></label>
         <div class="chips">${[1, 2, 3, 4, 5, 6, 7].map((w) => `<span class="chip ${off.has(w) ? 'on' : ''}" data-w="${w}">${WEEKDAYS_LONG[w]}</span>`).join('')}</div></div>
       <label class="f" style="margin-top:12px"><span>Off days per month</span><input name="quota" type="number" min="0" max="15" value="${u?.monthlyOffQuota ?? 4}"></label>

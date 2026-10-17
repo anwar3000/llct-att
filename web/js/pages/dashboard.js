@@ -60,8 +60,8 @@ export function mount(el, _params, { setHeader }) {
       ${kpi('Active sites', activeSites.size, `${store.schedulesToday.length} visits scheduled`, 'site', '#8E5CC4', 'sites')}
       ${kpi('Active projects', activeProjects.length, `${store.projects.length} total`, 'project', '#C2557A', 'projects')}
       ${isAdmin()
-        ? kpi('Pending approvals', store.pendingPetty.length + store.pendingOff.length + store.pendingSites.length, `${fmtMoney(pendingAmt)} petty waiting`, 'pending', '#E08E2B', 'petty')
-        : kpi('Pending approvals', store.pendingOff.length + store.pendingSites.length, 'off days & new sites', 'pending', '#E08E2B')}
+        ? kpi('Pending approvals', store.pendingPetty.length + store.pendingOff.length + store.pendingSites.length + store.requests.length, `${store.requests.length} document changes · ${fmtMoney(pendingAmt)} petty`, 'pending', '#E08E2B', store.requests.length ? 'requests' : 'petty')
+        : kpi('Pending approvals', store.pendingOff.length + store.pendingSites.length + store.requests.length, `off days, new sites & ${store.requests.length} document changes`, 'pending', '#E08E2B', store.requests.length ? 'requests' : '')}
     </div>
 
     ${forgot.length || flagged.length || store.alerts.length ? `

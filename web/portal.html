@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLCT Documents Portal</title>
+  <meta name="theme-color" content="#404041" />
+  <link rel="apple-touch-icon" href="img/icon-192.png" />
+  <link rel="icon" type="image/png" href="img/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/app.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="boot" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;color:#404041;background:#f7f6f3;padding:24px;text-align:center">
+      <img src="img/logo.png" alt="LLCT" style="width:160px;border-radius:12px;margin-bottom:18px">
+      <div style="font-weight:700;font-size:18px">LLCT Documents Portal</div>
+      <div id="boot-msg" style="margin-top:6px;color:#75757a">Loading…</div>
+      <pre id="boot-err" style="display:none;margin-top:16px;max-width:680px;white-space:pre-wrap;text-align:left;background:#fff;border:1px solid #f1c9c9;color:#b23535;padding:12px 14px;border-radius:10px;font-size:12.5px"></pre>
+    </div>
+  </div>
+  <script>
+    // Show any start-up problem on screen instead of a blank page.
+    (function () {
+      var errs = [];
+      function show(msg) {
+        errs.push(msg);
+        var b = document.getElementById('boot-err');
+        if (b) { b.style.display = 'block'; b.textContent = errs.join('\n\n'); }
+        var m = document.getElementById('boot-msg');
+        if (m) m.textContent = 'The portal could not start. Please send this message to support:';
+      }
+      window.__bootError = show;
+      window.addEventListener('error', function (e) {
+        var t = e.target;
+        if (t && (t.src || t.href)) show('Could not load: ' + (t.src || t.href));
+        else show((e.message || 'Error') + (e.filename ? '\n at ' + e.filename + ':' + e.lineno : ''));
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) { show('Error: ' + (e.reason && (e.reason.message || e.reason))); });
+      setTimeout(function () {
+        if (!window.__appStarted) show('Still loading after 15 s. Address: ' + location.href +
+          '\nCheck your internet connection, then reload (Cmd+Shift+R).');
+      }, 15000);
+    })();
+  </script>
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+  <script type="module" src="js/portal.js"></script>
+</body>
+</html>
