@@ -1,6 +1,6 @@
-import { store, isAdmin, alertLabel, resolveAlert, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates } from '../fb.js';
+import { store, isAdmin, alertLabel, resolveAlert, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
 import {
-  esc, fromTz, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
+  esc, fromTz, STAFF_COLOR, EXT_COLOR, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
 } from '../util.js';
 
@@ -23,6 +23,8 @@ export function mount(el, _params, { setHeader }) {
 
   const from = dateKey(addDays(now, -13));
   sessionsInRange(from, dateKey(now)).then((list) => { trend = list; draw(); }).catch((e) => console.error(e));
+  let extTrend = null;
+  workerEntriesInRange(from, dateKey(now)).then((list) => { extTrend = list; draw(); }).catch((e) => console.error(e));
   recentUpdates(6).then((l) => { updates = l; draw(); }).catch(() => {});
 
   function draw() {
@@ -36,6 +38,10 @@ export function mount(el, _params, { setHeader }) {
     const activeSites = new Set([...store.today.map((s) => s.siteId), ...store.open.map((s) => s.siteId)]);
     const pendingAmt = store.pendingPetty.filter((t) => t.type !== 'credit').reduce((a, t) => a + t.amount, 0);
     const activeProjects = store.projects.filter((p) => p.status === 'active');
+    // External workers (labour) are part of the workforce too.
+    const extIds = new Set(store.workersToday.map((e) => e.workerId));
+    const extMins = store.workersToday.reduce((a, e) => a + entryMinutes(e), 0);
+    const extNow = store.workerLocks.length;
 
     body.innerHTML = `
     <div class="quick">
@@ -47,10 +53,10 @@ export function mount(el, _params, { setHeader }) {
       <a href="#/reports">${icon('report', 16)} Reports</a>
     </div>
     <div class="grid kpis">
-      ${kpi('On duty now', `${count('onDuty')} / ${st.length}`, 'Tap for live map', 'pin', '#2E9E6A', 'map')}
-      ${kpi('Present today', present, `${count('notIn')} not in · ${count('off')} off`, 'people', '#D98A1A', 'attendance')}
-      ${kpi('Work time today', fmtMins(minutes), present ? `Avg ${fmtMins(minutes / present)} / person` : '—', 'clock', '#3A7BD5')}
-      ${kpi('External workers on site', store.workerLocks.length, `${new Set(store.workerLocks.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', '#5B6B78', 'workers')}
+      ${kpi('On site now', count('onDuty') + extNow, `${count('onDuty')} staff · ${extNow} external`, 'pin', '#2E9E6A', 'map')}
+      ${kpi('Workforce today', present + extIds.size, `${present} staff · ${extIds.size} external`, 'people', '#D98A1A', 'attendance')}
+      ${kpi('Man-hours today', fmtMins(minutes + extMins), `staff ${fmtMins(minutes)} · external ${fmtMins(extMins)}`, 'clock', '#3A7BD5')}
+      ${kpi('External workers', `${extNow} on site`, `${new Set(store.workerLocks.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', EXT_COLOR, 'workers')}
       ${kpi('Active sites', activeSites.size, `${store.schedulesToday.length} visits scheduled`, 'site', '#8E5CC4', 'sites')}
       ${kpi('Active projects', activeProjects.length, `${store.projects.length} total`, 'project', '#C2557A', 'projects')}
       ${isAdmin()
@@ -80,7 +86,7 @@ export function mount(el, _params, { setHeader }) {
 
     <div class="grid cols-2-1 mt">
       <div class="card">
-        <div class="card-head"><h2>Work hours — last 14 days</h2><span class="muted small">all staff</span></div>
+        <div class="card-head"><h2>Man-hours — last 14 days</h2><span class="small"><span class="wf-dot staff"></span> Staff &nbsp;<span class="wf-dot ext"></span> External</span></div>
         <div class="card-pad"><div class="chart-box"><canvas id="trend"></canvas></div></div>
       </div>
       <div class="card">
@@ -91,7 +97,7 @@ export function mount(el, _params, { setHeader }) {
 
     <div class="grid cols-2 mt">
       <div class="card">
-        <div class="card-head"><h2>Team today</h2><a class="small" href="#/employees">Manage →</a></div>
+        <div class="card-head"><h2>Team today <span class="wf-chip staff">${st.length} staff</span> <span class="wf-chip ext">${extIds.size} external</span></h2><a class="small" href="#/employees">Manage →</a></div>
         ${st.length ? st.map((s) => `
           <a class="list-item" href="#/employees/${s.user.id}" style="color:inherit">
             ${avatar(s.user.name, 34, RING[s.state])}
@@ -100,6 +106,16 @@ export function mount(el, _params, { setHeader }) {
             <div class="right">${pill(s.forgot ? 'Open since earlier' : STATE[s.state][0], s.forgot ? 'red' : STATE[s.state][1], s.state === 'onDuty')}
               ${s.minutes ? `<div class="small" style="font-weight:700;margin-top:3px">${fmtMins(s.minutes)}</div>` : ''}</div>
           </a>`).join('') : '<div class="empty"><b>No employees yet</b>Add staff under Employees.</div>'}
+        ${extIds.size ? `<div class="list-item small" style="background:#fdf6ea;color:#a8640f;font-weight:700">External workers today · ${extIds.size}</div>
+        ${[...extIds].map((wid) => {
+          const es = store.workersToday.filter((e) => e.workerId === wid);
+          const w = store.worker(wid);
+          const open = es.find((e) => e.open);
+          const m = es.reduce((a, e) => a + entryMinutes(e), 0);
+          return `<a class="list-item" href="#/workers/${wid}" style="color:inherit">${avatar(w?.name || es[0].workerName, 30, EXT_COLOR)}
+            <div class="grow"><b>${esc(w?.name || es[0].workerName)}</b><div class="small muted">${esc(es[es.length - 1].siteName)} · with ${esc(es[es.length - 1].employeeName)}</div></div>
+            <div class="right"><span class="wf-chip ext">${open ? 'On site' : 'Done'}</span><div class="small" style="font-weight:700;margin-top:3px">${fmtMins(m)}</div></div></a>`;
+        }).join('')}` : ''}
       </div>
       <div>
         <div class="card">
@@ -196,22 +212,26 @@ export function mount(el, _params, { setHeader }) {
   function drawChart() {
     const canvas = body.querySelector('#trend');
     if (!canvas || !window.Chart) return;
-    const labels = [], data = [];
+    const labels = [], data = [], ext = [];
     for (let i = 13; i >= 0; i--) {
       const d = addDays(new Date(), -i);
       const k = dateKey(d);
       labels.push(d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
       const src = k === dateKey(new Date()) ? store.today : (trend || []).filter((s) => s.date === k);
       data.push(Math.round(src.reduce((a, s) => a + (((s.checkOut || new Date()) - s.checkIn) / 3600000), 0) * 10) / 10);
+      const esrc = k === dateKey(new Date()) ? store.workersToday : (extTrend || []).filter((e) => e.date === k);
+      ext.push(Math.round((esrc.reduce((a, e) => a + entryMinutes(e), 0) / 60) * 10) / 10);
     }
     if (chart) chart.destroy();
     chart = new window.Chart(canvas, {
       type: 'bar',
-      data: { labels, datasets: [{ label: 'Hours', data, backgroundColor: '#D98A1A', borderRadius: 6, maxBarThickness: 28 }] },
+      data: { labels, datasets: [
+        { label: 'Staff', data, backgroundColor: STAFF_COLOR, borderRadius: 4, maxBarThickness: 28 },
+        { label: 'External', data: ext, backgroundColor: EXT_COLOR, borderRadius: 4, maxBarThickness: 28 }] },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.raw} h` } } },
-        scales: { y: { beginAtZero: true, grid: { color: '#eef1f3' }, ticks: { callback: (v) => `${v}h` } }, x: { grid: { display: false } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw} h` } } },
+        scales: { y: { stacked: true, beginAtZero: true, grid: { color: '#eef1f3' }, ticks: { callback: (v) => `${v}h` } }, x: { stacked: true, grid: { display: false } } },
       },
     });
   }

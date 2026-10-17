@@ -212,7 +212,7 @@ class _HomeTabState extends State<HomeTab> {
     }
     // Next step: pick the external workers who are with you (skippable).
     final sid = sessionId;
-    if (sid != null && mounted && _workerCount != 0 && await _askAboutWorkers(picked.name) && mounted) {
+    if (sid != null && mounted && await _askAboutWorkers(picked.name) && mounted) {
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => WorkerPickerScreen(
           me: widget.me,

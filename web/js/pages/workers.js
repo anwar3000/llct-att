@@ -39,6 +39,7 @@ function list(el, { setHeader }) {
       if (filter === 'active' && !w.active) return false;
       if (filter === 'inactive' && w.active) return false;
       if (filter === 'onsite' && !store.workerLock(w.id)) return false;
+      if (filter === 'byStaff' && !w.addedBy) return false;
       if (filter === 'expiry' && !['expired', 'soon'].includes(ownerExpiry(w.id).state)) return false;
       if (filter === 'missing' && ['passport', 'eid'].every((k) => store.files(w.id).some((f) => f.kind === k))) return false;
       if (!ql) return true;
@@ -61,7 +62,7 @@ function list(el, { setHeader }) {
       <input id="w-q" placeholder="Search name, phone, company, passport / EID no…" value="${esc(q)}" style="max-width:340px">
       <div class="chips">${[['active', `Active (${cnt((w) => w.active)})`], ['onsite', `On site (${locks.length})`],
         ['expiry', `Expiring / expired (${cnt((w) => ['expired', 'soon'].includes(ownerExpiry(w.id).state))})`],
-        ['missing', 'Missing PP/EID'], ['inactive', `Inactive (${cnt((w) => !w.active)})`], ['all', 'All']]
+        ['missing', 'Missing PP/EID'], ['byStaff', `Added by staff (${cnt((w) => w.addedBy)})`], ['inactive', `Inactive (${cnt((w) => !w.active)})`], ['all', 'All']]
         .map(([k, l]) => `<span class="chip ${filter === k ? 'on' : ''}" data-f="${k}">${l}</span>`).join('')}</div>
       <span class="spacer"></span>${sel.size ? `<span class="small"><b>${sel.size}</b> selected · <a href="javascript:void 0" id="w-clear">clear</a></span>` : ''}
     </div>
@@ -72,7 +73,7 @@ function list(el, { setHeader }) {
         const lk = store.workerLock(w.id);
         return `<tr class="click" data-id="${w.id}">
         <td><input type="checkbox" data-sel="${w.id}" ${sel.has(w.id) ? 'checked' : ''}></td>
-        <td><div class="person">${avatar(w.name, 30)}<div><div class="nm">${esc(w.name)}</div><div class="small muted">${esc(w.code || '')}${w.active ? '' : ' · inactive'}</div></div></div></td>
+        <td><div class="person">${avatar(w.name, 30)}<div><div class="nm">${esc(w.name)}</div><div class="small muted">${esc(w.code || '')}${w.active ? '' : ' · inactive'}</div>${w.addedBy ? `<span class="pill amber" title="Added from the app — please complete their documents">Added by ${esc(w.addedBy)}</span>` : ''}</div></div></td>
         <td>${esc(w.company)}</td><td>${esc(w.trade)}</td><td class="nowrap">${esc(w.phone)}</td>
         <td class="small mono">${(() => { const i = store.info(w.id) || {}; return `${esc(i.passportNo || '—')}<br>${esc(i.eidNo || '—')}`; })()}</td>
         <td>${docsSummaryHtml(w.id)}</td>

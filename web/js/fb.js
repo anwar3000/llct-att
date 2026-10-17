@@ -141,6 +141,7 @@ export function mapWorker(d) {
   return {
     id: d.id, name: m.name || 'Worker', phone: m.phone || '', company: m.company || '', trade: m.trade || '',
     nationality: m.nationality || '', code: m.code || '', active: m.active !== false, createdAt: toDate(m.createdAt),
+    addedBy: m.addedByEmployee === true ? (m.createdBy || 'staff') : '',
   };
 }
 export function mapWorkerLock(d) {
@@ -194,7 +195,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [],
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], workersToday: [],
   _subs: [], _listeners: new Set(), _day: null,
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -222,6 +223,7 @@ export const store = {
     if (isAdmin()) sub(query(C('petty'), orderBy('createdAt', 'desc'), limit(3000)), 'petty', mapPetty);
     sub(C('extWorkers'), 'workers', mapWorker, (l) => l.sort(byName));
     sub(C('workerLocks'), 'workerLocks', mapWorkerLock);
+    sub(query(C('workerAttendance'), where('date', '==', this._day)), 'workersToday', mapWorkerEntry);
     sub(C('idInfo'), 'idInfo', mapIdInfo);
     sub(C('idFiles'), 'idFiles', mapIdFile, (l) => l.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0)));
     this._tick = setInterval(() => {
@@ -449,6 +451,17 @@ export async function addWorkersToSession(session, workers) {
     await b.commit();
   }
   return busy;
+}
+
+export const entryMinutes = (e, now = new Date()) => Math.max(0, Math.round(((e.checkOut || now) - e.checkIn) / 60000));
+export async function workerEntriesForSites(siteIds) {
+  if (!siteIds.length) return [];
+  const out = [];
+  for (let i = 0; i < siteIds.length; i += 30) {
+    const snap = await getDocs(query(C('workerAttendance'), where('siteId', 'in', siteIds.slice(i, i + 30))));
+    out.push(...snap.docs.map(mapWorkerEntry));
+  }
+  return out.sort((a, b) => a.checkIn - b.checkIn);
 }
 
 export async function workerEntriesInRange(from, to) {

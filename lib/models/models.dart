@@ -786,6 +786,9 @@ class WorkerEntry {
   final DateTime? checkOut;
   final bool open;
   final int? tz;
+  final String date;
+  final String company;
+  final String trade;
 
   WorkerEntry({
     required this.id,
@@ -797,6 +800,9 @@ class WorkerEntry {
     this.checkOut,
     this.open = false,
     this.tz,
+    this.date = '',
+    this.company = '',
+    this.trade = '',
   });
 
   DateTime get inLocal => atZone(checkIn, tz);
@@ -815,6 +821,9 @@ class WorkerEntry {
       checkOut: _ts(m['checkOut']),
       open: m['open'] == true,
       tz: _tz(m['tz']),
+      date: _str(m['date']),
+      company: _str(m['company']),
+      trade: _str(m['trade']),
     );
   }
 }

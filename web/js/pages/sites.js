@@ -1,11 +1,142 @@
-import { store, saveSite, deleteSite, saveProject, approveSite } from '../fb.js';
-import { esc, icon, pill, cap, progressBar, toast, modal, confirmBox, friendlyError, fmtMins } from '../util.js';
+import {
+  store, saveSite, deleteSite, saveProject, approveSite, sessionsForSites, workerEntriesForSites, sessionMinutes, entryMinutes,
+} from '../fb.js';
+import {
+  esc, icon, pill, cap, progressBar, toast, modal, confirmBox, friendlyError, fmtMins, avatar, fmtTime, fmtDay, dateKey, addDays,
+  startOfMonth, hoursDec, STAFF_COLOR, EXT_COLOR, atTz,
+} from '../util.js';
+import { workforce, siteWorkforceReport, downloadReport } from '../report-lib.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
 import { createPlacePicker } from '../placepicker.js';
 
 const STATUSES = ['planned', 'active', 'on hold', 'completed'];
 
-export function mount(el, params, { setHeader }) {
+// ------------------------------------------------------------------ site detail: consolidated workforce
+function detail(el, id, { setHeader }) {
+  const today = new Date();
+  let range = 'today', from = dateKey(today), to = dateKey(today);
+  let sessions = null, entries = null, chart = null, token = 0;
+
+  async function load() {
+    const t = ++token;
+    const [s, e] = await Promise.all([sessionsForSites([id]), workerEntriesForSites([id])]);
+    if (t !== token) return;
+    sessions = s; entries = e; draw();
+  }
+  const setRange = (r) => {
+    range = r;
+    const now = new Date();
+    if (r === 'today') { from = to = dateKey(now); }
+    if (r === '7') { from = dateKey(addDays(now, -6)); to = dateKey(now); }
+    if (r === 'month') { from = dateKey(startOfMonth(now)); to = dateKey(now); }
+    if (r === 'all') { from = '2000-01-01'; to = dateKey(now); }
+    draw();
+  };
+
+  function header(site) {
+    setHeader(site.name, `${esc(site.address || '')}${site.address ? ' · ' : ''}${cap(site.status)} · ${site.progress}% complete · radius ${Math.round(site.radius)} m`,
+      `<a class="btn ghost" href="#/sites">← All sites</a>
+       <button class="btn ghost" id="sd-xlsx">${icon('download', 16)} Excel</button>
+       <button class="btn ghost" id="sd-pdf">PDF</button>
+       <button class="btn" id="sd-edit">${icon('edit', 16)} Edit site</button>`);
+    document.getElementById('sd-edit').onclick = () => editSite(store.site(id));
+    ['xlsx', 'pdf'].forEach((f) => {
+      document.getElementById(`sd-${f}`).onclick = async () => {
+        try { await downloadReport(await siteWorkforceReport(store.site(id), from, to), f); } catch (e) { toast(friendlyError(e), true); }
+      };
+    });
+  }
+
+  function draw() {
+    const site = store.site(id);
+    if (!site) { el.innerHTML = store.loaded ? '<div class="card empty"><b>Site not found</b></div>' : ''; return; }
+    header(site);
+    const inR = (d) => d >= from && d <= to;
+    const ss = (sessions || []).filter((x) => inR(x.date));
+    const es = (entries || []).filter((x) => inR(x.date));
+    const wf = workforce(ss, es);
+    const staffNow = store.open.filter((x) => x.siteId === id);
+    const extNow = store.workerLocks.filter((l) => l.siteId === id);
+    const total = wf.staffMins + wf.extMins;
+    const pct = total ? Math.round((wf.staffMins / total) * 100) : 0;
+    el.innerHTML = `
+    <div class="row" style="margin-bottom:12px">
+      <div class="chips">${[['today', 'Today'], ['7', 'Last 7 days'], ['month', 'This month'], ['all', 'All time']]
+        .map(([k, l]) => `<span class="chip ${range === k ? 'on' : ''}" data-r="${k}">${l}</span>`).join('')}</div>
+      <span class="row" style="gap:6px;flex-wrap:nowrap"><input type="date" id="sd-from" style="width:150px" value="${range === 'all' ? '' : from}"> – <input type="date" id="sd-to" style="width:150px" value="${to}"></span>
+      <span class="spacer"></span><span class="small"><span class="wf-dot staff"></span> Staff &nbsp; <span class="wf-dot ext"></span> External workers</span>
+    </div>
+    <div class="grid kpis">
+      ${k('Total workforce', wf.people.length, `${wf.staffCount} staff · ${wf.extCount} external`, '#404041')}
+      ${k('Total man-hours', fmtMins(total), `${hoursDec(total)} h`, '#404041')}
+      ${k('Staff', `${wf.staffCount} · ${fmtMins(wf.staffMins)}`, `${pct}% of hours`, STAFF_COLOR)}
+      ${k('External workers', `${wf.extCount} · ${fmtMins(wf.extMins)}`, `${total ? 100 - pct : 0}% of hours`, EXT_COLOR)}
+      ${k('On site now', staffNow.length + extNow.length, `${staffNow.length} staff · ${extNow.length} external`, '#2E9E6A')}
+    </div>
+    ${total ? `<div class="wf-bar mt" title="Share of man-hours"><i class="staff" style="width:${pct}%"></i><i class="ext" style="width:${100 - pct}%"></i></div>` : ''}
+    <div class="grid cols-2-1 mt">
+      <div class="card"><div class="card-head"><h2>Who worked here</h2><span class="muted small">${sessions ? `${wf.people.length} people` : 'Loading…'}</span></div>
+        <div class="table-wrap"><table class="t">
+          <tr><th>Name</th><th>Type</th><th>Designation / company</th><th class="num">Days</th><th class="num">Hours</th><th>Last day</th></tr>
+          ${wf.people.length ? wf.people.map((p) => `<tr class="wf-row ${p.type === 'staff' ? 'staff' : 'ext'} click" data-go="${p.type === 'staff' ? `#/employees/${p.id}` : `#/workers/${p.id}`}">
+            <td><div class="person">${avatar(p.name, 28, p.type === 'staff' ? STAFF_COLOR : EXT_COLOR)}<span class="nm">${esc(p.name)}</span></div></td>
+            <td><span class="wf-chip ${p.type === 'staff' ? 'staff' : 'ext'}">${p.type === 'staff' ? 'Staff' : 'External'}</span></td>
+            <td class="small">${esc(p.org)}</td><td class="num">${p.days.size}</td><td class="num"><b>${fmtMins(p.mins)}</b></td>
+            <td class="small nowrap">${p.last ? fmtDay(p.last) : '—'}</td></tr>`).join('')
+            : `<tr><td colspan="6"><div class="empty">${sessions ? 'Nobody worked here in this period' : 'Loading…'}</div></td></tr>`}
+          ${wf.people.length ? `
+          <tr class="wf-sub staff"><td colspan="3">Staff subtotal · ${wf.staffCount}</td><td></td><td class="num">${fmtMins(wf.staffMins)}</td><td></td></tr>
+          <tr class="wf-sub ext"><td colspan="3">External subtotal · ${wf.extCount}</td><td></td><td class="num">${fmtMins(wf.extMins)}</td><td></td></tr>
+          <tr class="wf-sub total"><td colspan="3">TOTAL · ${wf.people.length} people</td><td></td><td class="num">${fmtMins(total)}</td><td></td></tr>` : ''}
+        </table></div></div>
+      <div>
+        <div class="card"><div class="card-head"><h2>On site now</h2></div>
+          ${staffNow.map((x) => `<a class="list-item" href="#/employees/${x.employeeId}" style="color:inherit">${avatar(x.employeeName, 28, STAFF_COLOR)}<div class="grow"><b>${esc(x.employeeName)}</b><div class="small muted">Staff · since ${fmtTime(x.inLocal)}</div></div><span class="wf-chip staff">Staff</span></a>`).join('')}
+          ${extNow.map((l) => `<a class="list-item" href="#/workers/${l.workerId}" style="color:inherit">${avatar(store.worker(l.workerId)?.name || '?', 28, EXT_COLOR)}<div class="grow"><b>${esc(store.worker(l.workerId)?.name || 'Worker')}</b><div class="small muted">with ${esc(l.employeeName)} · since ${fmtTime(atTz(l.since, store.open.find((x) => x.id === l.sessionId)?.tz))}</div></div><span class="wf-chip ext">External</span></a>`).join('')}
+          ${staffNow.length + extNow.length ? '' : '<div class="empty">Nobody on site right now</div>'}
+        </div>
+        <div class="card mt"><div class="card-head"><h2>Man-hours per day</h2></div><div class="card-pad"><div class="chart-box" style="height:220px"><canvas id="sd-chart"></canvas></div></div></div>
+      </div>
+    </div>`;
+    el.querySelectorAll('[data-r]').forEach((c) => { c.onclick = () => setRange(c.dataset.r); });
+    el.querySelector('#sd-from').onchange = (e) => { if (e.target.value) { from = e.target.value; range = 'custom'; draw(); } };
+    el.querySelector('#sd-to').onchange = (e) => { if (e.target.value) { to = e.target.value; range = 'custom'; draw(); } };
+    el.querySelectorAll('[data-go]').forEach((r) => { r.onclick = () => { location.hash = r.dataset.go; }; });
+    drawChart(ss, es);
+  }
+
+  function drawChart(ss, es) {
+    const canvas = el.querySelector('#sd-chart');
+    if (!canvas || !window.Chart) return;
+    const days = [...new Set([...ss.map((x) => x.date), ...es.map((x) => x.date)])].sort().slice(-31);
+    const staff = days.map((d) => hoursDec(ss.filter((x) => x.date === d).reduce((a, x) => a + sessionMinutes(x), 0)));
+    const ext = days.map((d) => hoursDec(workforce([], es.filter((x) => x.date === d)).extMins));
+    if (chart) chart.destroy();
+    chart = new window.Chart(canvas, {
+      type: 'bar',
+      data: { labels: days.map((d) => d.slice(5)), datasets: [
+        { label: 'Staff', data: staff, backgroundColor: STAFF_COLOR, borderRadius: 4, maxBarThickness: 26 },
+        { label: 'External', data: ext, backgroundColor: EXT_COLOR, borderRadius: 4, maxBarThickness: 26 }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw} h` } } },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { callback: (v) => `${v}h` } } } },
+    });
+  }
+
+  draw();
+  load();
+  const off = store.on(() => { if (!el.querySelector('input:focus')) draw(); });
+  return () => { off(); token++; if (chart) chart.destroy(); };
+}
+const k = (label, value, sub, color) => `<div class="card kpi"><div class="lbl"><span class="ico" style="background:${color}1f;color:${color}">●</span>${esc(label)}</div>
+  <div class="val" style="font-size:22px;color:${color === '#404041' ? 'inherit' : color}">${esc(value)}</div><div class="sub">${esc(sub)}</div></div>`;
+
+export function mount(el, params, ctx) {
+  if (params[0]) return detail(el, params[0], ctx);
+  return list(el, ctx);
+}
+
+function list(el, { setHeader }) {
   setHeader('Sites', 'Work locations with geofence radius used for check-in',
     `<button class="btn" id="s-new">${icon('plus', 16)} Add site</button>`);
   document.getElementById('s-new').onclick = () => editSite(null);
@@ -28,21 +159,24 @@ export function mount(el, params, { setHeader }) {
     const list = all.filter((s) => !q || s.name.toLowerCase().includes(q) || s.address.toLowerCase().includes(q));
     el.querySelector('#s-count').textContent = `${list.length} of ${all.length}`;
     el.querySelector('#s-table').innerHTML = list.length ? `<table class="t">
-      <tr><th>Site</th><th>Project</th><th>Status</th><th>Progress</th><th class="num">Today</th><th class="num">Radius</th></tr>
+      <tr><th>Site</th><th>Project</th><th>Status</th><th>Progress</th><th class="num">On site now</th><th class="num">Today</th><th class="num">Radius</th></tr>
       ${list.map((s) => {
         const proj = s.projectId ? store.project(s.projectId) : null;
         const onSite = store.open.filter((x) => x.siteId === s.id).length;
-        const mins = store.today.filter((x) => x.siteId === s.id).reduce((a, x) => a + ((x.checkOut || new Date()) - x.checkIn) / 60000, 0);
+        const extOn = store.workerLocks.filter((l) => l.siteId === s.id).length;
+        const mins = store.today.filter((x) => x.siteId === s.id).reduce((a, x) => a + ((x.checkOut || new Date()) - x.checkIn) / 60000, 0)
+          + store.workersToday.filter((x) => x.siteId === s.id).reduce((a, x) => a + entryMinutes(x), 0);
         return `<tr class="click" data-id="${s.id}">
           <td><b style="color:${s.active ? 'inherit' : '#8a96a0'}">${esc(s.name)}</b>${s.addedBy ? ` ${pill(`Added by ${s.addedBy}`, 'amber')}` : ''}${!s.approved && s.status !== 'rejected' ? ` ${pill('Awaiting approval', 'red')} <button class="btn sm success" data-approve="${s.id}">Approve</button> <button class="btn sm ghost" data-reject="${s.id}">Reject</button>` : ''}<div class="small muted">${esc(s.address)}</div></td>
           <td>${proj ? `<a href="#/projects/${proj.id}" data-stop>${esc(proj.name)}</a>` : '<span class="muted">—</span>'}</td>
           <td>${s.active ? pill(cap(s.status), { active: 'green', planned: 'blue', 'on hold': 'amber', completed: 'teal' }[s.status] || 'gray') : pill('Inactive', 'gray')}</td>
           <td style="min-width:120px"><div class="row" style="gap:8px;flex-wrap:nowrap"><div style="flex:1">${progressBar(s.progress)}</div><b class="small">${s.progress}%</b></div></td>
-          <td class="num">${onSite ? `<span style="color:#2E9E6A;font-weight:700">● ${onSite}</span> · ` : ''}${fmtMins(mins)}</td>
+          <td class="num nowrap">${onSite || extOn ? `<span class="wf-chip staff" title="Staff">${onSite}</span> <span class="wf-chip ext" title="External workers">${extOn}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="num">${mins ? fmtMins(mins) : '—'}</td>
           <td class="num">${Math.round(s.radius)} m</td></tr>`;
       }).join('')}</table>` : `<div class="empty"><b>No sites</b>Add a site to start scheduling and check-ins.</div>`;
     el.querySelectorAll('tr[data-id]').forEach((r) => {
-      r.onclick = (e) => { if (e.target.closest('[data-stop],[data-approve],[data-reject]')) return; editSite(store.site(r.dataset.id)); };
+      r.onclick = (e) => { if (e.target.closest('[data-stop],[data-approve],[data-reject]')) return; location.hash = `#/sites/${r.dataset.id}`; };
     });
     el.querySelectorAll('[data-approve]').forEach((b) => { b.onclick = () => approveSite(b.dataset.approve, true).then(() => toast('Site approved')); });
     el.querySelectorAll('[data-reject]').forEach((b) => { b.onclick = () => approveSite(b.dataset.reject, false).then(() => toast('Site rejected')); });
@@ -53,10 +187,6 @@ export function mount(el, params, { setHeader }) {
 
   draw();
   const off = store.on(draw);
-  if (params[0]) {
-    const openIt = () => { const x = store.site(params[0]); if (x) { editSite(x); return true; } return false; };
-    if (!openIt()) { const off = store.on(() => { if (openIt()) off(); }); }
-  }
   return () => { off(); map.remove(); };
 }
 

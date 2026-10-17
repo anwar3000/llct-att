@@ -2,13 +2,15 @@ import { store, isAdmin } from '../fb.js';
 import { esc, icon, dateKey, startOfMonth, toast, friendlyError, monthKey, parseKey, modal } from '../util.js';
 import {
   monthlySummaryReport, dailyMatrixReport, attendanceLogReport, pettyReport, updatesReport, projectReport, alertsReport,
-  projectsOverviewReport, downloadReport, filterReport, keywordTerms, workerAttendanceReport, workerRegisterReport,
+  projectsOverviewReport, downloadReport, filterReport, keywordTerms, workerAttendanceReport, workerRegisterReport, workforceBySiteReport, siteWorkforceReport,
 } from '../report-lib.js';
 
 const REPORTS = [
   { id: 'summary', name: 'Monthly attendance summary', desc: 'One row per employee: days worked, off days, absences, total hours, average start time, flagged check-ins.', inputs: ['month'], tags: 'attendance hours payroll monthly employee' },
   { id: 'matrix', name: 'Daily attendance register', desc: 'Payroll-style grid — employees × days of the month with hours, OFF and A (absent).', inputs: ['month'], tags: 'attendance register payroll muster daily absent off' },
   { id: 'log', name: 'Attendance log (detailed)', desc: 'Every check-in / check-out with times, duration, GPS distance and location coordinates.', inputs: ['range', 'employee', 'site'], tags: 'attendance check in out gps location log detailed' },
+  { id: 'workforce', name: 'Workforce by site (staff + external)', desc: 'Per site: staff and external worker headcount and man-hours, consolidated, plus everyone’s days and hours.', inputs: ['range'], tags: 'workforce manpower man-hours site staff external labour consolidated' },
+  { id: 'siteworkforce', name: 'Site workforce', desc: 'Everyone who worked at one site — staff and external workers — with days, hours and a daily log.', inputs: ['range', 'site1'], tags: 'site workforce manpower staff external labour' },
   { id: 'workers', name: 'External workers attendance', desc: 'Per worker: days and hours on site, plus every entry with date, site, time in/out and the employee who added them.', inputs: ['range', 'worker', 'site'], tags: 'external workers labour manpower hours timesheet' },
   { id: 'wregister', name: 'External workers register', desc: 'Workers × days of the month with hours on site — for labour supplier invoices.', inputs: ['month'], tags: 'external workers labour register timesheet monthly invoice' },
   { id: 'alerts', name: 'Geofence alerts', desc: 'Times staff left their site while still checked in (checked hourly), with GPS position.', inputs: ['range', 'employee'], tags: 'alerts geofence left site gps flag' },
@@ -44,6 +46,7 @@ export function mount(el, _p, { setHeader }) {
         ${r.inputs.includes('range') ? `<label class="f"><span>From</span><input type="date" data-k="from" value="${defaults.from}"></label>
           <label class="f"><span>To</span><input type="date" data-k="to" value="${defaults.to}"></label>` : ''}
         ${r.inputs.includes('employee') ? `<label class="f"><span>Employee</span><select data-k="employee"><option value="">All</option>${store.employees.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>` : ''}
+        ${r.inputs.includes('site1') ? `<label class="f"><span>Site</span><select data-k="site1">${store.sites.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">No sites</option>'}</select></label>` : ''}
         ${r.inputs.includes('worker') ? `<label class="f"><span>Worker</span><select data-k="worker"><option value="">All</option>${store.workers.map((w) => `<option value="${w.id}">${esc(w.name)}${w.company ? ` (${esc(w.company)})` : ''}</option>`).join('')}</select></label>` : ''}
         ${r.inputs.includes('site') ? `<label class="f"><span>Site</span><select data-k="site"><option value="">All</option>${store.sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>` : ''}
         ${r.inputs.includes('project') ? `<label class="f"><span>Project</span><select data-k="project">${store.projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('') || '<option value="">No projects yet</option>'}</select></label>` : ''}
@@ -67,6 +70,8 @@ export function mount(el, _p, { setHeader }) {
       if (id === 'summary') return monthlySummaryReport(parseKey(`${val('month')}-01`));
       if (id === 'matrix') return dailyMatrixReport(parseKey(`${val('month')}-01`));
       if (id === 'log') return attendanceLogReport(val('from'), val('to'), val('employee') || null, val('site') || null);
+      if (id === 'workforce') return workforceBySiteReport(val('from'), val('to'));
+      if (id === 'siteworkforce') { const st = store.site(val('site1')); if (!st) throw new Error('Choose a site.'); return siteWorkforceReport(st, val('from'), val('to')); }
       if (id === 'workers') return workerAttendanceReport(val('from'), val('to'), val('worker') || null, val('site') || null);
       if (id === 'wregister') return workerRegisterReport(parseKey(`${val('month')}-01`));
       if (id === 'alerts') return alertsReport(val('from'), val('to'), val('employee') || null);

@@ -116,7 +116,13 @@ service cloud.firestore {
     // Registered by management. Staff only see name / company / trade / phone to pick them at check-in.
     match /extWorkers/{id} {
       allow read: if isActive();
-      allow write: if isManagement();
+      // Staff can add a worker who isn't on the list yet (management completes the documents later).
+      allow create: if isManagement() || (isActive()
+                      && request.resource.data.createdById == request.auth.uid
+                      && request.resource.data.addedByEmployee == true
+                      && request.resource.data.keys().hasOnly(['name', 'phone', 'company', 'trade', 'active',
+                           'createdAt', 'createdBy', 'createdById', 'addedByEmployee']));
+      allow update, delete: if isManagement();
     }
 
     // One lock per worker while they are on a site: stops the same worker being

@@ -9,6 +9,7 @@ import '../../services/geocode_service.dart';
 import '../../services/location_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
+import '../../widgets/site_workforce.dart';
 import '../../widgets/tiles.dart';
 
 const siteStatuses = ['planned', 'active', 'on hold', 'completed'];
@@ -180,6 +181,10 @@ class _SiteEditorState extends State<SiteEditor> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
           children: [
+            if (_editing) ...[
+              SiteWorkforceCard(siteId: widget.existing!.id),
+              const SizedBox(height: 16),
+            ],
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,

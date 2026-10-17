@@ -146,6 +146,84 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
     }
   }
 
+  Future<void> _addNew() async {
+    final name = TextEditingController(text: _search.text.trim());
+    final phone = TextEditingController();
+    final company = TextEditingController();
+    final trade = TextEditingController();
+    String? err;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('Add new external worker'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Only if the worker is not in the list. Management will add their documents later.',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+              const SizedBox(height: 12),
+              TextField(
+                  controller: name,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Full name *')),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: phone,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Phone *')),
+              const SizedBox(height: 10),
+              TextField(controller: company, decoration: const InputDecoration(labelText: 'Company / agency')),
+              const SizedBox(height: 10),
+              TextField(controller: trade, decoration: const InputDecoration(labelText: 'Trade (Helper, Mason…)')),
+              if (err != null) ...[
+                const SizedBox(height: 10),
+                Text(err!, style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+              ],
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(90, 44)),
+              onPressed: () {
+                final n = name.text.trim(), p = phone.text.replaceAll(RegExp(r'[\s-]'), '');
+                if (n.isEmpty || p.isEmpty) {
+                  setD(() => err = 'Name and phone are required.');
+                  return;
+                }
+                final dup = _workers.where((w) => w.phone.replaceAll(RegExp(r'[\s-]'), '') == p).firstOrNull;
+                if (dup != null) {
+                  setD(() => err = '${dup.name} already has this phone number — pick them from the list.');
+                  return;
+                }
+                Navigator.pop(c, true);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final w = await Db.addWorkerByEmployee(
+        me: widget.me,
+        name: name.text.trim(),
+        phone: phone.text.trim(),
+        company: company.text.trim(),
+        trade: trade.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _selected.add(w.id);
+        _search.clear();
+      });
+      showSnack(context, '${w.name} added and ticked — tap Save to check them in');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not add: $e', error: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final q = _search.text.trim().toLowerCase();
@@ -190,7 +268,8 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: TextField(
+                child: Row(children: [
+                  Expanded(child: TextField(
                   controller: _search,
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
@@ -198,7 +277,15 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
                     prefixIcon: Icon(Icons.search),
                     isDense: true,
                   ),
-                ),
+                  )),
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+                    onPressed: _saving ? null : _addNew,
+                    icon: const Icon(Icons.person_add_alt_1),
+                    label: const Text('New'),
+                  ),
+                ]),
               ),
               Expanded(
                 child: _loadError != null
@@ -213,7 +300,7 @@ class _WorkerPickerScreenState extends State<WorkerPickerScreen> {
                     ? const EmptyState(
                         icon: Icons.engineering_outlined,
                         title: 'No external workers registered',
-                        message: 'Management registers workers on the web dashboard (External workers).',
+                        message: 'Tap “New” above to add a worker who is with you.',
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(8, 4, 8, 100),

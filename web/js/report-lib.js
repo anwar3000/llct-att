@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, alertsInRange, workerEntriesInRange, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, alertsInRange, workerEntriesInRange, workerEntriesForSites, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   fmtMoney, tzLabel, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -173,8 +173,9 @@ export async function alertsReport(from, to, empId = null) {
 
 export async function projectReport(p) {
   const sites = p.siteIds.map((id) => store.site(id)).filter(Boolean);
-  const [sessions, updates] = await Promise.all([sessionsForSites(p.siteIds), updatesForSites(p.siteIds)]);
+  const [sessions, updates, entries] = await Promise.all([sessionsForSites(p.siteIds), updatesForSites(p.siteIds), workerEntriesForSites(p.siteIds)]);
   const mins = sessions.reduce((a, s) => a + sessionMinutes(s), 0);
+  const ws = workforceSheets(sessions, entries);
   const prog = sites.length ? Math.round(sites.reduce((a, s) => a + s.progress, 0) / sites.length) : 0;
   const staff = new Map();
   for (const s of sessions) {
@@ -185,7 +186,9 @@ export async function projectReport(p) {
   const summary = [
     ['Project', p.name], ['Code', p.code], ['Client', p.client], ['Project manager', p.manager], ['Status', cap(p.status)],
     ['Start date', p.startDate], ['Target end date', p.endDate], ['Work progress (avg of sites)', `${prog}%`],
-    ['Sites', sites.length], ['Man-hours', fmtMins(mins)], ['Man-hours (decimal)', hoursDec(mins)], ['Staff involved', staff.size],
+    ['Sites', sites.length], ['Man-hours — staff', fmtMins(mins)], ['Man-hours — external workers', fmtMins(ws.wf.extMins)],
+    ['Man-hours — total', `${fmtMins(mins + ws.wf.extMins)} (${hoursDec(mins + ws.wf.extMins)} h)`],
+    ['Staff involved', staff.size], ['External workers involved', ws.wf.extCount],
     ['Site visits', sessions.length], ['Site updates', updates.length], ['Description', p.description],
   ];
   const sheets = [
@@ -202,6 +205,7 @@ export async function projectReport(p) {
       rows: [...staff.values()].sort((a, b) => b.mins - a.mins).map((v) => [v.name, v.days.size, fmtMins(v.mins), hoursDec(v.mins), d2(v.first), d2(v.last)]),
       totals: ['TOTAL', '', fmtMins(mins), hoursDec(mins), '', ''],
     },
+    { ...ws.sheets[0], name: 'Workforce (staff + external)' },
     {
       name: 'Attendance', columns: ['Date', 'Employee', 'Site', 'In', 'Out', 'Hours', 'GPS check'], widths: [11, 20, 20, 8, 8, 8, 24],
       rows: sessions.map((s) => [s.date, s.employeeName, s.siteName, t2(s.inLocal), s.checkOut ? t2(s.outLocal) : 'OPEN', hoursDec(sessionMinutes(s)), sessionFlagged(s) ? flagText(s) : 'OK']),
@@ -396,6 +400,112 @@ export async function workerRegisterReport(month) {
     orientation: 'landscape',
     pdfFont: 6,
     sheets: [{ name: 'Register', columns: cols, widths: [22, 16, ...Array(n).fill(5), 6, 8], rows }],
+  };
+}
+
+// ================================================================== consolidated workforce (staff + external)
+/**
+ * One row per person who worked, staff and external workers together.
+ * Returns { people: [{type, id, name, org, days:Set, mins, sites:Set, last}], staffMins, extMins }.
+ */
+export function workforce(sessions, entries) {
+  const people = new Map();
+  const add = (key, base, date, mins, site, when) => {
+    const p = people.get(key) || { ...base, days: new Set(), mins: 0, sites: new Set(), last: null };
+    p.days.add(date); p.mins += mins; if (site) p.sites.add(site);
+    if (!p.last || when > p.last) p.last = when;
+    people.set(key, p);
+  };
+  for (const s of sessions) {
+    const u = store.user(s.employeeId);
+    add(`s:${s.employeeId}`, { type: 'staff', id: s.employeeId, name: s.employeeName, org: u?.designation || 'Staff' },
+      s.date, sessionMinutes(s), s.siteName, s.checkIn);
+  }
+  const dayMins = workerDayMinutes(entries);
+  const seen = new Set();
+  for (const e of entries) {
+    const w = workerInfo(e.workerId, e);
+    const k = `${e.workerId}|${e.date}`;
+    add(`w:${e.workerId}`, { type: 'external', id: e.workerId, name: w.name, org: [w.company, w.trade].filter(Boolean).join(' · ') || 'External' },
+      e.date, seen.has(k) ? 0 : (dayMins.get(k) || 0), e.siteName, e.checkIn);
+    seen.add(k);
+  }
+  const list = [...people.values()].sort((a, b) => (a.type === b.type ? b.mins - a.mins : a.type === 'staff' ? -1 : 1));
+  return {
+    people: list,
+    staffMins: list.filter((p) => p.type === 'staff').reduce((a, p) => a + p.mins, 0),
+    extMins: list.filter((p) => p.type === 'external').reduce((a, p) => a + p.mins, 0),
+    staffCount: list.filter((p) => p.type === 'staff').length,
+    extCount: list.filter((p) => p.type === 'external').length,
+  };
+}
+
+function workforceSheets(sessions, entries) {
+  const wf = workforce(sessions, entries);
+  const rows = wf.people.map((p) => [p.type === 'staff' ? 'Staff' : 'External worker', p.name, p.org, p.days.size, fmtMins(p.mins), hoursDec(p.mins), [...p.sites].join(', '), d2(p.last)]);
+  const daily = [
+    ...sessions.map((s) => [s.date, 'Staff', s.employeeName, s.siteName, t2(s.inLocal), s.checkOut ? t2(s.outLocal) : 'OPEN', tzLabel(s.tz), hoursDec(sessionMinutes(s)), '']),
+    ...entries.map((e) => [e.date, 'External worker', workerInfo(e.workerId, e).name, e.siteName, t2(e.inLocal), e.checkOut ? t2(e.outLocal) : 'ON SITE', tzLabel(e.tz),
+      hoursDec(Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000))), e.employeeName]),
+  ].sort((a, b) => (a[0] + a[4]).localeCompare(b[0] + b[4]));
+  return {
+    wf,
+    sheets: [
+      {
+        name: 'Workforce',
+        columns: ['Type', 'Name', 'Designation / company', 'Days', 'Total time', 'Hours', 'Sites', 'Last day'],
+        widths: [15, 24, 26, 7, 11, 8, 34, 11],
+        rows: [
+          ...rows,
+        ],
+        totals: [`TOTAL ${wf.people.length} people`, `${wf.staffCount} staff · ${wf.extCount} external`, `staff ${hoursDec(wf.staffMins)} h · external ${hoursDec(wf.extMins)} h`, '',
+          fmtMins(wf.staffMins + wf.extMins), hoursDec(wf.staffMins + wf.extMins), '', ''],
+      },
+      {
+        name: 'Daily log',
+        columns: ['Date', 'Type', 'Name', 'Site', 'In (local)', 'Out (local)', 'Time zone', 'Hours', 'Added by'],
+        widths: [11, 15, 22, 22, 9, 10, 11, 7, 18],
+        rows: daily,
+      },
+    ],
+  };
+}
+
+/** Everyone who worked at one site (staff + external), consolidated. */
+export async function siteWorkforceReport(site, from, to) {
+  const [sessions, entries] = await Promise.all([sessionsForSites([site.id]), workerEntriesForSites([site.id])]);
+  const inR = (d) => d >= from && d <= to;
+  const ws = workforceSheets(sessions.filter((s) => inR(s.date)), entries.filter((e) => inR(e.date)));
+  return {
+    title: `Site workforce — ${site.name}`,
+    subtitle: `${from} to ${to} · ${ws.wf.people.length} people (${ws.wf.staffCount} staff, ${ws.wf.extCount} external) · ${hoursDec(ws.wf.staffMins + ws.wf.extMins)} man-hours`,
+    filename: `site-workforce-${site.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${from}-to-${to}`,
+    orientation: 'landscape',
+    sheets: ws.sheets,
+  };
+}
+
+/** Per-site totals: staff vs external headcount and hours. */
+export async function workforceBySiteReport(from, to) {
+  const [sessions, entries] = await Promise.all([sessionsInRange(from, to), workerEntriesInRange(from, to)]);
+  const ids = [...new Set([...sessions.map((s) => s.siteId), ...entries.map((e) => e.siteId)])];
+  const rows = ids.map((id) => {
+    const wf = workforce(sessions.filter((s) => s.siteId === id), entries.filter((e) => e.siteId === id));
+    const name = store.site(id)?.name || sessions.find((s) => s.siteId === id)?.siteName || entries.find((e) => e.siteId === id)?.siteName || 'Site';
+    return [name, wf.staffCount, hoursDec(wf.staffMins), wf.extCount, hoursDec(wf.extMins), wf.staffCount + wf.extCount, hoursDec(wf.staffMins + wf.extMins)];
+  }).sort((a, b) => b[6] - a[6]);
+  const sum = (i) => Math.round(rows.reduce((a, r) => a + r[i], 0) * 100) / 100;
+  const all = workforceSheets(sessions, entries);
+  return {
+    title: 'Workforce by site (staff + external)',
+    subtitle: `${from} to ${to}`,
+    filename: `workforce-by-site-${from}-to-${to}`,
+    orientation: 'landscape',
+    sheets: [
+      { name: 'By site', columns: ['Site', 'Staff', 'Staff hours', 'External workers', 'External hours', 'Total people', 'Total man-hours'],
+        widths: [28, 8, 12, 16, 14, 13, 15], rows, totals: ['TOTAL', '', sum(2), '', sum(4), '', sum(6)] },
+      ...all.sheets,
+    ],
   };
 }
 

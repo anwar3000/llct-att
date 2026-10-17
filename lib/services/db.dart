@@ -318,6 +318,40 @@ class Db {
       q.docs.map(ExtWorker.fromDoc).where((w) => w.active).toList()
         ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
 
+  /// This month's staff sessions and external-worker entries at one site.
+  static Stream<List<AttendanceSession>> siteSessionsMonth(String siteId, String month) => attendance
+      .where('siteId', isEqualTo: siteId)
+      .where('month', isEqualTo: month)
+      .snapshots()
+      .map(_sortSessions);
+  static Stream<List<WorkerEntry>> siteWorkersMonth(String siteId, String month) => workerAttendance
+      .where('siteId', isEqualTo: siteId)
+      .where('month', isEqualTo: month)
+      .snapshots()
+      .map((q) => q.docs.map(WorkerEntry.fromDoc).toList());
+
+  /// Employee adds a worker who isn't registered yet. Returns the new worker.
+  static Future<ExtWorker> addWorkerByEmployee({
+    required AppUser me,
+    required String name,
+    required String phone,
+    String company = '',
+    String trade = '',
+  }) async {
+    final ref = await extWorkers.add({
+      'name': name,
+      'phone': phone,
+      'company': company,
+      'trade': trade,
+      'active': true,
+      'addedByEmployee': true,
+      'createdBy': me.name,
+      'createdById': me.id,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return ExtWorker(id: ref.id, name: name, phone: phone, company: company, trade: trade);
+  }
+
   static Stream<Map<String, WorkerLock>> workerLocksStream() => workerLocks
       .snapshots()
       .map((q) => {for (final d in q.docs) d.id: WorkerLock.fromDoc(d)});
