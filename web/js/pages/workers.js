@@ -51,7 +51,7 @@ function list(el, { setHeader }) {
 
   function draw() {
     const rows = shown();
-    const locks = store.workerLocks;
+    const locks = store.extOnSite;
     const cnt = (f) => store.workers.filter(f).length;
     el.innerHTML = `
     ${locks.length ? `<div class="card"><div class="card-head"><h2>On site now (${locks.length})</h2><span class="small muted">added by staff at check-in</span></div>

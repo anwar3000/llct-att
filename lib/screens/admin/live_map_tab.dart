@@ -32,14 +32,24 @@ class _LiveMapTabState extends State<LiveMapTab> {
 
   List<StaffStatus> _visible() {
     return widget.live.statuses.where((s) {
-      if (s.user.lastLocation == null) return false;
+      if (_locOf(s) == null) return false;
       if (_onDutyOnly) return s.state == StaffState.onDuty;
       return true;
     }).toList();
   }
 
+  /// Phone GPS, or — if on duty but no GPS has arrived yet — the site they checked in at.
+  LiveLocation? _locOf(StaffStatus s) {
+    final l = s.user.lastLocation;
+    if (l != null) return l;
+    if (s.open == null) return null;
+    final site = widget.live.siteById(s.open!.siteId);
+    if (site == null) return null;
+    return LiveLocation(lat: site.lat, lng: site.lng, checkedIn: true, siteName: site.name);
+  }
+
   List<LatLng> _allPoints(List<StaffStatus> staff) => [
-        ...staff.map((s) => LatLng(s.user.lastLocation!.lat, s.user.lastLocation!.lng)),
+        ...staff.map((s) => LatLng(_locOf(s)!.lat, _locOf(s)!.lng)),
         if (_showSites)
           ...widget.live.sites.where((s) => s.active).map((s) => LatLng(s.lat, s.lng)),
       ];
@@ -62,7 +72,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
   List<Marker> _workerMarkers() {
     final bySession = <String, StaffStatus>{
       for (final s in widget.live.statuses)
-        if (s.open != null && s.user.lastLocation != null) s.open!.id: s,
+        if (s.open != null && _locOf(s) != null) s.open!.id: s,
     };
     final groups = <String, List<WorkerEntry>>{};
     for (final e in widget.live.externalOnSite) {
@@ -73,7 +83,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
       final emp = bySession[sid];
       LatLng? base;
       if (emp != null) {
-        base = LatLng(emp.user.lastLocation!.lat, emp.user.lastLocation!.lng);
+        base = LatLng(_locOf(emp)!.lat, _locOf(emp)!.lng);
       } else {
         final site = widget.live.siteById(list.first.siteId);
         if (site != null) base = LatLng(site.lat, site.lng);
@@ -135,7 +145,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
   }
 
   void _focus(StaffStatus s) {
-    final l = s.user.lastLocation!;
+    final l = _locOf(s)!;
     if (_ready) _map.move(LatLng(l.lat, l.lng), 16);
     _showStaff(s);
   }
@@ -168,7 +178,8 @@ class _LiveMapTabState extends State<LiveMapTab> {
               InfoRow(Icons.login, 'Checked in', '${fmtDateTime(s.open!.inLocal)} ${tzLabel(s.open!.tz)}'),
             ],
             InfoRow(Icons.timer_outlined, 'Today', fmtDuration(s.worked)),
-            InfoRow(Icons.gps_fixed, 'Last GPS', lastSeenLabel(l)),
+            InfoRow(Icons.gps_fixed, 'Last GPS',
+                l == null ? 'No GPS from phone yet — shown at the site. Check location permission / battery.' : lastSeenLabel(l)),
             if (l != null) InfoRow(Icons.pin_drop_outlined, 'Coordinates', latLngLabel(l.lat, l.lng)),
             const SizedBox(height: 14),
             FilledButton.icon(
@@ -223,7 +234,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
               MarkerLayer(markers: _workerMarkers()),
               MarkerLayer(
                 markers: staff
-                    .map((s) => employeeMarker(s.user, s.user.lastLocation!,
+                    .map((s) => employeeMarker(s.user, _locOf(s)!,
                         onTap: () => _showStaff(s)))
                     .toList(),
               ),
@@ -287,7 +298,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
                       separatorBuilder: (_, __) => const SizedBox(width: 8),
                       itemBuilder: (c, i) {
                         final s = onDuty[i];
-                        final l = s.user.lastLocation!;
+                        final l = _locOf(s)!;
                         return SizedBox(
                           width: 220,
                           child: Card(

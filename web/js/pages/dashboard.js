@@ -41,7 +41,7 @@ export function mount(el, _params, { setHeader }) {
     // External workers (labour) are part of the workforce too.
     const extIds = new Set(store.workersToday.map((e) => e.workerId));
     const extMins = store.workersToday.reduce((a, e) => a + entryMinutes(e), 0);
-    const extNow = store.workerLocks.length;
+    const extNow = store.extOnSite.length;
 
     body.innerHTML = `
     <div class="quick">
@@ -54,10 +54,10 @@ export function mount(el, _params, { setHeader }) {
       <a href="#/reports">${icon('report', 16)} Reports</a>
     </div>
     <div class="grid kpis">
-      ${kpi('On site now', count('onDuty') + extNow, `${count('onDuty')} staff · ${extNow} external`, 'pin', '#2E9E6A', 'working')}
+      ${kpi('On site now', store.open.length + extNow, `${store.open.length} staff · ${extNow} external`, 'pin', '#2E9E6A', 'working')}
       ${kpi('Workforce today', present + extIds.size, `${present} staff · ${extIds.size} external`, 'people', '#D98A1A', 'attendance')}
       ${kpi('Man-hours today', fmtMins(minutes + extMins), `staff ${fmtMins(minutes)} · external ${fmtMins(extMins)}`, 'clock', '#3A7BD5')}
-      ${kpi('External workers', `${extNow} on site`, `${new Set(store.workerLocks.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', EXT_COLOR, 'workers')}
+      ${kpi('External workers', `${extNow} on site`, `${new Set(store.extOnSite.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', EXT_COLOR, 'workers')}
       ${kpi('Active sites', activeSites.size, `${store.schedulesToday.length} visits scheduled`, 'site', '#8E5CC4', 'sites')}
       ${kpi('Active projects', activeProjects.length, `${store.projects.length} total`, 'project', '#C2557A', 'projects')}
       ${isAdmin()

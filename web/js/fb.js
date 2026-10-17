@@ -203,7 +203,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [], workersToday: [], requests: [], settings: { minDailyHours: 8 }, rates: {},
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8 }, rates: {},
   _subs: [], _listeners: new Set(), _day: null,
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -243,7 +243,9 @@ export const store = {
         this.emit();
       }, () => {}));
     }
-    sub(query(C('workerAttendance'), where('date', '==', this._day)), 'workersToday', mapWorkerEntry);
+    // Today's worker entries PLUS any still open from earlier (e.g. checked in before midnight).
+    sub(query(C('workerAttendance'), where('date', '==', this._day)), '_wToday', mapWorkerEntry);
+    sub(query(C('workerAttendance'), where('open', '==', true)), '_wOpen', mapWorkerEntry);
     sub(C('idInfo'), 'idInfo', mapIdInfo);
     sub(C('idFiles'), 'idFiles', mapIdFile, (l) => l.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0)));
     this._tick = setInterval(() => {
@@ -259,8 +261,26 @@ export const store = {
   user(id) { return this.users.find((u) => u.id === id) || null; },
   site(id) { return this.sites.find((s) => s.id === id) || null; },
   project(id) { return this.projects.find((p) => p.id === id) || null; },
+  get workersToday() {
+    const m = new Map();
+    [...this._wToday, ...this._wOpen].forEach((e) => m.set(e.id, e));
+    return [...m.values()];
+  },
+  /** External workers on site now — from open attendance entries (works even if a lock is missing). */
+  get extOnSite() {
+    const m = new Map();
+    for (const e of this._wOpen) {
+      const prev = m.get(e.workerId);
+      if (!prev || e.checkIn > prev.since) {
+        m.set(e.workerId, { workerId: e.workerId, recordId: e.id, sessionId: e.sessionId, employeeId: e.employeeId, employeeName: e.employeeName,
+          siteId: e.siteId, siteName: e.siteName, since: e.checkIn, name: e.workerName });
+      }
+    }
+    for (const l of this.workerLocks) if (!m.has(l.workerId)) m.set(l.workerId, { ...l, name: '' });
+    return [...m.values()];
+  },
   worker(id) { return this.workers.find((w) => w.id === id) || null; },
-  workerLock(id) { return this.workerLocks.find((l) => l.workerId === id) || null; },
+  workerLock(id) { return this.extOnSite.find((l) => l.workerId === id) || null; },
   info(ownerId) { return this.idInfo.find((i) => i.id === ownerId) || null; },
   files(ownerId) { return this.idFiles.filter((f) => f.ownerId === ownerId && !f.pending); },
   get pendingSites() { return this.sites.filter((s) => !s.approved && s.status !== 'rejected'); },

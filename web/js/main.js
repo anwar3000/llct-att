@@ -20,7 +20,7 @@ window.__appStarted = true;
 
 const NAV = [
   { path: '', label: 'Dashboard', icon: 'dashboard', page: dashboard },
-  { path: 'working', label: 'Working now', icon: 'people', page: working, badge: () => store.open.length + store.workerLocks.length, badgeColor: 'green' },
+  { path: 'working', label: 'Working now', icon: 'people', page: working, badge: () => store.open.length + store.extOnSite.length, badgeColor: 'green' },
   { path: 'map', label: 'Live map', icon: 'map', page: livemap },
   { sep: 'Work' },
   { path: 'projects', label: 'Projects', icon: 'project', page: projects },

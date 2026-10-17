@@ -8,8 +8,11 @@ export function mount(el, _p, { setHeader }) {
 
   function draw() {
     const st = staffStatuses();
-    const onDuty = st.filter((s) => s.state === 'onDuty' && s.open);
-    const locks = store.workerLocks;
+    // Every open check-in (any role, any date — catches forgotten check-outs too).
+    const onDuty = [...store.open].sort((a, b) => a.checkIn - b.checkIn).map((o) => ({
+      open: o, user: store.user(o.employeeId) || { id: o.employeeId, name: o.employeeName, lastLocation: null },
+    }));
+    const locks = store.extOnSite;
     const ql = q.toLowerCase();
     const match = (...v) => !ql || v.join(' ').toLowerCase().includes(ql);
 
@@ -68,7 +71,7 @@ export function mount(el, _p, { setHeader }) {
   function ext(l, tz, nested) {
     const w = store.worker(l.workerId);
     return `<a class="list-item" href="#/workers/${l.workerId}" style="color:inherit;${nested ? 'padding-left:40px;' : ''}background:#fffaf2;border-left:3px solid ${EXT_COLOR}">
-      ${avatar(w?.name || '?', nested ? 26 : 32, EXT_COLOR)}<div class="grow"><b class="${nested ? 'small' : ''}">${esc(w?.name || 'Worker')}</b>
+      ${avatar(w?.name || l.name || '?', nested ? 26 : 32, EXT_COLOR)}<div class="grow"><b class="${nested ? 'small' : ''}">${esc(w?.name || l.name || 'Worker')}</b>
       <div class="small muted">External${w?.trade ? ` · ${esc(w.trade)}` : ''} · since ${fmtTime(atTz(l.since, tz))}${nested ? '' : ` · with ${esc(l.employeeName)}`}</div></div>
       ${pill('On site', 'green', true)}</a>`;
   }

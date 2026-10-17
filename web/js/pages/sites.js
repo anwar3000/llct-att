@@ -56,7 +56,7 @@ function detail(el, id, { setHeader }) {
     const es = (entries || []).filter((x) => inR(x.date));
     const wf = workforce(ss, es);
     const staffNow = store.open.filter((x) => x.siteId === id);
-    const extNow = store.workerLocks.filter((l) => l.siteId === id);
+    const extNow = store.extOnSite.filter((l) => l.siteId === id);
     const total = wf.staffMins + wf.extMins;
     const pct = total ? Math.round((wf.staffMins / total) * 100) : 0;
     el.innerHTML = `
@@ -92,7 +92,7 @@ function detail(el, id, { setHeader }) {
       <div>
         <div class="card"><div class="card-head"><h2>On site now</h2></div>
           ${staffNow.map((x) => `<a class="list-item" href="#/employees/${x.employeeId}" style="color:inherit">${avatar(x.employeeName, 28, STAFF_COLOR)}<div class="grow"><b>${esc(x.employeeName)}</b><div class="small muted">Staff · since ${fmtTime(x.inLocal)}</div></div><span class="wf-chip staff">Staff</span></a>`).join('')}
-          ${extNow.map((l) => `<a class="list-item" href="#/workers/${l.workerId}" style="color:inherit">${avatar(store.worker(l.workerId)?.name || '?', 28, EXT_COLOR)}<div class="grow"><b>${esc(store.worker(l.workerId)?.name || 'Worker')}</b><div class="small muted">with ${esc(l.employeeName)} · since ${fmtTime(atTz(l.since, store.open.find((x) => x.id === l.sessionId)?.tz))}</div></div><span class="wf-chip ext">External</span></a>`).join('')}
+          ${extNow.map((l) => `<a class="list-item" href="#/workers/${l.workerId}" style="color:inherit">${avatar(store.worker(l.workerId)?.name || l.name || '?', 28, EXT_COLOR)}<div class="grow"><b>${esc(store.worker(l.workerId)?.name || l.name || 'Worker')}</b><div class="small muted">with ${esc(l.employeeName)} · since ${fmtTime(atTz(l.since, store.open.find((x) => x.id === l.sessionId)?.tz))}</div></div><span class="wf-chip ext">External</span></a>`).join('')}
           ${staffNow.length + extNow.length ? '' : '<div class="empty">Nobody on site right now</div>'}
         </div>
         <div class="card mt"><div class="card-head"><h2>Man-hours per day</h2></div><div class="card-pad"><div class="chart-box" style="height:220px"><canvas id="sd-chart"></canvas></div></div></div>
@@ -163,7 +163,7 @@ function list(el, { setHeader }) {
       ${list.map((s) => {
         const proj = s.projectId ? store.project(s.projectId) : null;
         const onSite = store.open.filter((x) => x.siteId === s.id).length;
-        const extOn = store.workerLocks.filter((l) => l.siteId === s.id).length;
+        const extOn = store.extOnSite.filter((l) => l.siteId === s.id).length;
         const mins = store.today.filter((x) => x.siteId === s.id).reduce((a, x) => a + ((x.checkOut || new Date()) - x.checkIn) / 60000, 0)
           + store.workersToday.filter((x) => x.siteId === s.id).reduce((a, x) => a + entryMinutes(x), 0);
         return `<tr class="click" data-id="${s.id}">

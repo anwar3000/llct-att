@@ -324,6 +324,12 @@ class Db {
       .snapshots()
       .map((q) => q.docs.map(WorkerEntry.fromDoc).toList()..sort((a, b) => a.workerName.compareTo(b.workerName)));
 
+  /// External workers still on site (any date — survives midnight).
+  static Stream<List<WorkerEntry>> openWorkerEntries() => workerAttendance
+      .where('open', isEqualTo: true)
+      .snapshots()
+      .map((q) => q.docs.map(WorkerEntry.fromDoc).toList());
+
   /// This month's staff sessions and external-worker entries at one site.
   static Stream<List<AttendanceSession>> siteSessionsMonth(String siteId, String month) => attendance
       .where('siteId', isEqualTo: siteId)

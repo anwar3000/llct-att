@@ -23,7 +23,17 @@ class AdminLive extends ChangeNotifier {
   List<Schedule> schedules = [];
   List<PettyTxn> pendingPetty = [];
   List<GeoAlert> alerts = [];
-  List<WorkerEntry> workersToday = [];
+  List<WorkerEntry> _wToday = [];
+  List<WorkerEntry> _wOpen = [];
+
+  /// Today's external-worker entries plus any still open from earlier (e.g. checked in before midnight).
+  List<WorkerEntry> get workersToday {
+    final m = <String, WorkerEntry>{for (final e in _wToday) e.id: e};
+    for (final e in _wOpen) {
+      m[e.id] = e;
+    }
+    return m.values.toList();
+  }
   bool loaded = false;
   Object? error;
 
@@ -89,7 +99,11 @@ class AdminLive extends ChangeNotifier {
       notifyListeners();
     }, onError: onErr));
     _subs.add(Db.workersForDate(dateKey(now)).listen((v) {
-      workersToday = v;
+      _wToday = v;
+      notifyListeners();
+    }, onError: (_) {}));
+    _subs.add(Db.openWorkerEntries().listen((v) {
+      _wOpen = v;
       notifyListeners();
     }, onError: (_) {}));
     if (canSeeAccounts) _subs.add(Db.pettyPending().listen((v) {
