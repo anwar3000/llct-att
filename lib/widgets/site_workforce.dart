@@ -34,16 +34,15 @@ class _SiteWorkforceCardState extends State<SiteWorkforceCard> {
   final _subs = <StreamSubscription>[];
   List<AttendanceSession> _sessions = [];
   List<WorkerEntry> _entries = [];
-  bool _todayOnly = false;
+  String _range = 'month'; // today | month | all
 
   @override
   void initState() {
     super.initState();
-    final m = monthKey(DateTime.now());
-    _subs.add(Db.siteSessionsMonth(widget.siteId, m).listen((l) {
+    _subs.add(Db.siteSessionsAll(widget.siteId).listen((l) {
       if (mounted) setState(() => _sessions = l);
     }, onError: (_) {}));
-    _subs.add(Db.siteWorkersMonth(widget.siteId, m).listen((l) {
+    _subs.add(Db.siteWorkersAll(widget.siteId).listen((l) {
       if (mounted) setState(() => _entries = l);
     }, onError: (_) {}));
   }
@@ -59,14 +58,21 @@ class _SiteWorkforceCardState extends State<SiteWorkforceCard> {
   @override
   Widget build(BuildContext context) {
     final today = dateKey(DateTime.now());
+    final month = monthKey(DateTime.now());
+    bool inRange(String d) => _range == 'all' || (_range == 'today' ? d == today : d.startsWith(month));
+    // Total to date (all time), staff + external; open check-ins count up to now.
+    final allStaff = _sessions.fold(Duration.zero, (a, s) => a + s.worked());
+    final allExt = _entries.fold(Duration.zero, (a, e) => a + e.worked());
+    final allDays = {..._sessions.map((s) => s.date), ..._entries.map((e) => e.date)}..remove('');
+    final firstDay = allDays.isEmpty ? null : (allDays.toList()..sort()).first;
     final people = <String, _Person>{};
-    for (final s in _sessions.where((s) => !_todayOnly || s.date == today)) {
+    for (final s in _sessions.where((s) => inRange(s.date))) {
       final p = people.putIfAbsent('s${s.employeeId}', () => _Person(s.employeeName, 'Staff', false));
       p.days.add(s.date);
       p.time += s.worked();
       if (s.isOpen) p.onSite = true;
     }
-    for (final e in _entries.where((e) => !_todayOnly || e.date == today)) {
+    for (final e in _entries.where((e) => inRange(e.date))) {
       final p = people.putIfAbsent('w${e.workerId}',
           () => _Person(e.workerName, [e.company, e.trade].where((x) => x.isNotEmpty).join(' · ').ifBlank('External'), true));
       p.days.add(e.date);
@@ -97,18 +103,40 @@ class _SiteWorkforceCardState extends State<SiteWorkforceCard> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [AppColors.primaryDark, AppColors.primary]),
+              borderRadius: BorderRadius.circular(14),
+              border: const Border(bottom: BorderSide(color: AppColors.accent, width: 3)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Total working hours to date',
+                  style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+              Text(fmtDuration(allStaff + allExt),
+                  style: const TextStyle(color: AppColors.accent, fontSize: 28, fontWeight: FontWeight.w800)),
+              Text(
+                'Staff ${fmtDuration(allStaff)} · External ${fmtDuration(allExt)}'
+                '${firstDay == null ? '' : ' · since $firstDay'} · ${allDays.length} day${allDays.length == 1 ? '' : 's'}',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ]),
+          ),
           Row(children: [
             const Expanded(
                 child: Text('Workforce', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-            SegmentedButton<bool>(
+            SegmentedButton<String>(
               showSelectedIcon: false,
               style: const ButtonStyle(visualDensity: VisualDensity.compact),
               segments: const [
-                ButtonSegment(value: true, label: Text('Today')),
-                ButtonSegment(value: false, label: Text('This month')),
+                ButtonSegment(value: 'today', label: Text('Today')),
+                ButtonSegment(value: 'month', label: Text('Month')),
+                ButtonSegment(value: 'all', label: Text('All')),
               ],
-              selected: {_todayOnly},
-              onSelectionChanged: (v) => setState(() => _todayOnly = v.first),
+              selected: {_range},
+              onSelectionChanged: (v) => setState(() => _range = v.first),
             ),
           ]),
           const SizedBox(height: 10),

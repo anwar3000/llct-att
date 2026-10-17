@@ -3,7 +3,7 @@ import {
 } from '../fb.js';
 import {
   esc, icon, pill, cap, progressBar, toast, modal, confirmBox, friendlyError, fmtMins, avatar, fmtTime, fmtDay, dateKey, addDays,
-  startOfMonth, hoursDec, STAFF_COLOR, EXT_COLOR, atTz,
+  startOfMonth, hoursDec, STAFF_COLOR, EXT_COLOR, atTz, parseKey,
 } from '../util.js';
 import { workforce, siteWorkforceReport, downloadReport } from '../report-lib.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -55,11 +55,26 @@ function detail(el, id, { setHeader }) {
     const ss = (sessions || []).filter((x) => inR(x.date));
     const es = (entries || []).filter((x) => inR(x.date));
     const wf = workforce(ss, es);
+    // Total to date — everything ever worked at this site (people on site now count up to this minute).
+    const all = sessions ? workforce(sessions, entries || []) : null;
+    const allDays = sessions ? new Set([...sessions.map((x) => x.date), ...(entries || []).map((x) => x.date)]) : new Set();
+    const firstDay = [...allDays].sort()[0];
+    const allTotal = all ? all.staffMins + all.extMins : 0;
     const staffNow = store.open.filter((x) => x.siteId === id);
     const extNow = store.extOnSite.filter((l) => l.siteId === id);
     const total = wf.staffMins + wf.extMins;
     const pct = total ? Math.round((wf.staffMins / total) * 100) : 0;
     el.innerHTML = `
+    <div class="site-total">
+      <div><div class="lbl">Total working hours to date</div>
+        <div class="big">${all ? fmtMins(allTotal) : '…'}</div>
+        <div class="sub">${all ? `${hoursDec(allTotal)} man-hours${firstDay ? ` · since ${fmtDay(parseKey(firstDay))}` : ''} · ${allDays.size} working day${allDays.size === 1 ? '' : 's'}` : 'Loading…'}</div></div>
+      ${all ? `<div class="split">
+        <div><span class="wf-dot staff"></span> Staff <b>${fmtMins(all.staffMins)}</b><div class="sub">${all.staffCount} people</div></div>
+        <div><span class="wf-dot ext"></span> External <b>${fmtMins(all.extMins)}</b><div class="sub">${all.extCount} workers</div></div>
+        <div>Total people <b>${all.people.length}</b><div class="sub">${staffNow.length + extNow.length} on site now</div></div>
+      </div>` : ''}
+    </div>
     <div class="row" style="margin-bottom:12px">
       <div class="chips">${[['today', 'Today'], ['7', 'Last 7 days'], ['month', 'This month'], ['all', 'All time']]
         .map(([k, l]) => `<span class="chip ${range === k ? 'on' : ''}" data-r="${k}">${l}</span>`).join('')}</div>

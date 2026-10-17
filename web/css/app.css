@@ -378,3 +378,10 @@ tr.short-day td { background: #fdf1f1; }
 .pin-label.ext-label { color: #a8640f; font-size: 10px; }
 .data-warn { display: flex; gap: 10px; margin: 0 28px 12px; padding: 12px 14px; border-radius: 12px; background: #fbe6e6; color: #8f2a2a; border: 1px solid #f1c9c9; font-size: 13.5px; }
 .data-warn a { color: #8f2a2a; text-decoration: underline; }
+.site-total { display: flex; flex-wrap: wrap; gap: 18px 36px; align-items: center; padding: 16px 20px; margin-bottom: 14px; border-radius: 14px;
+  background: linear-gradient(135deg, #2b2b2c, #404041); color: #fff; border-bottom: 4px solid var(--accent); }
+.site-total .lbl { font-size: 12.5px; color: #d6d6d8; font-weight: 600; }
+.site-total .big { font-size: 34px; font-weight: 800; color: var(--accent); letter-spacing: -.02em; line-height: 1.15; }
+.site-total .sub { font-size: 12px; color: #bdbdc0; }
+.site-total .split { display: flex; gap: 28px; flex-wrap: wrap; }
+.site-total .split b { display: block; font-size: 18px; color: #fff; }

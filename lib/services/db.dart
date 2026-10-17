@@ -342,6 +342,14 @@ class Db {
       .snapshots()
       .map((q) => q.docs.map(WorkerEntry.fromDoc).toList());
 
+  /// Everything ever worked at one site (for the "total to date" figure).
+  static Stream<List<AttendanceSession>> siteSessionsAll(String siteId) =>
+      attendance.where('siteId', isEqualTo: siteId).snapshots().map(_sortSessions);
+  static Stream<List<WorkerEntry>> siteWorkersAll(String siteId) => workerAttendance
+      .where('siteId', isEqualTo: siteId)
+      .snapshots()
+      .map((q) => q.docs.map(WorkerEntry.fromDoc).toList());
+
   /// Employee adds a worker who isn't registered yet. Returns the new worker.
   static Future<ExtWorker> addWorkerByEmployee({
     required AppUser me,
