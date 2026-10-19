@@ -95,3 +95,7 @@ body.staff input, body.staff select, body.staff textarea { font-size: 16px; } /*
 body.staff .modal { max-width: 560px; width: calc(100% - 20px); }
 body.staff .modal-foot { display: flex; gap: 8px; }
 body.staff #toast-root { bottom: calc(88px + env(safe-area-inset-bottom)) !important; }
+.st-wico { width: 42px; height: 42px; border-radius: 12px; background: #fff4e2; color: #D98A1A; display: grid; place-items: center; flex: none; }
+.st-wk-row { display: flex; align-items: center; gap: 10px; padding-top: 10px; }
+.st-wk-row .grow { flex: 1; min-width: 0; }
+.st-btn.danger-o { color: #D64545; border-color: #f1c9c9; }

@@ -57,44 +57,81 @@ class Db {
   static Future<void> deleteSite(String id) => sites.doc(id).delete();
 
   /// Employee found no registered site where they are working → create one at their GPS spot.
-  static Future<Site> createSiteByEmployee({
+  static CollectionReference<Map<String, dynamic>> get siteKeys => _fs.collection('siteKeys');
+
+  /// ~220 m grid cell used to stop two people adding the same place twice.
+  static String _cell(double lat, double lng, [int dy = 0, int dx = 0]) =>
+      'g_${(lat / 0.002).floor() + dy}_${(lng / 0.002).floor() + dx}';
+  static String _nameKey(String name) => 'n_${name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}';
+
+  /// Adds a site from the field. If someone already added a site at this place
+  /// (or with the same name), nothing is created and that existing site is returned
+  /// with `existing: true` — the first one submitted wins.
+  static Future<({Site site, bool existing})> createSiteByEmployee({
     required AppUser user,
     required String name,
     required String address,
     required double lat,
     required double lng,
-  }) async {
-    final site = Site(
-      id: '',
-      name: name,
-      address: address,
-      lat: lat,
-      lng: lng,
-      radius: kDefaultSiteRadius,
-      status: 'active',
-      notes: 'Added from the field by ${user.name}',
-      approved: false,
-    );
-    final ref = await sites.add({
-      ...site.toMap(),
-      'createdBy': user.id,
-      'createdByName': user.name,
-      'addedByEmployee': true,
-      'createdAt': FieldValue.serverTimestamp(),
+  }) {
+    final keyRefs = [
+      for (var dy = -1; dy <= 1; dy++)
+        for (var dx = -1; dx <= 1; dx++) siteKeys.doc(_cell(lat, lng, dy, dx)),
+      siteKeys.doc(_nameKey(name)),
+    ];
+    return _fs.runTransaction<({Site site, bool existing})>((tx) async {
+      // 1) read every key (all reads must come before writes)
+      final keys = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final r in keyRefs) {
+        keys.add(await tx.get(r));
+      }
+      for (final k in keys.where((k) => k.exists)) {
+        final sid = k.data()?['siteId'];
+        if (sid is! String || sid.isEmpty) continue;
+        final sd = await tx.get(sites.doc(sid));
+        if (!sd.exists) continue;
+        final existing = Site.fromDoc(sd);
+        if (existing.active && existing.status != 'rejected') return (site: existing, existing: true);
+      }
+      // 2) nobody has it — create the site and claim this place + name
+      final ref = sites.doc();
+      final data = {
+        'name': name,
+        'address': address,
+        'lat': lat,
+        'lng': lng,
+        'radius': kDefaultSiteRadius,
+        'active': true,
+        'progress': 0,
+        'status': 'active',
+        'notes': 'Added from the field by ${user.name}',
+        'approved': false,
+        'createdBy': user.id,
+        'createdByName': user.name,
+        'addedByEmployee': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+      tx.set(ref, data);
+      final claim = {'siteId': ref.id, 'by': user.id, 'at': FieldValue.serverTimestamp()};
+      tx.set(siteKeys.doc(_cell(lat, lng)), claim);
+      tx.set(siteKeys.doc(_nameKey(name)), claim);
+      return (
+        site: Site(
+          id: ref.id,
+          name: name,
+          address: address,
+          lat: lat,
+          lng: lng,
+          radius: kDefaultSiteRadius,
+          status: 'active',
+          notes: 'Added from the field by ${user.name}',
+          createdByName: user.name,
+          createdBy: user.id,
+          approved: false,
+        ),
+        existing: false,
+      );
     });
-    return Site(
-      id: ref.id,
-      name: site.name,
-      address: site.address,
-      lat: lat,
-      lng: lng,
-      radius: site.radius,
-      status: site.status,
-      notes: site.notes,
-      createdByName: user.name,
-      createdBy: user.id,
-      approved: false,
-    );
   }
 
   static Future<Site?> getSite(String id) async {
@@ -270,6 +307,7 @@ class Db {
     required double radius,
     required bool mocked,
     String note = '',
+    bool closeWorkers = true,
   }) async {
     final now = DateTime.now();
     await attendance.doc(session.id).update({
@@ -286,7 +324,7 @@ class Db {
       if (mocked) 'mocked': true,
       if (note.isNotEmpty) 'note': note,
     });
-    await _closeWorkersSafely(session, now);
+    if (closeWorkers) await _closeWorkersSafely(session, now);
   }
 
   /// Admin: force-close a session someone forgot to check out of.
@@ -317,6 +355,14 @@ class Db {
   static Stream<List<ExtWorker>> activeWorkersStream() => extWorkers.snapshots().map((q) =>
       q.docs.map(ExtWorker.fromDoc).where((w) => w.active).toList()
         ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+
+  /// External workers this employee put on site and hasn't punched out yet (any check-in).
+  static Stream<List<WorkerEntry>> myOpenWorkers(String uid) => workerAttendance
+      .where('employeeId', isEqualTo: uid)
+      .where('open', isEqualTo: true)
+      .snapshots()
+      .map((q) => q.docs.map(WorkerEntry.fromDoc).toList()
+        ..sort((a, b) => a.workerName.toLowerCase().compareTo(b.workerName.toLowerCase())));
 
   /// All external-worker entries for a day (management).
   static Stream<List<WorkerEntry>> workersForDate(String date) => workerAttendance

@@ -36,6 +36,7 @@ class _HomeTabState extends State<HomeTab> {
   bool _busy = false;
   int _workerCount = -1; // -1 = not loaded yet / could not load
   List<WorkerEntry> _sessionWorkers = [];
+  List<WorkerEntry> _myWorkers = []; // every external worker I still have on site
   StreamSubscription? _sessionWorkersSub;
   String? _sessionWorkersFor;
   String _busyText = '';
@@ -74,6 +75,9 @@ class _HomeTabState extends State<HomeTab> {
     _subs.add(Db.offDaysForEmployeeMonth(uid, monthKey(DateTime.now())).listen((l) {
       if (mounted) setState(() => _offDays = l);
     }));
+    _subs.add(Db.myOpenWorkers(uid).listen((l) {
+      if (mounted) setState(() => _myWorkers = l);
+    }, onError: (_) {}));
     _subs.add(Db.activeWorkersStream().listen((l) {
       if (mounted) setState(() => _workerCount = l.length);
     }, onError: (_) {}));
@@ -294,14 +298,35 @@ class _HomeTabState extends State<HomeTab> {
   Future<void> _checkOut() async {
     final open = widget.open;
     if (open == null) return;
-    final ok = await confirm(
-      context,
-      'Check out?',
-      'Check out from ${open.siteName}.\nTime on this site: ${fmtDuration(open.worked())}'
-          '${_onSiteWorkers == 0 ? '' : '\n\n$_onSiteWorkers external worker${_onSiteWorkers == 1 ? '' : 's'} will be checked out with you.'}',
-      ok: 'Check out',
-    );
-    if (!ok || !mounted) return;
+    var closeWorkers = true;
+    if (_onSiteWorkers == 0) {
+      final ok = await confirm(
+        context,
+        'Check out?',
+        'Check out from ${open.siteName}.\nTime on this site: ${fmtDuration(open.worked())}',
+        ok: 'Check out',
+      );
+      if (!ok || !mounted) return;
+    } else {
+      final r = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Check out?'),
+          content: Text('Check out from ${open.siteName} (${fmtDuration(open.worked())}).\n\n'
+              '$_onSiteWorkers external worker${_onSiteWorkers == 1 ? ' is' : 's are'} still on site with you. '
+              'Punch them out now too, or keep them on site and punch them out later?'),
+          actionsOverflowDirection: VerticalDirection.down,
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            OutlinedButton(onPressed: () => Navigator.pop(c, 'keep'), child: const Text('Keep workers on site')),
+            FilledButton(onPressed: () => Navigator.pop(c, 'all'), child: const Text('Punch out workers too')),
+          ],
+        ),
+      );
+      if (r == null || !mounted) return;
+      closeWorkers = r == 'all';
+    }
+
     final pos = await _locate('Getting your GPS location…');
     if (pos == null || !mounted) return;
 
@@ -323,6 +348,7 @@ class _HomeTabState extends State<HomeTab> {
         distance: dist,
         radius: site?.radius ?? kDefaultSiteRadius,
         mocked: pos.isMocked,
+        closeWorkers: closeWorkers,
       );
       await TrackingService.instance
           .pushOnce(widget.me.id, pos, checkedIn: false, siteName: '');
@@ -340,8 +366,7 @@ class _HomeTabState extends State<HomeTab> {
   static final _newSiteMarker = Site(id: '__new__', name: '', lat: 0, lng: 0);
 
   /// Approved sites, plus any site this employee added that is still awaiting approval.
-  List<Site> get _visibleSites =>
-      _sites.where((s) => s.approved || s.createdBy == widget.me.id).toList();
+  List<Site> get _visibleSites => _sites.where((s) => s.status != 'rejected').toList();
 
   Future<void> _blocked(String title, String message) => showDialog<void>(
         context: context,
@@ -406,13 +431,24 @@ class _HomeTabState extends State<HomeTab> {
       _busyText = 'Adding site…';
     });
     try {
-      return await Db.createSiteByEmployee(
+      final r = await Db.createSiteByEmployee(
         user: widget.me,
         name: name.text.trim(),
         address: address.text.trim(),
         lat: pos.latitude,
         lng: pos.longitude,
       );
+      if (!r.existing) return r.site;
+      if (!mounted) return null;
+      setState(() => _busy = false);
+      final use = await confirm(
+        context,
+        'Site already added',
+        '“${r.site.name}” was already added here${r.site.createdByName.isNotEmpty ? ' by ${r.site.createdByName}' : ''}'
+            '${r.site.approved ? '' : ' and is awaiting approval'}.\n\nA place can only be added once. Check in to this site instead?',
+        ok: 'Use this site',
+      );
+      return use ? r.site : null;
     } catch (e) {
       if (mounted) showSnack(context, 'Could not add site: $e', error: true);
       return null;
@@ -537,7 +573,7 @@ class _HomeTabState extends State<HomeTab> {
             const SizedBox(height: 14),
             _actionButton(open),
             const SizedBox(height: 12),
-            open != null ? _workersCard(open) : _workersHint(),
+            open != null || _myWorkers.isNotEmpty ? _workersCard(open) : _workersHint(),
             const SizedBox(height: 12),
             _quickActions(open),
             if (_isOffToday) ...[
@@ -738,20 +774,17 @@ class _HomeTabState extends State<HomeTab> {
         ]),
       );
 
-  Widget _workersCard(AttendanceSession open) {
-    final onSite = _sessionWorkers.where((e) => e.open).toList();
+  Widget _workersCard(AttendanceSession? open) {
+    final onSite = _myWorkers;
     return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => _openWorkers(open),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-          child: Row(children: [
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
             Container(
               width: 42,
               height: 42,
-              decoration: BoxDecoration(
-                  color: AppColors.accentSoft, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: AppColors.accentSoft, borderRadius: BorderRadius.circular(12)),
               child: const Icon(Icons.engineering, color: AppColors.accentDark),
             ),
             const SizedBox(width: 12),
@@ -760,24 +793,95 @@ class _HomeTabState extends State<HomeTab> {
                 Text(
                     onSite.isEmpty
                         ? 'No external workers added'
-                        : '${onSite.length} external worker${onSite.length == 1 ? '' : 's'} with you',
+                        : '${onSite.length} external worker${onSite.length == 1 ? '' : 's'} on site',
                     style: const TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 2),
                 Text(
-                  onSite.isEmpty
-                      ? 'Tap to add labour working with you at this site'
-                      : onSite.map((e) => e.workerName).join(', '),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+                    open == null
+                        ? 'You are checked out — punch them out when they leave'
+                        : 'Add labour to your check-in, punch each out when they leave',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+              ]),
+            ),
+            if (open != null)
+              TextButton(onPressed: () => _openWorkers(open), child: Text(onSite.isEmpty ? 'Add' : 'Add more')),
+          ]),
+          for (final e in onSite)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                Avatar(e.workerName, size: 30, ring: AppColors.accentDark),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(e.workerName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text('${e.siteName} · in ${fmtTime(e.inLocal)} · ${fmtDuration(e.worked())}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  ]),
+                ),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    foregroundColor: AppColors.danger,
+                  ),
+                  onPressed: () => _punchOut([e]),
+                  child: const Text('Punch out'),
                 ),
               ]),
             ),
-            TextButton(onPressed: () => _openWorkers(open), child: Text(onSite.isEmpty ? 'Add' : 'Manage')),
-          ]),
-        ),
+          if (onSite.length > 1)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(onPressed: () => _punchOut(onSite), child: const Text('Punch out all')),
+            ),
+        ]),
       ),
     );
+  }
+
+  /// Punch out one or more external workers (now, or at a time you pick).
+  Future<void> _punchOut(List<WorkerEntry> list) async {
+    final names = list.map((e) => e.workerName).join(', ');
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Punch out ${list.length == 1 ? list.first.workerName : '${list.length} workers'}'),
+        content: Text(list.length == 1 ? 'When did they leave the site?' : '$names\n\nWhen did they leave the site?'),
+        actionsOverflowDirection: VerticalDirection.down,
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(c, 'pick'), child: const Text('Earlier time…')),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(90, 42)),
+            onPressed: () => Navigator.pop(c, 'now'),
+            child: Text('Now ${fmtTime(DateTime.now())}'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+    var at = DateTime.now();
+    if (choice == 'pick') {
+      final t = await showTimePicker(context: context, initialTime: TimeOfDay.now(), helpText: 'Time they left');
+      if (t == null || !mounted) return;
+      final n = DateTime.now();
+      at = DateTime(n.year, n.month, n.day, t.hour, t.minute);
+      if (at.isAfter(n)) at = at.subtract(const Duration(days: 1));
+    }
+    var done = 0;
+    try {
+      for (final e in list) {
+        if (!at.isAfter(e.checkIn)) {
+          if (mounted) showSnack(context, '${e.workerName}: time must be after ${fmtTime(e.inLocal)}', error: true);
+          continue;
+        }
+        await Db.endWorkerEntry(e, at);
+        done++;
+      }
+      if (mounted && done > 0) showSnack(context, '$done punched out at ${fmtTime(at)}');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not punch out: $e', error: true);
+    }
   }
 
   Widget _actionButton(AttendanceSession? open) {

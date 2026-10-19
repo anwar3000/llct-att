@@ -23,7 +23,7 @@ const EXPENSE_CATS = ['Fuel', 'Food', 'Travel', 'Materials', 'Tools', 'Other'];
 const UPDATE_CATS = ['Progress', 'Issue', 'Material', 'Safety'];
 
 const S = {
-  me: null, tab: 'today', sites: [], open: null, todaySessions: [], workers: [], locks: {}, sessionWorkers: [],
+  me: null, tab: 'today', sites: [], open: null, todaySessions: [], workers: [], locks: {}, sessionWorkers: [], myWorkers: [],
   month: new Date(), monthSessions: [], monthOff: [], petty: [], myUpdates: [], idInfo: {}, idFiles: [],
   busy: '', subs: [], sessSubs: [], monthSubs: [], lastAlertAt: 0, lastPush: 0,
 };
@@ -52,7 +52,7 @@ function locate() {
     );
   });
 }
-const visibleSites = () => S.sites.filter((s) => s.active && (s.approved || s.createdBy === S.me.id));
+const visibleSites = () => S.sites.filter((s) => s.active && s.status !== 'rejected');
 const minsOf = (s) => Math.max(0, Math.round(((s.checkOut || new Date()) - s.checkIn) / 60000));
 const busy = (t) => { S.busy = t; drawBusy(); };
 
@@ -145,6 +145,8 @@ function start() {
   on(query(C('attendance'), where('employeeId', '==', uid), where('date', '==', dateKey(new Date()))), (s) => {
     S.todaySessions = s.docs.map(mapSession).sort((a, b) => a.checkIn - b.checkIn); draw();
   });
+  on(query(C('workerAttendance'), where('employeeId', '==', uid), where('open', '==', true)),
+    (s) => { S.myWorkers = s.docs.map(mapWorkerEntry).sort((a, b) => a.workerName.localeCompare(b.workerName)); draw(); });
   on(C('extWorkers'), (s) => { S.workers = s.docs.map(mapWorker).filter((w) => w.active).sort((a, b) => a.name.localeCompare(b.name)); });
   on(C('workerLocks'), (s) => { S.locks = Object.fromEntries(s.docs.map((d) => [d.id, d.data()])); });
   on(query(C('petty'), where('employeeId', '==', uid)), (s) => { S.petty = s.docs.map(mapPetty).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); draw(); });
@@ -247,11 +249,16 @@ function drawToday(main) {
       <div class="timer" id="st-timer">${fmtMins(closed + (o ? minsOf(o) : 0))}</div>
     </div>
     <button class="st-big ${o ? 'out' : 'in'}" id="st-act">${o ? 'CHECK OUT' : 'CHECK IN'}</button>
-    ${o ? `<div class="st-card st-workers" id="st-wk">
-        <div class="ico">${icon('worker', 22)}</div>
-        <div class="grow"><b>${onSite.length ? `${onSite.length} external worker${onSite.length === 1 ? '' : 's'} with you` : 'No external workers added'}</b>
-          <div class="small muted">${onSite.length ? esc(onSite.map((e) => e.workerName).join(', ')) : 'Tap to add labour working with you'}</div></div>
-        <span class="st-link">${onSite.length ? 'Manage' : 'Add'}</span></div>`
+    ${o || S.myWorkers.length ? `<div class="st-card pad">
+        <div class="row" style="flex-wrap:nowrap;gap:10px"><div class="st-wico">${icon('worker', 22)}</div>
+          <div class="grow"><b>${S.myWorkers.length ? `${S.myWorkers.length} external worker${S.myWorkers.length === 1 ? '' : 's'} on site` : 'No external workers added'}</b>
+          <div class="small muted">${o ? 'Add labour to your check-in, punch each out when they leave' : 'You are checked out — punch them out when they leave'}</div></div>
+          ${o ? `<button class="st-btn sm" id="st-wk">${S.myWorkers.length ? 'Add more' : 'Add'}</button>` : ''}</div>
+        ${S.myWorkers.map((e) => `<div class="row-i st-wk-row">${avatar(e.workerName, 30, '#D98A1A')}
+          <div class="grow"><b class="small">${esc(e.workerName)}</b><div class="small muted">${esc(e.siteName)} · in ${fmtTime(e.inLocal)} · ${fmtMins(minsOf(e))}</div></div>
+          <button class="st-btn sm danger-o" data-po="${e.id}">Punch out</button></div>`).join('')}
+        ${S.myWorkers.length > 1 ? '<div style="text-align:right"><button class="st-btn sm" id="st-poall" style="margin-top:6px">Punch out all</button></div>' : ''}
+      </div>`
       : '<div class="st-note">External workers: check in first, then tick the labour working with you.</div>'}
     <div class="st-quick">
       <a data-go="update">${icon('updates', 20)}<span>Site update</span></a>
@@ -266,6 +273,8 @@ function drawToday(main) {
     ${isIOS ? '<div class="st-note small">On iPhone, location is shared only while this app is open. Open it from time to time while you are on site.</div>' : ''}`;
   main.querySelector('#st-act').onclick = () => (o ? checkOut() : checkIn());
   main.querySelector('#st-wk')?.addEventListener('click', () => workerPicker(false));
+  main.querySelectorAll('[data-po]').forEach((b) => { b.onclick = () => punchOut(S.myWorkers.filter((e) => e.id === b.dataset.po)); });
+  main.querySelector('#st-poall')?.addEventListener('click', () => punchOut(S.myWorkers));
   main.querySelectorAll('[data-go]').forEach((a) => { a.onclick = () => { S.tab = a.dataset.go; draw(); }; });
 }
 function drawTimer() {
@@ -354,10 +363,11 @@ function createSiteHere(p) {
           if (!name) { m.querySelector('#ns-e').textContent = 'Enter a site name.'; return; }
           ev.currentTarget.disabled = true;
           try {
-            const data = { name, address: m.querySelector('#ns-a').value.trim(), lat: p.lat, lng: p.lng, radius: DEFAULT_RADIUS, active: true, progress: 0,
-              status: 'active', notes: `Added from the field by ${S.me.name}`, approved: false, createdBy: S.me.id, createdByName: S.me.name, addedByEmployee: true, createdAt: serverTimestamp() };
-            const ref = await addDoc(C('sites'), data);
-            close(); resolve({ id: ref.id, ...data });
+            const r = await createSiteSafely(name, m.querySelector('#ns-a').value.trim(), p);
+            close();
+            if (!r.existing) { resolve(r.site); return; }
+            const use = await confirmBox('Site already added', `“${r.site.name}” was already added here${r.site.createdByName ? ` by ${r.site.createdByName}` : ''}${r.site.approved ? '' : ' and is awaiting approval'}.\n\nA place can only be added once. Check in to this site instead?`, { ok: 'Use this site' });
+            resolve(use ? r.site : null);
           } catch (e) { m.querySelector('#ns-e').textContent = friendlyError(e); ev.currentTarget.disabled = false; }
         };
       },
@@ -365,11 +375,57 @@ function createSiteHere(p) {
   });
 }
 
+// First one wins: a place (≈220 m grid incl. neighbours) or a site name can be claimed only once.
+const cellKey = (lat, lng, dy = 0, dx = 0) => `g_${Math.floor(lat / 0.002) + dy}_${Math.floor(lng / 0.002) + dx}`;
+const nameKey = (n) => `n_${n.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+async function createSiteSafely(name, address, p) {
+  const keyRefs = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) keyRefs.push(doc(db, 'siteKeys', cellKey(p.lat, p.lng, dy, dx)));
+  keyRefs.push(doc(db, 'siteKeys', nameKey(name)));
+  return runTransaction(db, async (tx) => {
+    const keys = [];
+    for (const r of keyRefs) keys.push(await tx.get(r));
+    for (const k of keys) {
+      if (!k.exists()) continue;
+      const sid = k.data().siteId;
+      if (!sid) continue;
+      const sd = await tx.get(doc(db, 'sites', sid));
+      if (!sd.exists()) continue;
+      const ex = mapSite(sd);
+      if (ex.active && ex.status !== 'rejected') return { site: { ...ex, createdByName: sd.data().createdByName || '' }, existing: true };
+    }
+    const ref = doc(C('sites'));
+    const data = { name, address, lat: p.lat, lng: p.lng, radius: DEFAULT_RADIUS, active: true, progress: 0, status: 'active',
+      notes: `Added from the field by ${S.me.name}`, approved: false, createdBy: S.me.id, createdByName: S.me.name, addedByEmployee: true, createdAt: serverTimestamp() };
+    tx.set(ref, data);
+    const claim = { siteId: ref.id, by: S.me.id, at: serverTimestamp() };
+    tx.set(doc(db, 'siteKeys', cellKey(p.lat, p.lng)), claim);
+    tx.set(doc(db, 'siteKeys', nameKey(name)), claim);
+    return { site: { id: ref.id, ...data }, existing: false };
+  });
+}
+
 async function checkOut() {
   const o = S.open;
   if (!o) return;
   const onSite = S.sessionWorkers.filter((e) => e.open).length;
-  if (!await confirmBox('Check out?', `Check out from ${o.siteName}.\nTime on this site: ${fmtMins(minsOf(o))}${onSite ? `\n\n${onSite} external worker${onSite === 1 ? '' : 's'} will be checked out with you.` : ''}`, { ok: 'Check out' })) return;
+  let closeAll = true;
+  if (!onSite) {
+    if (!await confirmBox('Check out?', `Check out from ${o.siteName}.\nTime on this site: ${fmtMins(minsOf(o))}`, { ok: 'Check out' })) return;
+  } else {
+    const r = await new Promise((res) => modal({
+      title: 'Check out?',
+      body: `<p style="margin:0;white-space:pre-wrap">Check out from ${esc(o.siteName)} (${fmtMins(minsOf(o))}).\n\n${onSite} external worker${onSite === 1 ? ' is' : 's are'} still on site with you. Punch them out now too, or keep them on site and punch them out later?</p>`,
+      foot: '<div style="display:flex;flex-direction:column;gap:8px;width:100%"><button class="st-btn primary" data-a>Punch out workers too</button><button class="st-btn" data-k>Keep workers on site</button><button class="st-btn" data-c>Cancel</button></div>',
+      onMount: (m, close) => {
+        m.querySelector('[data-a]').onclick = () => { close(); res('all'); };
+        m.querySelector('[data-k]').onclick = () => { close(); res('keep'); };
+        m.querySelector('[data-c]').onclick = () => { close(); res(null); };
+      },
+    }));
+    if (!r) return;
+    closeAll = r === 'all';
+  }
   busy('Getting your GPS location…');
   let p = null;
   try { p = await locate(); } catch (e) {
@@ -385,7 +441,7 @@ async function checkOut() {
       checkOut: Timestamp.fromDate(now), checkOutServer: serverTimestamp(), outLat: p?.lat ?? null, outLng: p?.lng ?? null, outAccuracy: p?.accuracy ?? null,
       outDistance: d, outOutside: d != null && site ? d > site.radius : false, durationMin: Math.round((now - o.checkIn) / 60000), status: 'closed', outTz: tzNow(),
     });
-    await closeWorkers(o.id, now).catch(() => {});
+    if (closeAll) await closeWorkers(o.id, now).catch(() => {});
     if (p) await pushLocation(p, false, '', false).catch(() => {});
     toast(`Checked out · ${fmtMins(Math.round((now - o.checkIn) / 60000))} at ${o.siteName}`);
   } catch (e) { toast(`Check-out failed: ${friendlyError(e)}`, true); }
@@ -516,6 +572,32 @@ function newWorkerDialog(prefill = '') {
         };
       },
     });
+  });
+}
+
+function punchOut(list) {
+  if (!list.length) return;
+  const nowT = new Date();
+  const hh = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  modal({
+    title: list.length === 1 ? `Punch out ${list[0].workerName}` : `Punch out ${list.length} workers`,
+    body: `${list.length > 1 ? `<p class="small muted" style="margin-top:0">${esc(list.map((e) => e.workerName).join(', '))}</p>` : ''}
+      <label class="f"><span>Time they left the site</span><input type="time" id="po-t" value="${hh(nowT)}"></label><div class="error" id="po-e"></div>`,
+    foot: '<button class="st-btn" data-c>Cancel</button><button class="st-btn primary" data-ok style="flex:1">Punch out</button>',
+    onMount: (m, close) => {
+      m.querySelector('[data-c]').onclick = close;
+      m.querySelector('[data-ok]').onclick = async (ev) => {
+        const [h, mi] = m.querySelector('#po-t').value.split(':').map(Number);
+        const n = new Date();
+        let at = new Date(n.getFullYear(), n.getMonth(), n.getDate(), h, mi);
+        if (h === n.getHours() && mi === n.getMinutes()) at = n; // "now" = this exact moment
+        else if (at > n) at = new Date(at.getTime() - 86400000);
+        const bad = list.find((e) => at <= e.checkIn);
+        if (bad) { m.querySelector('#po-e').textContent = `${bad.workerName} started at ${fmtTime(bad.inLocal)} — pick a later time.`; return; }
+        ev.currentTarget.disabled = true;
+        try { for (const e of list) await endWorker(e, at); toast(`Punched out at ${fmtTime(at)}`); close(); } catch (e) { m.querySelector('#po-e').textContent = friendlyError(e); ev.currentTarget.disabled = false; }
+      };
+    },
   });
 }
 

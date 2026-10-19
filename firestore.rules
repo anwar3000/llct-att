@@ -60,6 +60,13 @@ service cloud.firestore {
       allow delete: if isManagement();
     }
 
+    // Claims on a place / site name so the same new site can't be added twice (first one wins).
+    match /siteKeys/{key} {
+      allow read: if isActive();
+      allow create, update: if isActive() && request.resource.data.siteId is string;
+      allow delete: if isManagement();
+    }
+
     // ------------------------------------------------------------ schedules
     match /schedules/{id} {
       allow read: if isManagement() || owns();
