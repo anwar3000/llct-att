@@ -1,5 +1,5 @@
 import { store, staffStatuses } from '../fb.js';
-import { esc, avatar, fmtMins, fmtTime, timeAgo, pill, EXT_COLOR, STAFF_COLOR, atTz } from '../util.js';
+import { esc, avatar, fmtMins, fmtTime, timeAgo, pill, EXT_COLOR, STAFF_COLOR, atTz, icon } from '../util.js';
 import { makeMap, siteLayer, employeeMarker, fitTo, workerMarker } from '../mapkit.js';
 import { logoutDialog } from '../admin-edit.js';
 
@@ -45,7 +45,8 @@ export function mount(el, _p, { setHeader }) {
   function draw() {
     const sig = JSON.stringify([showAll, store.sites.map((s) => [s.id, s.lat, s.lng, s.radius, s.active]),
       staffStatuses().map((s) => [s.user.id, s.state, s.user.lastLocation && [s.user.lastLocation.lat, s.user.lastLocation.lng, +s.user.lastLocation.at]]),
-      store.extOnSite.map((l) => [l.workerId, l.sessionId]), store.open.map((o) => o.id)]);
+      store.extOnSite.map((l) => [l.workerId, l.sessionId]), store.open.map((o) => o.id),
+      store.tripsActive.map((t) => [t.id, t.lastLat, t.lastLng, t.distanceM])]);
     if (sig === lastSig) return;
     lastSig = sig;
     siteGroup.clearLayers();
@@ -90,6 +91,18 @@ export function mount(el, _p, { setHeader }) {
         markers.set(`w:${l.workerId}`, m);
       });
     });
+    // Drivers on a trip: shown at the trip's latest GPS point.
+    store.tripsActive.forEach((t) => {
+      const lat = t.lastLat ?? t.startLat, lng = t.lastLng ?? t.startLng;
+      if (lat == null || lng == null) return;
+      const m = window.L.marker([lat, lng], { icon: window.L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+        html: `<div style="width:30px;height:30px;border-radius:50%;background:#7B4FC9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:grid;place-items:center">${icon('car', 16, '#fff')}</div>` }) })
+        .bindPopup(`<b>${esc(t.employeeName)}</b> <span style="color:#7B4FC9;font-weight:700">· Driving</span><br>
+          ${t.vehicle ? `${esc(t.vehicle)}<br>` : ''}From ${esc(t.startSiteName || 'GPS location')} · since ${fmtTime(atTz(t.startAt, t.tz))}<br>
+          <b>${((t.distanceM || 0) / 1000).toFixed(1)} km</b> so far · GPS ${timeAgo(t.lastAt)}<br><a href="#/trips">Open trips →</a>`);
+      empGroup.addLayer(m);
+      markers.set(`t:${t.id}`, m);
+    });
     const onDuty = vis.filter((s) => s.state === 'onDuty');
     const locks = store.extOnSite;
     el.querySelector('#lm-count').innerHTML = `<span class="wf-chip staff">${onDuty.length} staff</span> <span class="wf-chip ext">${locks.length} external</span>`;
@@ -108,6 +121,11 @@ export function mount(el, _p, { setHeader }) {
       ${avatar(store.worker(l.workerId)?.name || l.name || '?', 30, EXT_COLOR)}<div class="grow"><b>${esc(store.worker(l.workerId)?.name || l.name || 'Worker')}</b>
       <div class="small muted">External · ${esc(l.siteName)} · with ${esc(l.employeeName)}</div></div></a>`).join('')
       : '<div class="empty"><b>Nobody on duty</b>Staff appear here when they check in.</div>';
+    if (store.tripsActive.length) {
+      el.querySelector('#lm-list').innerHTML += `<div class="small muted" style="padding:10px 14px 4px;font-weight:700">DRIVING NOW</div>` + store.tripsActive.map((t) => `<a class="list-item" data-focus="t:${t.id}" href="javascript:void 0" style="color:inherit;border-left:3px solid #7B4FC9">
+        <span style="width:30px;height:30px;border-radius:50%;background:#7B4FC9;display:grid;place-items:center;flex:none">${icon('car', 16, '#fff')}</span>
+        <div class="grow"><b>${esc(t.employeeName)}</b><div class="small muted">${esc(t.startSiteName || 'GPS')} → … · ${((t.distanceM || 0) / 1000).toFixed(1)} km</div></div></a>`).join('');
+    }
     if (!el._loBound) {
       el._loBound = true;
       el.addEventListener('click', (e) => { const a = e.target.closest('[data-lo]'); if (a) logoutDialog(a.dataset.lo); });

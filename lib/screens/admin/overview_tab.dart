@@ -10,6 +10,7 @@ import '../../widgets/tiles.dart';
 import 'admin_live.dart';
 import 'approvals.dart';
 import 'employee_detail_screen.dart';
+import 'live_map_tab.dart';
 import 'staff_status.dart';
 
 class OverviewTab extends StatefulWidget {
@@ -81,7 +82,10 @@ class _OverviewTabState extends State<OverviewTab> {
           ...live.open.map((s) => s.siteId),
         };
 
-        return RefreshIndicator(
+        return LayoutBuilder(builder: (context, c) {
+        // Big screens (unfolded Fold, tablets): live map + live lists on the right.
+        final wide = c.maxWidth >= 700;
+        final list = RefreshIndicator(
           onRefresh: () async {},
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
@@ -150,6 +154,10 @@ class _OverviewTabState extends State<OverviewTab> {
                   sub: 'Outside site / fake GPS',
                 ),
               ]),
+              if (!wide && live.tripsToday.isNotEmpty) ...[
+                const SectionTitle('Driver trips today'),
+                _TripsCard(live),
+              ],
 
               // ----------------------------------------------- attention
               if (forgotten.isNotEmpty || flaggedToday.isNotEmpty || live.alerts.isNotEmpty) ...[
@@ -408,7 +416,130 @@ class _OverviewTabState extends State<OverviewTab> {
             ],
           ),
         );
+        if (!wide) return list;
+        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(flex: 11, child: list),
+          Expanded(flex: 9, child: _LivePanel(me: widget.me, live: live, onNavigate: widget.onNavigate)),
+        ]);
+        });
       },
+    );
+  }
+}
+
+/// Right-hand live column on big screens: map with everyone on duty, who is on which site, driver trips.
+class _LivePanel extends StatelessWidget {
+  final AppUser me;
+  final AdminLive live;
+  final void Function(int) onNavigate;
+  const _LivePanel({required this.me, required this.live, required this.onNavigate});
+
+  @override
+  Widget build(BuildContext context) {
+    final bySite = <String, ({String name, List<AttendanceSession> staff, List<WorkerEntry> ext})>{};
+    ({String name, List<AttendanceSession> staff, List<WorkerEntry> ext}) group(String id, String name) =>
+        bySite.putIfAbsent(id, () => (name: live.siteById(id)?.name ?? name, staff: <AttendanceSession>[], ext: <WorkerEntry>[]));
+    for (final o in live.open) {
+      group(o.siteId, o.siteName).staff.add(o);
+    }
+    for (final e in live.externalOnSite) {
+      group(e.siteId, e.siteName).ext.add(e);
+    }
+    final groups = bySite.values.toList()
+      ..sort((a, b) => (b.staff.length + b.ext.length).compareTo(a.staff.length + a.ext.length));
+    return ListView(padding: const EdgeInsets.fromLTRB(4, 4, 16, 32), children: [
+      Row(children: [
+        Container(width: 9, height: 9, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text('LIVE · ${fmtTime(DateTime.now())}',
+            style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.6)),
+        const Spacer(),
+        TextButton.icon(onPressed: () => onNavigate(1), icon: const Icon(Icons.open_in_full, size: 16), label: const Text('Full map')),
+      ]),
+      Card(
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(height: 330, child: LiveMapTab(me: me, live: live, embedded: true)),
+      ),
+      if (live.tripsToday.isNotEmpty) ...[
+        const SectionTitle('Driver trips today'),
+        _TripsCard(live),
+      ],
+      SectionTitle('On site now · ${live.open.length + live.externalOnSite.length}'),
+      if (groups.isEmpty)
+        const Card(child: EmptyState(icon: Icons.location_off_outlined, title: 'Nobody on site right now'))
+      else
+        for (final g in groups)
+          Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(child: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w800))),
+                  Pill('${g.staff.length} staff', color: kStaffColor),
+                  const SizedBox(width: 6),
+                  Pill('${g.ext.length} ext', color: kExtColor),
+                ]),
+                const SizedBox(height: 6),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (final o in g.staff)
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: Avatar(o.employeeName, size: 22, ring: kStaffColor),
+                      label: Text('${o.employeeName.split(' ').first} · ${fmtDuration(o.worked())}', style: const TextStyle(fontSize: 12)),
+                    ),
+                  for (final e in g.ext)
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: kExtColor.withValues(alpha: 0.08),
+                      avatar: Avatar(e.workerName, size: 22, ring: kExtColor),
+                      label: Text('${e.workerName.split(' ').first} · ${fmtDuration(e.worked())}', style: const TextStyle(fontSize: 12)),
+                    ),
+                ]),
+              ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+/// Driver trips today: who is driving now, km and cost so far.
+class _TripsCard extends StatelessWidget {
+  final AdminLive live;
+  const _TripsCard(this.live);
+
+  @override
+  Widget build(BuildContext context) {
+    final trips = live.tripsToday;
+    final km = trips.fold<double>(0, (a, t) => a + t.km);
+    final cost = trips.fold<double>(0, (a, t) => a + (t.cost ?? 0));
+    return Card(
+      child: Column(children: [
+        ListTile(
+          leading: const CircleAvatar(backgroundColor: Color(0x1A7B4FC9), child: Icon(Icons.local_shipping_outlined, color: kTripColor)),
+          title: Text('${trips.length} trip${trips.length == 1 ? '' : 's'} · ${km.toStringAsFixed(1)} km',
+              style: const TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: Text('${live.activeTrips.length} driving now${live.canSeeAccounts && cost > 0 ? ' · ${fmtMoney(cost)} (finished trips)' : ''}'),
+        ),
+        for (final t in trips.take(8)) ...[
+          const Divider(height: 1, indent: 16),
+          ListTile(
+            dense: true,
+            leading: Icon(t.isActive ? Icons.local_shipping : Icons.route,
+                color: t.isActive ? AppColors.success : AppColors.muted),
+            title: Text(t.employeeName, style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(
+                '${fmtTime(t.startLocal)} ${t.startSiteName.isEmpty ? 'GPS' : t.startSiteName} → ${t.isActive ? 'driving…' : (t.endSiteName.isEmpty ? 'GPS' : t.endSiteName)}'
+                '${t.siteName.isNotEmpty && !t.isActive ? ' · charged to ${t.siteName}' : ''}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+            trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('${t.km.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w800)),
+              if (live.canSeeAccounts && t.cost != null) Text(fmtMoney(t.cost!), style: const TextStyle(fontSize: 11.5)),
+            ]),
+          ),
+        ],
+      ]),
     );
   }
 }

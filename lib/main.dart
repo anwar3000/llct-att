@@ -11,6 +11,7 @@ import 'screens/employee/employee_shell.dart';
 import 'services/auth_service.dart';
 import 'services/db.dart';
 import 'services/tracking_service.dart';
+import 'services/trip_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -87,6 +88,7 @@ class _ProfileGateState extends State<_ProfileGate> {
         }
         if (!user.active) {
           TrackingService.instance.stop();
+          TripService.instance.detach();
           return const _Blocked(
             title: 'Account disabled',
             message: 'Your account has been deactivated. Please contact management.',
@@ -97,6 +99,7 @@ class _ProfileGateState extends State<_ProfileGate> {
         if (user.forceLogoutAt != null && signedInAt != null && user.forceLogoutAt!.isAfter(signedInAt)) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             await TrackingService.instance.stop(markStopped: true);
+            await TripService.instance.detach();
             await AuthService.signOut();
           });
           return const _Blocked(

@@ -11,6 +11,7 @@ import '../../services/location_service.dart';
 import '../../services/tracking_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
+import '../../widgets/trip_card.dart';
 import 'worker_picker_screen.dart';
 
 class HomeTab extends StatefulWidget {
@@ -564,15 +565,18 @@ class _HomeTabState extends State<HomeTab> {
     final open = widget.open;
     _watchSessionWorkers();
     return Stack(children: [
-      RefreshIndicator(
-        onRefresh: () async => _subscribe(),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-          children: [
+      LayoutBuilder(builder: (context, c) {
+        // Unfolded Fold / tablet: check-in side on the left, today's plan and history on the right.
+        final wide = c.maxWidth >= 700;
+        final left = <Widget>[
             _statusCard(open),
             const SizedBox(height: 14),
             _actionButton(open),
             const SizedBox(height: 12),
+            if (widget.me.isDriver) ...[
+              TripCard(me: widget.me, sites: _sites),
+              const SizedBox(height: 12),
+            ],
             open != null || _myWorkers.isNotEmpty ? _workersCard(open) : _workersHint(),
             const SizedBox(height: 12),
             _quickActions(open),
@@ -587,6 +591,8 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ),
             ],
+        ];
+        final right = <Widget>[
             SectionTitle("Today's schedule",
                 trailing: Text('${_schedules.length} site${_schedules.length == 1 ? '' : 's'}',
                     style: const TextStyle(color: AppColors.muted))),
@@ -623,9 +629,21 @@ class _HomeTabState extends State<HomeTab> {
                           ),
               ),
             ),
-          ],
-        ),
-      ),
+        ];
+        if (!wide) {
+          return RefreshIndicator(
+            onRefresh: () async => _subscribe(),
+            child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [...left, ...right]),
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: () async => _subscribe(),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 10, 32), children: left)),
+            Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(10, 0, 20, 32), children: right)),
+          ]),
+        );
+      }),
       if (_busy)
         Positioned.fill(
           child: Container(

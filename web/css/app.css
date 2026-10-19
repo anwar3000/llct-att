@@ -385,3 +385,4 @@ tr.short-day td { background: #fdf1f1; }
 .site-total .sub { font-size: 12px; color: #bdbdc0; }
 .site-total .split { display: flex; gap: 28px; flex-wrap: wrap; }
 .site-total .split b { display: block; font-size: 18px; color: #fff; }
+.seg { display: inline-flex; gap: 4px; flex-wrap: wrap; }

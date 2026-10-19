@@ -88,6 +88,10 @@ class AppUser {
   final DateTime? createdAt;
   /// Set by management to sign this person out of every device.
   final DateTime? forceLogoutAt;
+  /// Drivers get the Trips feature; their own rate per km overrides the company rate.
+  final bool isDriver;
+  final double? tripRatePerKm;
+  final String vehicle;
   final LiveLocation? lastLocation;
 
   AppUser({
@@ -103,6 +107,9 @@ class AppUser {
     this.monthlyOffQuota = kDefaultMonthlyOffQuota,
     this.createdAt,
     this.forceLogoutAt,
+    this.isDriver = false,
+    this.tripRatePerKm,
+    this.vehicle = '',
     this.lastLocation,
   });
 
@@ -134,6 +141,9 @@ class AppUser {
       monthlyOffQuota: _int(m['monthlyOffQuota'], kDefaultMonthlyOffQuota),
       createdAt: _ts(m['createdAt']),
       forceLogoutAt: _ts(m['forceLogoutAt']),
+      isDriver: m['isDriver'] == true,
+      tripRatePerKm: _dbl(m['tripRatePerKm']),
+      vehicle: _str(m['vehicle']),
       lastLocation: LiveLocation.fromMap(m['lastLocation']),
     );
   }
@@ -898,3 +908,88 @@ const idKinds = [
 
 /// Max size of one uploaded document copy.
 const kMaxDocBytes = 2 * 1024 * 1024;
+
+
+/// A driver's car trip: start → stop with GPS route, distance and cost.
+class Trip {
+  final String id;
+  final String employeeId;
+  final String employeeName;
+  final String vehicle;
+  final String purpose;
+  final String status; // active | done
+  final DateTime startAt;
+  final DateTime? endAt;
+  final int? tz;
+  final double? startLat, startLng, endLat, endLng, lastLat, lastLng;
+  final String startSiteId, startSiteName, endSiteId, endSiteName, siteId, siteName;
+  final double distanceM;
+  final double? ratePerKm;
+  final double? cost;
+  final int pointsCount;
+
+  Trip({
+    required this.id,
+    required this.employeeId,
+    required this.employeeName,
+    this.vehicle = '',
+    this.purpose = '',
+    this.status = 'active',
+    required this.startAt,
+    this.endAt,
+    this.tz,
+    this.startLat,
+    this.startLng,
+    this.endLat,
+    this.endLng,
+    this.lastLat,
+    this.lastLng,
+    this.startSiteId = '',
+    this.startSiteName = '',
+    this.endSiteId = '',
+    this.endSiteName = '',
+    this.siteId = '',
+    this.siteName = '',
+    this.distanceM = 0,
+    this.ratePerKm,
+    this.cost,
+    this.pointsCount = 0,
+  });
+
+  bool get isActive => status == 'active';
+  double get km => distanceM / 1000;
+  Duration get duration => (endAt ?? DateTime.now()).difference(startAt);
+  DateTime get startLocal => atZone(startAt, tz);
+  DateTime? get endLocal => endAt == null ? null : atZone(endAt!, tz);
+
+  factory Trip.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return Trip(
+      id: d.id,
+      employeeId: _str(m['employeeId']),
+      employeeName: _str(m['employeeName']),
+      vehicle: _str(m['vehicle']),
+      purpose: _str(m['purpose']),
+      status: _str(m['status'], 'active'),
+      startAt: _ts(m['startAt']) ?? DateTime.now(),
+      endAt: _ts(m['endAt']),
+      tz: _tz(m['tz']),
+      startLat: _dbl(m['startLat']),
+      startLng: _dbl(m['startLng']),
+      endLat: _dbl(m['endLat']),
+      endLng: _dbl(m['endLng']),
+      lastLat: _dbl(m['lastLat']),
+      lastLng: _dbl(m['lastLng']),
+      startSiteId: _str(m['startSiteId']),
+      startSiteName: _str(m['startSiteName']),
+      endSiteId: _str(m['endSiteId']),
+      endSiteName: _str(m['endSiteName']),
+      siteId: _str(m['siteId']),
+      siteName: _str(m['siteName']),
+      distanceM: _dbl(m['distanceM']) ?? 0,
+      ratePerKm: _dbl(m['ratePerKm']),
+      cost: _dbl(m['cost']),
+      pointsCount: _int(m['pointsCount']),
+    );
+  }
+}

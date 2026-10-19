@@ -815,4 +815,136 @@ class Db {
     batch.delete(idFiles.doc(f.id));
     await batch.commit();
   }
+
+  // ---------------------------------------------------------------- driver trips
+  static CollectionReference<Map<String, dynamic>> get trips => _fs.collection('trips');
+
+  static Stream<Trip?> activeTrip(String uid) => trips
+      .where('employeeId', isEqualTo: uid)
+      .where('status', isEqualTo: 'active')
+      .snapshots()
+      .map((q) => q.docs.isEmpty ? null : Trip.fromDoc(q.docs.first));
+
+  static Stream<List<Trip>> tripsForDay(String uid, String date) => trips
+      .where('employeeId', isEqualTo: uid)
+      .where('date', isEqualTo: date)
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
+
+  /// Management: every trip running now / every trip on a date.
+  static Stream<List<Trip>> activeTripsAll() => trips
+      .where('status', isEqualTo: 'active')
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList());
+
+  static Stream<List<Trip>> tripsForDate(String date) => trips
+      .where('date', isEqualTo: date)
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList());
+
+  /// Company rate per km (admin setting) — a driver's own rate overrides it.
+  static Future<double> tripRate(AppUser u) async {
+    if (u.tripRatePerKm != null) return u.tripRatePerKm!;
+    try {
+      final d = await _fs.collection('settings').doc('general').get();
+      final v = d.data()?['tripRatePerKm'];
+      return v is num ? v.toDouble() : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<String> startTrip({
+    required AppUser user,
+    required String vehicle,
+    required String purpose,
+    required double lat,
+    required double lng,
+    Site? site,
+  }) async {
+    final now = DateTime.now();
+    final ref = trips.doc();
+    final batch = _fs.batch();
+    batch.set(ref, {
+      'employeeId': user.id,
+      'employeeName': user.name,
+      'vehicle': vehicle,
+      'purpose': purpose,
+      'status': 'active',
+      'startAt': Timestamp.fromDate(now),
+      'startServer': FieldValue.serverTimestamp(),
+      'tz': now.timeZoneOffset.inMinutes,
+      'date': dateKey(now),
+      'month': monthKey(now),
+      'startLat': lat,
+      'startLng': lng,
+      'lastLat': lat,
+      'lastLng': lng,
+      'lastAt': FieldValue.serverTimestamp(),
+      'startSiteId': site?.id ?? '',
+      'startSiteName': site?.name ?? '',
+      'distanceM': 0,
+      'pointsCount': 1,
+      'platform': 'android',
+    });
+    batch.set(ref.collection('points').doc(), {'lat': lat, 'lng': lng, 'at': FieldValue.serverTimestamp()});
+    await batch.commit();
+    return ref.id;
+  }
+
+  /// Saves a route point and the running distance.
+  static Future<void> addTripPoint(String tripId, double lat, double lng, double distanceM, int points) {
+    final ref = trips.doc(tripId);
+    final batch = _fs.batch();
+    batch.set(ref.collection('points').doc(), {'lat': lat, 'lng': lng, 'at': FieldValue.serverTimestamp()});
+    batch.update(ref, {
+      'distanceM': distanceM,
+      'pointsCount': points,
+      'lastLat': lat,
+      'lastLng': lng,
+      'lastAt': FieldValue.serverTimestamp(),
+    });
+    return batch.commit();
+  }
+
+  static Future<void> endTrip({
+    required Trip trip,
+    required double distanceM,
+    required int points,
+    required double ratePerKm,
+    double? lat,
+    double? lng,
+    Site? site,
+    String note = '',
+  }) async {
+    final now = DateTime.now();
+    // The trip's cost is charged to the drop-off site, or the pick-up site if the drop isn't at a site.
+    final chargeId = site?.id ?? trip.startSiteId;
+    final chargeName = site?.name ?? trip.startSiteName;
+    final km = distanceM / 1000;
+    final ref = trips.doc(trip.id);
+    final batch = _fs.batch();
+    if (lat != null && lng != null) {
+      batch.set(ref.collection('points').doc(), {'lat': lat, 'lng': lng, 'at': FieldValue.serverTimestamp()});
+    }
+    batch.update(ref, {
+      'status': 'done',
+      'endAt': Timestamp.fromDate(now),
+      'endServer': FieldValue.serverTimestamp(),
+      'endTz': now.timeZoneOffset.inMinutes,
+      'endLat': lat,
+      'endLng': lng,
+      'endSiteId': site?.id ?? '',
+      'endSiteName': site?.name ?? '',
+      'siteId': chargeId,
+      'siteName': chargeName,
+      'distanceM': distanceM,
+      'pointsCount': points + (lat != null ? 1 : 0),
+      'durationMin': now.difference(trip.startAt).inMinutes,
+      'ratePerKm': ratePerKm,
+      'cost': (km * ratePerKm * 100).round() / 100,
+      if (note.isNotEmpty) 'note': note,
+    });
+    await batch.commit();
+  }
 }

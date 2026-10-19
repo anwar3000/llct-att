@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../models/models.dart';
 import 'db.dart';
+import 'position_hub.dart';
 
 /// Runs while an employee is checked in:
 ///  * streams their position to Firestore (live map + GPS trail)
@@ -18,7 +19,8 @@ class TrackingService {
   TrackingService._();
   static final instance = TrackingService._();
 
-  StreamSubscription<Position>? _sub;
+  bool _running = false;
+  DateTime? _lastPushAt;
   Timer? _hourly;
   String? _uid;
   String _name = '';
@@ -30,7 +32,7 @@ class TrackingService {
   DateTime? _lastAlertAt;
   bool _wasOutside = false;
 
-  bool get isRunning => _sub != null;
+  bool get isRunning => _running;
   String? get sessionId => _session?.id;
 
   static const _trackEvery = Duration(minutes: 2);
@@ -47,7 +49,7 @@ class TrackingService {
     required AttendanceSession session,
     Site? site,
   }) async {
-    if (_sub != null && _uid == uid && _session?.id == session.id) {
+    if (_running && _uid == uid && _session?.id == session.id) {
       if (site != null) _site = site;
       return;
     }
@@ -59,22 +61,8 @@ class TrackingService {
     _wasOutside = false;
     _lastAlertAt = null;
 
-    final settings = AndroidSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 25,
-      intervalDuration: const Duration(seconds: 60),
-      foregroundNotificationConfig: const ForegroundNotificationConfig(
-        notificationTitle: 'On duty',
-        notificationText: 'Your work location is being shared while checked in.',
-        enableWakeLock: true,
-        setOngoing: true,
-      ),
-    );
-
-    _sub = Geolocator.getPositionStream(locationSettings: settings).listen(
-      _onPosition,
-      onError: (e) => debugPrint('Tracking error: $e'),
-    );
+    _running = true;
+    await PositionHub.instance.add('duty', _onPosition);
     _hourly = Timer.periodic(_hourlyCheck, (_) => _hourlyTick());
   }
 
@@ -83,6 +71,9 @@ class TrackingService {
     if (uid == null) return;
     _lastPos = p;
     final now = DateTime.now();
+    // During a driver trip the shared GPS runs every few seconds — keep duty updates to ~1 per 30 s.
+    if (_lastPushAt != null && now.difference(_lastPushAt!) < const Duration(seconds: 30)) return;
+    _lastPushAt = now;
     var addPoint = _lastTrackPoint == null || now.difference(_lastTrackPoint!) >= _trackEvery;
     if (!addPoint && _lastTrackPos != null) {
       final moved = Geolocator.distanceBetween(
@@ -197,8 +188,8 @@ class TrackingService {
   }
 
   Future<void> stop({bool markStopped = true}) async {
-    await _sub?.cancel();
-    _sub = null;
+    if (_running) await PositionHub.instance.remove('duty');
+    _running = false;
     _hourly?.cancel();
     _hourly = null;
     final uid = _uid;

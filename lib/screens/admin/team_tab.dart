@@ -61,9 +61,19 @@ class _TeamTabState extends State<TeamTab> {
     ];
   }
 
-  void _open(AppUser u) => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => EmployeeDetailScreen(me: widget.me, userId: u.id, live: widget.live),
-      ));
+  /// Big screens show the person beside the list (master–detail) instead of opening a new page.
+  bool _wide = false;
+  String? _selected;
+
+  void _open(AppUser u) {
+    if (_wide) {
+      setState(() => _selected = u.id);
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => EmployeeDetailScreen(me: widget.me, userId: u.id, live: widget.live),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +88,9 @@ class _TeamTabState extends State<TeamTab> {
               icon: const Icon(Icons.person_add_alt_1),
               label: const Text('Add person'),
             ),
-      body: ListenableBuilder(
+      body: LayoutBuilder(builder: (context, c) {
+        _wide = c.maxWidth >= 760;
+        final listView = ListenableBuilder(
         listenable: widget.live,
         builder: (context, _) {
           final live = widget.live;
@@ -138,6 +150,8 @@ class _TeamTabState extends State<TeamTab> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Card(
                         child: ListTile(
+                          selected: _wide && _selected == s.user.id,
+                          selectedTileColor: AppColors.accentSoft,
                           onTap: () => _open(s.user),
                           leading: Avatar(s.user.name, ring: s.color),
                           title: Text(s.user.name,
@@ -202,7 +216,22 @@ class _TeamTabState extends State<TeamTab> {
             ],
           );
         },
-      ),
+      );
+        if (!_wide) return listView;
+        return Row(children: [
+          SizedBox(width: c.maxWidth >= 1100 ? 420 : 360, child: listView),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: _selected == null
+                ? const EmptyState(
+                    icon: Icons.touch_app_outlined,
+                    title: 'Select a person',
+                    message: 'Their attendance, route, workers and documents show here.')
+                : EmployeeDetailScreen(
+                    key: ValueKey(_selected), me: widget.me, userId: _selected!, live: widget.live),
+          ),
+        ]);
+      }),
     );
   }
 

@@ -32,6 +32,8 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 ---
 
 ## What's new
+- **Driver trips (v1.5.0):** tick *Driver* on an employee (web: Employees → Edit; app: Team → person → Edit). They get **Start trip / Stop trip** in the app. The phone records the GPS route and adds up the distance. Bad fixes, jitter and impossible jumps are ignored. Cost = km × rate. The rate is the driver's own rate, or the company rate set on the **Driver trips** page. Each trip is charged to the site where it ends; if it doesn't end at a site, it is charged to the site where it started. The dashboard has a **Driver trips** tab: trips running now (live), route map, admin corrections, and expense by site and by driver. Running trips also show on the live map. Each site page shows its transport cost, and project reports include transport. **Reports → Driver trips — daily report** gives an Excel/PDF/CSV with daily totals per driver, totals by site, and the full trip log. On iPhone, GPS runs only while the web app is open, so the screen is kept awake during a trip.
+- **Big screens (Galaxy Fold, tablets):** when unfolded, the management app shows a side menu. The Overview gets a live map, an on-site list by site, and driver trips beside the dashboard. The Live map gets a live side panel. The Team tab shows the person's details beside the list. The staff home screen uses two columns.
 - **Web dashboard** for managers (`web/` folder). It's published free on GitHub Pages and includes projects, live map, attendance, petty cash and downloadable reports in Excel, PDF and CSV.
 - **Roles:** `admin` has full access. `manager` sees everything except accounts (petty cash and budgets) and can't create logins. `employee` uses the mobile app.
 - **Strict geofence:** staff can only check in inside a site's radius, which you set per site. Fake-GPS check-ins are blocked.
@@ -187,7 +189,8 @@ firestore.rules                 security rules (staff only see their own data)
 ## Firestore collections
 `users` (+ `users/{uid}/track` GPS trail) · `sites` · `projects` · `schedules` · `attendance` · `siteUpdates` · `petty` · `offDays` · `alerts` ·
 `extWorkers` (registered labour) · `workerLocks` (who has which worker right now) · `workerAttendance` (worker time per check-in) ·
-`idInfo` (ID numbers and expiry dates) · `idFiles` (+ `chunks`: scanned copies, management only)
+`idInfo` (ID numbers and expiry dates) · `idFiles` (+ `chunks`: scanned copies, management only) ·
+`trips` (+ `points`: driver trips with GPS route, distance and cost)
 
 ## Known limits
 - **Password reset:** staff log in with IDs rather than real emails, so reset passwords in *Firebase Console → Authentication → (user) → Reset password*. You can also delete the user there and recreate them in the app.

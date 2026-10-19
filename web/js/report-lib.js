@@ -1,9 +1,9 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, alertsInRange, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, alertsInRange, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
-  fmtMoney, tzLabel, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
+  fmtMoney, tzLabel, atTz, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
 } from './util.js';
 import { employeeSummary, employeeDays, pettySummary, flagText } from './calc.js';
 
@@ -175,7 +175,8 @@ export async function alertsReport(from, to, empId = null) {
 
 export async function projectReport(p) {
   const sites = p.siteIds.map((id) => store.site(id)).filter(Boolean);
-  const [sessions, updates, entries] = await Promise.all([sessionsForSites(p.siteIds), updatesForSites(p.siteIds), workerEntriesForSites(p.siteIds)]);
+  const [sessions, updates, entries, trips] = await Promise.all([sessionsForSites(p.siteIds), updatesForSites(p.siteIds), workerEntriesForSites(p.siteIds),
+    tripsForSites(p.siteIds).catch(() => [])]);
   const mins = sessions.reduce((a, s) => a + sessionMinutes(s), 0);
   const ws = workforceSheets(sessions, entries);
   const prog = sites.length ? Math.round(sites.reduce((a, s) => a + s.progress, 0) / sites.length) : 0;
@@ -191,7 +192,8 @@ export async function projectReport(p) {
     ['Sites', sites.length], ['Man-hours — staff', fmtMins(mins)], ['Man-hours — external workers', fmtMins(ws.wf.extMins)],
     ['Man-hours — total', `${fmtMins(mins + ws.wf.extMins)} (${hoursDec(mins + ws.wf.extMins)} h)`],
     ['Staff involved', staff.size], ['External workers involved', ws.wf.extCount],
-    ['Site visits', sessions.length], ['Site updates', updates.length], ['Description', p.description],
+    ['Site visits', sessions.length], ['Site updates', updates.length], ['Driver trips charged', `${trips.length} · ${Math.round(trips.reduce((a, t) => a + tripKm(t), 0) * 10) / 10} km`],
+    ['Description', p.description],
   ];
   const sheets = [
     { name: 'Summary', columns: ['Item', 'Value'], widths: [28, 60], rows: summary },
@@ -217,11 +219,14 @@ export async function projectReport(p) {
       rows: updates.map((u) => [u.date || d2(u.createdLocal), u.siteName, u.employeeName, u.category, u.progress ?? '', u.note]),
     },
   ];
+  if (trips.length) sheets.push(tripLogSheet(trips, 'Transport (trips)'));
   if (isAdmin()) {
     const petty = store.petty.filter((t) => p.siteIds.includes(t.siteId));
     const ps = pettySummary(petty);
-    summary.splice(8, 0, ['Budget (AED)', p.budget || ''], ['Spent — approved petty (AED)', ps.spent], ['Pending petty (AED)', ps.pending],
-      ['Budget used', p.budget ? `${Math.round((ps.spent / p.budget) * 100)}%` : '']);
+    const transport = money(trips.reduce((a, t) => a + tripCost(t), 0));
+    summary.splice(8, 0, ['Budget (AED)', p.budget || ''], ['Spent — approved petty (AED)', ps.spent], ['Transport — driver trips (AED)', transport],
+      ['Total spent (AED)', money(ps.spent + transport)], ['Pending petty (AED)', ps.pending],
+      ['Budget used', p.budget ? `${Math.round(((ps.spent + transport) / p.budget) * 100)}%` : '']);
     sheets.push({
       name: 'Expenses', columns: ['Date', 'Employee', 'Type', 'Category', 'Site', 'Note', 'Amount (AED)', 'Status'], widths: [11, 18, 11, 12, 18, 30, 12, 10],
       rows: petty.map((t) => [t.date || d2(t.createdLocal), t.employeeName, t.type === 'credit' ? 'Cash given' : 'Expense', t.category, t.siteName, t.note, t.amount, cap(t.status)]),
@@ -473,6 +478,107 @@ export async function workerPayReport(from, to, onlyCompany = '') {
       { name: 'Attendance sheet', columns: sheetCols, widths: [22, 16, ...dates.map(() => 6), 6, 6, 7], rows: sheetRows },
       { name: 'Daily log', columns: ['Date', 'Worker', 'Company', 'Site', 'Added by', 'In', 'Out', 'Hours', 'Day total', 'Minimum check'],
         widths: [11, 22, 18, 20, 18, 7, 9, 7, 9, 18], rows: log },
+    ],
+  };
+}
+
+// ================================================================== driver trips
+const gps = (lat, lng) => (lat != null && lng != null ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : '');
+const km2 = (m) => Math.round(m / 10) / 100;
+const money = (v) => Math.round((v || 0) * 100) / 100;
+const tripLocal = (t, d) => (d ? atTz(d, t.tz) : null);
+
+/** Trip rows for a sheet (also used inside the project report). */
+export function tripLogSheet(trips, name = 'Trip log') {
+  const admin = isAdmin();
+  const cols = ['Date', 'Driver', 'Vehicle', 'Purpose', 'Start', 'End', 'Pick-up', 'Drop-off', 'Charged to site', 'Duration', 'Km'];
+  if (admin) cols.push('Rate / km (AED)', 'Cost (AED)');
+  cols.push('Start GPS', 'End GPS', 'Time zone', 'Note');
+  const rows = trips.map((t) => {
+    const r = [t.date, t.employeeName, t.vehicle, t.purpose, t2(tripLocal(t, t.startAt)), t.endAt ? t2(tripLocal(t, t.endAt)) : 'IN PROGRESS',
+      t.startSiteName || 'GPS location', t.endAt ? (t.endSiteName || 'GPS location') : '', t.siteName || '—', fmtMins(tripMinutes(t)), km2(t.distanceM)];
+    if (admin) r.push(t.ratePerKm ?? '', money(tripCost(t)));
+    r.push(gps(t.startLat, t.startLng), gps(t.endLat ?? t.lastLat, t.endLng ?? t.lastLng), tzLabel(t.tz), [t.note, t.editedBy ? `edited by ${t.editedBy}` : ''].filter(Boolean).join(' · '));
+    return r;
+  });
+  const km = trips.reduce((a, t) => a + tripKm(t), 0);
+  const totals = ['TOTAL', `${trips.length} trips`, '', '', '', '', '', '', '', fmtMins(trips.reduce((a, t) => a + tripMinutes(t), 0)), Math.round(km * 100) / 100];
+  if (admin) totals.push('', money(trips.reduce((a, t) => a + tripCost(t), 0)));
+  totals.push('', '', '', '');
+  return { name, columns: cols, widths: [11, 18, 12, 18, 7, 11, 18, 18, 18, 9, 8, ...(admin ? [10, 11] : []), 20, 20, 10, 28], rows, totals };
+}
+
+export async function tripsReport(from, to, driverId = null, siteId = null) {
+  const all = await tripsInRange(from, to);
+  const trips = all.filter((t) => (!driverId || t.employeeId === driverId) && (!siteId || t.siteId === siteId || t.startSiteId === siteId || t.endSiteId === siteId));
+  const admin = isAdmin();
+  // Daily summary per driver
+  const daily = new Map();
+  for (const t of trips) {
+    const k = `${t.date}|${t.employeeId}`;
+    const c = daily.get(k) || { date: t.date, name: t.employeeName, veh: new Set(), n: 0, km: 0, mins: 0, cost: 0, sites: new Set() };
+    c.n++; c.km += tripKm(t); c.mins += tripMinutes(t); c.cost += tripCost(t);
+    if (t.vehicle) c.veh.add(t.vehicle);
+    if (t.siteName) c.sites.add(t.siteName);
+    daily.set(k, c);
+  }
+  const dCols = ['Date', 'Driver', 'Vehicle', 'Trips', 'Km', 'Driving time', 'Sites charged'];
+  if (admin) dCols.push('Cost (AED)');
+  const dRows = [...daily.values()].sort((a, b) => (a.date + a.name).localeCompare(b.date + b.name)).map((c) => {
+    const r = [c.date, c.name, [...c.veh].join(', '), c.n, Math.round(c.km * 100) / 100, fmtMins(c.mins), [...c.sites].join(', ')];
+    if (admin) r.push(money(c.cost));
+    return r;
+  });
+  const tKm = trips.reduce((a, t) => a + tripKm(t), 0);
+  const tCost = trips.reduce((a, t) => a + tripCost(t), 0);
+  const dTot = ['TOTAL', '', '', trips.length, Math.round(tKm * 100) / 100, fmtMins(trips.reduce((a, t) => a + tripMinutes(t), 0)), ''];
+  if (admin) dTot.push(money(tCost));
+
+  // Per driver
+  const drv = new Map();
+  for (const t of trips) {
+    const c = drv.get(t.employeeId) || { name: t.employeeName, days: new Set(), n: 0, km: 0, cost: 0 };
+    c.days.add(t.date); c.n++; c.km += tripKm(t); c.cost += tripCost(t);
+    drv.set(t.employeeId, c);
+  }
+  const vCols = ['Driver', 'Days driven', 'Trips', 'Km', 'Avg km / trip'];
+  if (admin) vCols.push('Cost (AED)');
+  const vRows = [...drv.values()].sort((a, b) => b.km - a.km).map((c) => {
+    const r = [c.name, c.days.size, c.n, Math.round(c.km * 100) / 100, Math.round((c.km / c.n) * 10) / 10];
+    if (admin) r.push(money(c.cost));
+    return r;
+  });
+
+  // Per site (expense charged to the drop-off site, else the pick-up site)
+  const st = new Map();
+  for (const t of trips) {
+    const k = t.siteId || '';
+    const c = st.get(k) || { name: t.siteName || 'Not at a site', n: 0, km: 0, cost: 0 };
+    c.n++; c.km += tripKm(t); c.cost += tripCost(t);
+    st.set(k, c);
+  }
+  const sCols = ['Site', 'Trips', 'Km'];
+  if (admin) sCols.push('Transport cost (AED)');
+  const sRows = [...st.values()].sort((a, b) => b.cost - a.cost || b.km - a.km).map((c) => {
+    const r = [c.name, c.n, Math.round(c.km * 100) / 100];
+    if (admin) r.push(money(c.cost));
+    return r;
+  });
+  const sTot = ['TOTAL', trips.length, Math.round(tKm * 100) / 100];
+  if (admin) sTot.push(money(tCost));
+
+  const who = driverId ? ` — ${store.user(driverId)?.name || ''}` : '';
+  return {
+    title: `Driver trips${who}`,
+    subtitle: `${from} to ${to} · ${trips.length} trips · ${Math.round(tKm * 10) / 10} km${admin ? ` · AED ${money(tCost)}` : ''} · cost charged to the drop-off site (or pick-up site)`,
+    filename: `driver-trips-${from}-to-${to}`,
+    orientation: 'landscape',
+    pdfFont: 7,
+    sheets: [
+      { name: 'Daily report', columns: dCols, widths: [11, 20, 16, 7, 9, 12, 40, 12], rows: dRows, totals: dTot },
+      { name: 'By site', columns: sCols, widths: [30, 8, 10, 18], rows: sRows, totals: sTot },
+      { name: 'By driver', columns: vCols, widths: [22, 12, 8, 10, 12, 12], rows: vRows },
+      tripLogSheet(trips),
     ],
   };
 }

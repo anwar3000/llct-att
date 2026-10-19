@@ -1,9 +1,10 @@
 import {
   store, saveSite, deleteSite, saveProject, approveSite, sessionsForSites, workerEntriesForSites, sessionMinutes, entryMinutes,
+  tripsForSites, tripKm, tripCost, isAdmin,
 } from '../fb.js';
 import {
   esc, icon, pill, cap, progressBar, toast, modal, confirmBox, friendlyError, fmtMins, avatar, fmtTime, fmtDay, dateKey, addDays,
-  startOfMonth, hoursDec, STAFF_COLOR, EXT_COLOR, atTz, parseKey,
+  startOfMonth, hoursDec, STAFF_COLOR, EXT_COLOR, atTz, parseKey, fmtMoney,
 } from '../util.js';
 import { workforce, siteWorkforceReport, downloadReport } from '../report-lib.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -15,13 +16,13 @@ const STATUSES = ['planned', 'active', 'on hold', 'completed'];
 function detail(el, id, { setHeader }) {
   const today = new Date();
   let range = 'today', from = dateKey(today), to = dateKey(today);
-  let sessions = null, entries = null, chart = null, token = 0;
+  let sessions = null, entries = null, chart = null, token = 0, trips = [];
 
   async function load() {
     const t = ++token;
-    const [s, e] = await Promise.all([sessionsForSites([id]), workerEntriesForSites([id])]);
+    const [s, e, tr] = await Promise.all([sessionsForSites([id]), workerEntriesForSites([id]), tripsForSites([id]).catch(() => [])]);
     if (t !== token) return;
-    sessions = s; entries = e; draw();
+    sessions = s; entries = e; trips = tr; draw();
   }
   const setRange = (r) => {
     range = r;
@@ -110,6 +111,17 @@ function detail(el, id, { setHeader }) {
           ${extNow.map((l) => `<a class="list-item" href="#/workers/${l.workerId}" style="color:inherit">${avatar(store.worker(l.workerId)?.name || l.name || '?', 28, EXT_COLOR)}<div class="grow"><b>${esc(store.worker(l.workerId)?.name || l.name || 'Worker')}</b><div class="small muted">with ${esc(l.employeeName)} · since ${fmtTime(atTz(l.since, store.open.find((x) => x.id === l.sessionId)?.tz))}</div></div><span class="wf-chip ext">External</span></a>`).join('')}
           ${staffNow.length + extNow.length ? '' : '<div class="empty">Nobody on site right now</div>'}
         </div>
+        ${(() => {
+          const live = new Map(trips.map((x) => [x.id, x]));
+          store.tripsToday.filter((x) => x.siteId === id).forEach((x) => live.set(x.id, x));
+          const tr = [...live.values()].filter((x) => inR(x.date)).sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+          if (!tr.length) return '';
+          const km = tr.reduce((a, x) => a + tripKm(x), 0), cost = tr.reduce((a, x) => a + tripCost(x), 0);
+          return `<div class="card mt"><div class="card-head"><h2>Transport (driver trips)</h2><span class="spacer"></span><a class="small" href="#/trips">All trips →</a></div>
+            <div class="list-item"><div class="grow"><b>${tr.length} trip${tr.length === 1 ? '' : 's'} · ${km.toFixed(1)} km</b><div class="small muted">Pick-ups and drop-offs at this site</div></div>${isAdmin() ? `<b>${fmtMoney(Math.round(cost * 100) / 100)}</b>` : ''}</div>
+            ${tr.slice(0, 6).map((x) => `<div class="list-item small"><div class="grow">${esc(x.date.slice(5))} · <b>${esc(x.employeeName)}</b> · ${esc(x.startSiteName || 'GPS')} → ${esc(x.status === 'active' ? 'driving…' : (x.endSiteName || 'GPS'))}</div>${tripKm(x).toFixed(1)} km${isAdmin() ? ` · ${fmtMoney(tripCost(x))}` : ''}</div>`).join('')}
+          </div>`;
+        })()}
         <div class="card mt"><div class="card-head"><h2>Man-hours per day</h2></div><div class="card-pad"><div class="chart-box" style="height:220px"><canvas id="sd-chart"></canvas></div></div></div>
       </div>
     </div>`;

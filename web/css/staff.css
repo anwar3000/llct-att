@@ -99,3 +99,4 @@ body.staff #toast-root { bottom: calc(88px + env(safe-area-inset-bottom)) !impor
 .st-wk-row { display: flex; align-items: center; gap: 10px; padding-top: 10px; }
 .st-wk-row .grow { flex: 1; min-width: 0; }
 .st-btn.danger-o { color: #D64545; border-color: #f1c9c9; }
+.st-trip.on { border: 2px solid #2E9E6A; }

@@ -25,6 +25,8 @@ class AdminLive extends ChangeNotifier {
   List<GeoAlert> alerts = [];
   /// Set when external-worker data can't be read (usually: Firestore rules not published).
   String? externalError;
+  List<Trip> _tToday = [];
+  List<Trip> activeTrips = [];
   List<WorkerEntry> _wToday = [];
   List<WorkerEntry> _wOpen = [];
 
@@ -36,6 +38,15 @@ class AdminLive extends ChangeNotifier {
     }
     return m.values.toList();
   }
+  /// Today's driver trips plus any still running from before midnight (newest first).
+  List<Trip> get tripsToday {
+    final m = <String, Trip>{for (final t in _tToday) t.id: t};
+    for (final t in activeTrips) {
+      m[t.id] = t;
+    }
+    return m.values.toList()..sort((a, b) => b.startAt.compareTo(a.startAt));
+  }
+
   bool loaded = false;
   Object? error;
 
@@ -114,6 +125,14 @@ class AdminLive extends ChangeNotifier {
       _wOpen = v;
       notifyListeners();
     }, onError: extErr));
+    _subs.add(Db.tripsForDate(dateKey(now)).listen((v) {
+      _tToday = v;
+      notifyListeners();
+    }, onError: (_) {}));
+    _subs.add(Db.activeTripsAll().listen((v) {
+      activeTrips = v;
+      notifyListeners();
+    }, onError: (_) {}));
     if (canSeeAccounts) _subs.add(Db.pettyPending().listen((v) {
       pendingPetty = v;
       notifyListeners();

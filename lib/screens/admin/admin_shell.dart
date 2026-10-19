@@ -59,7 +59,10 @@ class _AdminShellState extends State<AdminShell> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.of(context).size.width >= 840;
+    // Side rail on big screens (unfolded Galaxy Fold, tablets); labels beside icons when there is room.
+    final width = MediaQuery.of(context).size.width;
+    final wide = width >= 600;
+    final extended = width >= 1000;
     final pages = [
       OverviewTab(me: widget.me, live: _live, onNavigate: go),
       LiveMapTab(me: widget.me, live: _live),
@@ -119,7 +122,8 @@ class _AdminShellState extends State<AdminShell> {
           NavigationRail(
             selectedIndex: _index,
             onDestinationSelected: go,
-            labelType: NavigationRailLabelType.all,
+            extended: extended,
+            labelType: extended ? NavigationRailLabelType.none : NavigationRailLabelType.all,
             backgroundColor: Colors.white,
             destinations: _items
                 .map((e) => NavigationRailDestination(

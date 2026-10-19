@@ -50,6 +50,9 @@ export function mapUser(d) {
     monthlyOffQuota: num(m.monthlyOffQuota, 4),
     createdAt: toDate(m.createdAt),
     forceLogoutAt: toDate(m.forceLogoutAt),
+    isDriver: m.isDriver === true,
+    vehicle: m.vehicle || '',
+    tripRatePerKm: typeof m.tripRatePerKm === 'number' ? m.tripRatePerKm : null,
     lastLocation: ll && typeof ll.lat === 'number' && typeof ll.lng === 'number'
       ? { lat: ll.lat, lng: ll.lng, accuracy: num(ll.accuracy), at: toDate(ll.at), checkedIn: ll.checkedIn === true, siteName: ll.siteName || '' }
       : null,
@@ -181,6 +184,89 @@ export const ID_FIELDS = ['nationality', 'passportNo', 'passportExpiry', 'eidNo'
   'visaNo', 'visaExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes'];
 
 /** Minimum working minutes per day (admin setting, default 8 h). */
+// ------------------------------------------------------------------ driver trips
+export function mapTrip(d) {
+  const m = d.data() || {};
+  const n = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : null);
+  return {
+    id: d.id,
+    employeeId: m.employeeId || '', employeeName: m.employeeName || '',
+    vehicle: m.vehicle || '', purpose: m.purpose || '', note: m.note || '',
+    status: m.status || 'active',
+    startAt: toDate(m.startAt), endAt: toDate(m.endAt), lastAt: toDate(m.lastAt),
+    tz: tzOf(m.tz), date: m.date || '', month: m.month || '',
+    startLat: n(m.startLat), startLng: n(m.startLng), endLat: n(m.endLat), endLng: n(m.endLng),
+    lastLat: n(m.lastLat), lastLng: n(m.lastLng),
+    startSiteId: m.startSiteId || '', startSiteName: m.startSiteName || '',
+    endSiteId: m.endSiteId || '', endSiteName: m.endSiteName || '',
+    siteId: m.siteId || '', siteName: m.siteName || '',
+    distanceM: num(m.distanceM), ratePerKm: n(m.ratePerKm), cost: n(m.cost),
+    pointsCount: num(m.pointsCount), platform: m.platform || '',
+    editedAt: toDate(m.editedAt), editedBy: m.editedBy || '', originalDistanceM: n(m.originalDistanceM),
+  };
+}
+export const tripKm = (t) => (t.distanceM || 0) / 1000;
+/** Cost of a trip: the saved cost, or (for a trip still running) km × the rate that will apply. */
+export const tripCost = (t) => (t.cost != null ? t.cost : Math.round(tripKm(t) * tripRateFor(t.employeeId) * 100) / 100);
+export const tripRateFor = (uid) => {
+  const u = store.user(uid);
+  return u?.tripRatePerKm != null ? u.tripRatePerKm : (store.settings.tripRatePerKm || 0);
+};
+export const tripMinutes = (t, now = new Date()) => (t.startAt ? Math.max(0, Math.round(((t.endAt || now) - t.startAt) / 60000)) : 0);
+export async function tripsInRange(from, to) {
+  const snap = await getDocs(query(C('trips'), where('date', '>=', from), where('date', '<=', to)));
+  return snap.docs.map(mapTrip).sort((a, b) => (a.startAt || 0) - (b.startAt || 0));
+}
+export async function tripsForSites(siteIds) {
+  if (!siteIds.length) return [];
+  const out = [];
+  for (let i = 0; i < siteIds.length; i += 30) {
+    const snap = await getDocs(query(C('trips'), where('siteId', 'in', siteIds.slice(i, i + 30))));
+    out.push(...snap.docs.map(mapTrip));
+  }
+  return out.sort((a, b) => (a.startAt || 0) - (b.startAt || 0));
+}
+export async function tripPoints(id) {
+  const snap = await getDocs(collection(db, 'trips', id, 'points'));
+  return snap.docs.map((d) => { const m = d.data(); return { lat: m.lat, lng: m.lng, at: toDate(m.at) }; })
+    .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number')
+    .sort((a, b) => (a.at || 0) - (b.at || 0));
+}
+/** Admin correction: distance, rate, charged site, purpose. Cost is recalculated. */
+export async function editTrip(t, { km, ratePerKm, siteId, purpose, vehicle, note }) {
+  const site = siteId ? store.site(siteId) : null;
+  const rate = ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.employeeId));
+  const data = {
+    distanceM: Math.round(km * 1000), ratePerKm: rate, cost: Math.round(km * rate * 100) / 100,
+    siteId: siteId || '', siteName: site?.name || (siteId ? t.siteName : ''),
+    purpose: purpose ?? t.purpose, vehicle: vehicle ?? t.vehicle, note: note ?? t.note,
+    editedAt: serverTimestamp(), editedBy: store.me?.name || '',
+  };
+  if (t.originalDistanceM == null) data.originalDistanceM = t.distanceM;
+  return updateDoc(doc(db, 'trips', t.id), data);
+}
+/** Ends a trip the driver forgot to stop (at the last GPS point). */
+export async function endTripNow(t) {
+  const rate = tripRateFor(t.employeeId);
+  const km = tripKm(t);
+  const end = t.lastAt || new Date();
+  return updateDoc(doc(db, 'trips', t.id), {
+    status: 'done', endAt: Timestamp.fromDate(end), endLat: t.lastLat, endLng: t.lastLng,
+    siteId: t.siteId || t.startSiteId, siteName: t.siteName || t.startSiteName,
+    durationMin: t.startAt ? Math.round((end - t.startAt) / 60000) : 0,
+    ratePerKm: rate, cost: Math.round(km * rate * 100) / 100, note: (t.note ? t.note + ' · ' : '') + `Ended by ${store.me?.name || 'management'}`,
+  });
+}
+export async function deleteTrip(id) {
+  const pts = await getDocs(collection(db, 'trips', id, 'points'));
+  for (let i = 0; i < pts.docs.length; i += 400) {
+    const b = writeBatch(db);
+    pts.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref));
+    await b.commit();
+  }
+  await deleteDoc(doc(db, 'trips', id));
+}
+
 export const minDayMins = () => Math.round((store.settings?.minDailyHours || 8) * 60);
 /** A finished day (not today with someone still on site) that is below the minimum. */
 export const isShortDay = (date, mins, stillOpen = false) => mins > 0 && mins < minDayMins() && !(stillOpen && date === dateKey(new Date()));
@@ -204,7 +290,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8 }, rates: {},
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8, tripRatePerKm: 0 }, rates: {}, _tToday: [], _tActive: [],
   _subs: [], _listeners: new Set(), _day: null, errors: {},
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -214,7 +300,7 @@ export const store = {
     this._day = dateKey(now);
     this.errors = {};
     const LABELS = { _wToday: 'external worker attendance', _wOpen: 'external workers on site', workerLocks: 'external worker locks',
-      workers: 'external workers', requests: 'change requests', idInfo: 'ID details', idFiles: 'ID copies' };
+      workers: 'external workers', requests: 'change requests', _tToday: 'driver trips', _tActive: 'trips in progress', idInfo: 'ID details', idFiles: 'ID copies' };
     const sub = (q, key, mapper, after) => this._subs.push(onSnapshot(q, (snap) => {
       this[key] = snap.docs.map(mapper);
       delete this.errors[key];
@@ -238,7 +324,10 @@ export const store = {
     sub(query(C('changeRequests'), where('status', '==', 'pending')), 'requests', mapRequest, (l) => l.sort((a, b) => (a.submittedAt || 0) - (b.submittedAt || 0)));
     this._subs.push(onSnapshot(doc(db, 'settings', 'general'), (d) => {
       const m = (d.exists() ? d.data() : null) || {};
-      this.settings = { minDailyHours: typeof m.minDailyHours === 'number' && m.minDailyHours > 0 ? m.minDailyHours : 8 };
+      this.settings = {
+        minDailyHours: typeof m.minDailyHours === 'number' && m.minDailyHours > 0 ? m.minDailyHours : 8,
+        tripRatePerKm: typeof m.tripRatePerKm === 'number' && m.tripRatePerKm >= 0 ? m.tripRatePerKm : 0,
+      };
       this.emit();
     }, () => {}));
     if (isAdmin()) {
@@ -250,6 +339,9 @@ export const store = {
     // Today's worker entries PLUS any still open from earlier (e.g. checked in before midnight).
     sub(query(C('workerAttendance'), where('date', '==', this._day)), '_wToday', mapWorkerEntry);
     sub(query(C('workerAttendance'), where('open', '==', true)), '_wOpen', mapWorkerEntry);
+    // Driver trips: today's plus any still running from before midnight.
+    sub(query(C('trips'), where('date', '==', this._day)), '_tToday', mapTrip);
+    sub(query(C('trips'), where('status', '==', 'active')), '_tActive', mapTrip);
     sub(C('idInfo'), 'idInfo', mapIdInfo);
     sub(C('idFiles'), 'idFiles', mapIdFile, (l) => l.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0)));
     this._tick = setInterval(() => {
@@ -270,6 +362,13 @@ export const store = {
     [...this._wToday, ...this._wOpen].forEach((e) => m.set(e.id, e));
     return [...m.values()];
   },
+  get tripsToday() {
+    const m = new Map();
+    [...this._tToday, ...this._tActive].forEach((t) => m.set(t.id, t));
+    return [...m.values()].sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+  },
+  get tripsActive() { return this._tActive; },
+  get drivers() { return this.users.filter((u) => u.isDriver && u.active); },
   /** External workers on site now — from open attendance entries (works even if a lock is missing). */
   get extOnSite() {
     const m = new Map();
@@ -394,7 +493,7 @@ export const deleteProject = (id) => deleteDoc(doc(db, 'projects', id));
 
 export const updateUser = (id, data) => setDoc(doc(db, 'users', id), data, { merge: true });
 
-export async function createStaff({ loginId, password, name, phone, designation, role, weeklyOffDays, monthlyOffQuota }) {
+export async function createStaff({ loginId, password, name, phone, designation, role, weeklyOffDays, monthlyOffQuota, ...extra }) {
   const second = getApps().find((a) => a.name === 'staffCreator') || initializeApp(firebaseConfig, 'staffCreator');
   const sAuth = getAuth(second);
   const email = loginToEmail(loginId);
@@ -403,7 +502,7 @@ export async function createStaff({ loginId, password, name, phone, designation,
   await signOut(sAuth);
   await setDoc(doc(db, 'users', uid), {
     name, loginId: loginId.trim(), email, phone, designation, role, active: true,
-    weeklyOffDays, monthlyOffQuota, createdAt: serverTimestamp(),
+    weeklyOffDays, monthlyOffQuota, createdAt: serverTimestamp(), ...extra,
   });
   return uid;
 }

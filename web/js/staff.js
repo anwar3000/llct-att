@@ -3,10 +3,10 @@
 // history & off days, site updates with photos, petty cash, and own ID documents.
 import {
   auth, db, onAuthStateChanged, login, logout, getMe, store, mapSession, mapSite, mapPetty, mapUpdate, mapWorker,
-  mapWorkerEntry, mapOff, mapIdInfo, mapIdFile, saveIdInfo, uploadIdFile, deleteIdFile, Timestamp, serverTimestamp,
+  mapWorkerEntry, mapOff, mapIdInfo, mapIdFile, saveIdInfo, uploadIdFile, deleteIdFile, Timestamp, serverTimestamp, mapTrip,
 } from './fb.js';
 import {
-  collection, doc, query, where, onSnapshot, addDoc, updateDoc, getDocs, deleteDoc, runTransaction, writeBatch,
+  collection, doc, query, where, onSnapshot, addDoc, updateDoc, getDocs, getDoc, deleteDoc, runTransaction, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   esc, icon, avatar, pill, toast, modal, confirmBox, friendlyError, fmtTime, fmtDate, fmtDay, fmtMins, fmtMoney, fmtMonth,
@@ -26,6 +26,7 @@ const S = {
   me: null, tab: 'today', sites: [], open: null, todaySessions: [], workers: [], locks: {}, sessionWorkers: [], myWorkers: [],
   month: new Date(), monthSessions: [], monthOff: [], petty: [], myUpdates: [], idInfo: {}, idFiles: [],
   busy: '', subs: [], sessSubs: [], monthSubs: [], lastAlertAt: 0, lastPush: 0,
+  trip: null, tripsToday: [], tw: null,
 };
 
 // ================================================================== helpers
@@ -128,6 +129,7 @@ function stopAll() {
   [...S.subs, ...S.sessSubs, ...S.monthSubs].forEach((u) => { try { u(); } catch { /* ignore */ } });
   S.subs = []; S.sessSubs = []; S.monthSubs = [];
   if (S._tick) clearInterval(S._tick);
+  stopWatch();
 }
 
 // ================================================================== data
@@ -160,6 +162,17 @@ function start() {
     if (f && signedIn && f > signedIn) { loginError = 'You were signed out by management. Sign in again to continue.'; logout(); }
     if (d.exists() && d.data().active === false) { loginError = 'Your account is disabled. Contact management.'; logout(); }
   }, () => {}));
+  if (S.me.isDriver) {
+    on(query(C('trips'), where('employeeId', '==', uid), where('status', '==', 'active')), (s) => {
+      const l = s.docs.map(mapTrip);
+      S.trip = l[0] || null;
+      if (S.trip) resumeTrip(S.trip); else stopWatch();
+      draw();
+    });
+    on(query(C('trips'), where('employeeId', '==', uid), where('date', '==', dateKey(new Date()))), (s) => {
+      S.tripsToday = s.docs.map(mapTrip).filter((t) => t.status !== 'active').sort((a, b) => (b.startAt || 0) - (a.startAt || 0)); draw();
+    });
+  }
   watchMonth();
   // While the app is open and you're checked in: share location every 5 min and check the geofence.
   S._tick = setInterval(() => { tick(); if (S.tab === 'today') drawTimer(); }, 30000);
@@ -249,6 +262,7 @@ function drawToday(main) {
       <div class="timer" id="st-timer">${fmtMins(closed + (o ? minsOf(o) : 0))}</div>
     </div>
     <button class="st-big ${o ? 'out' : 'in'}" id="st-act">${o ? 'CHECK OUT' : 'CHECK IN'}</button>
+    ${S.me.isDriver ? tripCardHtml() : ''}
     ${o || S.myWorkers.length ? `<div class="st-card pad">
         <div class="row" style="flex-wrap:nowrap;gap:10px"><div class="st-wico">${icon('worker', 22)}</div>
           <div class="grow"><b>${S.myWorkers.length ? `${S.myWorkers.length} external worker${S.myWorkers.length === 1 ? '' : 's'} on site` : 'No external workers added'}</b>
@@ -272,16 +286,169 @@ function drawToday(main) {
         <b>${fmtMins(minsOf(s))}</b></div>`).join('') : '<div class="empty small">No check-ins yet today</div>'}</div>
     ${isIOS ? '<div class="st-note small">On iPhone, location is shared only while this app is open. Open it from time to time while you are on site.</div>' : ''}`;
   main.querySelector('#st-act').onclick = () => (o ? checkOut() : checkIn());
+  main.querySelector('#st-trip-start')?.addEventListener('click', startTrip);
+  main.querySelector('#st-trip-stop')?.addEventListener('click', stopTrip);
   main.querySelector('#st-wk')?.addEventListener('click', () => workerPicker(false));
   main.querySelectorAll('[data-po]').forEach((b) => { b.onclick = () => punchOut(S.myWorkers.filter((e) => e.id === b.dataset.po)); });
   main.querySelector('#st-poall')?.addEventListener('click', () => punchOut(S.myWorkers));
   main.querySelectorAll('[data-go]').forEach((a) => { a.onclick = () => { S.tab = a.dataset.go; draw(); }; });
 }
 function drawTimer() {
+  const tt = document.getElementById('st-trip-time');
+  if (tt && S.trip) tt.textContent = fmtMins(Math.round((Date.now() - S.trip.startAt) / 60000));
   const t = document.getElementById('st-timer');
   if (!t) return;
   const closed = S.todaySessions.filter((s) => s.checkOut).reduce((a, s) => a + minsOf(s), 0);
   t.textContent = fmtMins(closed + (S.open ? minsOf(S.open) : 0));
+}
+
+// ================================================================== DRIVER TRIPS
+// Start → Stop with GPS distance. On iPhone the GPS only runs while this app is open, so the
+// screen is kept awake during a trip; a gap is bridged with the straight line between points.
+const tripKmOf = (t) => (S.tw && S.tw.id === t.id ? S.tw.dist : t.distanceM) / 1000;
+function tripCardHtml() {
+  const t = S.trip;
+  const km = S.tripsToday.reduce((a, x) => a + x.distanceM / 1000, 0);
+  return `<div class="st-card pad st-trip ${t ? 'on' : ''}">
+    <div class="row" style="flex-wrap:nowrap;gap:10px"><div class="st-wico" style="background:${t ? '#e2f4ea' : '#e4eefb'};color:${t ? '#2E9E6A' : '#3A7BD5'}">${icon('car', 22)}</div>
+      <div class="grow"><b>${t ? 'Trip in progress' : 'Driver trips'}</b>
+      <div class="small muted">${t ? `From ${esc(t.startSiteName || 'GPS location')} · ${fmtTime(t.startAt)}${t.vehicle ? ` · ${esc(t.vehicle)}` : ''}` : `Today: ${S.tripsToday.length} trip${S.tripsToday.length === 1 ? '' : 's'} · ${km.toFixed(1)} km`}</div></div></div>
+    ${t ? `<div class="st-kpis" style="grid-template-columns:1fr 1fr;margin:12px 0 0"><div><b id="st-trip-km">${tripKmOf(t).toFixed(2)} km</b><span>Distance</span></div>
+      <div><b id="st-trip-time">${fmtMins(Math.round((Date.now() - t.startAt) / 60000))}</b><span>Time</span></div></div>
+      <div class="st-note small" style="margin:10px 0 0">Keep this app open on screen while driving — the iPhone only records GPS while it’s open.</div>
+      <button class="st-big out" id="st-trip-stop" style="height:54px;margin:12px 0 0">STOP TRIP</button>`
+    : '<button class="st-big" id="st-trip-start" style="height:54px;margin:12px 0 0;background:#3A7BD5;color:#fff">START TRIP</button>'}
+    ${S.tripsToday.slice(0, 5).map((x) => `<div class="row small" style="flex-wrap:nowrap;margin-top:8px"><span class="grow">${fmtTime(x.startAt)} ${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</span><b>${(x.distanceM / 1000).toFixed(1)} km</b></div>`).join('')}
+  </div>`;
+}
+function siteAt(p) {
+  let best = null, bd = Infinity;
+  for (const s of visibleSites()) {
+    const d = distance(p.lat, p.lng, s.lat, s.lng);
+    if (d <= s.radius + 200 && d < bd) { best = s; bd = d; }
+  }
+  return best;
+}
+// Distance a new fix adds, or null to ignore it (poor accuracy, jitter, impossible jump).
+function tripStep(p, last) {
+  if (!p || p.accuracy > 50) return null;
+  if (!last) return 0;
+  const d = distance(last.lat, last.lng, p.lat, p.lng);
+  if (d < Math.min(30, Math.max(8, (p.accuracy + last.accuracy) / 2))) return null;
+  const secs = (p.at - last.at) / 1000;
+  if (secs > 0 && d / secs > 70) return null;
+  return d;
+}
+async function wake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !S.wakeLock) { S.wakeLock = await navigator.wakeLock.request('screen'); S.wakeLock.addEventListener?.('release', () => { S.wakeLock = null; }); }
+    if (!on && S.wakeLock) { await S.wakeLock.release(); S.wakeLock = null; }
+  } catch { /* not supported */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.tw) wake(true); });
+function stopWatch() {
+  if (S.tw?.watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(S.tw.watchId);
+  S.tw = null;
+  wake(false);
+}
+function resumeTrip(t) {
+  if (S.tw && S.tw.id === t.id) return;
+  stopWatch();
+  const lat = t.lastLat ?? t.startLat, lng = t.lastLng ?? t.startLng;
+  S.tw = { id: t.id, dist: t.distanceM || 0, points: t.pointsCount || 0, savedDist: t.distanceM || 0, savedAt: Date.now(), saving: false,
+    last: lat != null ? { lat, lng, accuracy: 20, at: (t.lastAt || new Date()).getTime() } : null, watchId: null };
+  wake(true);
+  if (!navigator.geolocation) return;
+  S.tw.watchId = navigator.geolocation.watchPosition((pos) => {
+    const tw = S.tw;
+    if (!tw || tw.id !== t.id) return;
+    const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, at: pos.timestamp || Date.now() };
+    const d = tripStep(p, tw.last);
+    if (d == null) return;
+    tw.last = p;
+    if (!d) return;
+    tw.dist += d; tw.points++;
+    const k = document.getElementById('st-trip-km');
+    if (k) k.textContent = `${(tw.dist / 1000).toFixed(2)} km`;
+    if (!tw.saving && (Date.now() - tw.savedAt >= 30000 || tw.dist - tw.savedDist >= 250)) {
+      tw.saving = true;
+      const b = writeBatch(db);
+      b.set(doc(C(`trips/${t.id}/points`)), { lat: p.lat, lng: p.lng, at: serverTimestamp() });
+      b.update(doc(db, 'trips', t.id), { distanceM: Math.round(tw.dist), pointsCount: tw.points, lastLat: p.lat, lastLng: p.lng, lastAt: serverTimestamp() });
+      b.commit().then(() => { tw.savedDist = tw.dist; tw.savedAt = Date.now(); }).catch((e) => console.warn('trip save', e)).finally(() => { tw.saving = false; });
+    }
+  }, (e) => console.warn('trip gps', e), { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+}
+function startTrip() {
+  const presets = ['Pick up workers', 'Drop workers', 'Material delivery', 'Site visit', 'Office'];
+  modal({
+    title: 'Start trip',
+    body: `<label class="f"><span>Vehicle / plate no.</span><input id="tp-veh" value="${esc(S.me.vehicle || '')}" autocapitalize="characters"></label>
+      <label class="f"><span>Purpose</span><input id="tp-pur"></label>
+      <div class="chips" style="margin:6px 0">${presets.map((x) => `<span class="chip" data-p="${esc(x)}">${esc(x)}</span>`).join('')}</div>
+      <div class="small muted">Distance is measured by GPS until you tap Stop trip. Keep this app open while driving.</div>`,
+    foot: '<button class="st-btn" data-no>Cancel</button><button class="st-btn primary" data-yes style="flex:1">START</button>',
+    onMount: (el, close) => {
+      el.querySelectorAll('[data-p]').forEach((c) => { c.onclick = () => { el.querySelector('#tp-pur').value = c.dataset.p; }; });
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = async () => {
+        const vehicle = el.querySelector('#tp-veh').value.trim(), purpose = el.querySelector('#tp-pur').value.trim();
+        close();
+        busy('Getting your GPS location…');
+        try {
+          const p = await locate();
+          const site = siteAt(p);
+          const now = new Date();
+          const ref = doc(C('trips'));
+          const b = writeBatch(db);
+          b.set(ref, {
+            employeeId: S.me.id, employeeName: S.me.name, vehicle, purpose, status: 'active',
+            startAt: Timestamp.fromDate(now), startServer: serverTimestamp(), tz: tzNow(), date: dateKey(now), month: monthKey(now),
+            startLat: p.lat, startLng: p.lng, lastLat: p.lat, lastLng: p.lng, lastAt: serverTimestamp(),
+            startSiteId: site?.id || '', startSiteName: site?.name || '', distanceM: 0, pointsCount: 1, platform: isIOS ? 'iphone' : 'web',
+          });
+          b.set(doc(C(`trips/${ref.id}/points`)), { lat: p.lat, lng: p.lng, at: serverTimestamp() });
+          await b.commit();
+          toast('Trip started — drive safe');
+        } catch (e) { alertBox('Could not start trip', friendlyError(e)); }
+        busy('');
+      };
+    },
+  });
+}
+async function stopTrip() {
+  const t = S.trip;
+  if (!t || !await confirmBox('Stop trip', 'End this trip now? The distance and cost will be saved.', { ok: 'Stop trip', danger: true })) return;
+  busy('Saving trip…');
+  try {
+    let dist = S.tw && S.tw.id === t.id ? S.tw.dist : t.distanceM;
+    let points = S.tw && S.tw.id === t.id ? S.tw.points : t.pointsCount;
+    let p = null;
+    try {
+      p = await locate();
+      const d = tripStep({ ...p, at: Date.now() }, S.tw?.last);
+      if (d) { dist += d; points++; }
+    } catch { /* end without a final fix */ }
+    const site = p ? siteAt(p) : null;
+    let rate = S.me.tripRatePerKm;
+    if (rate == null) {
+      try { const g = await getDoc(doc(db, 'settings', 'general')); rate = typeof g.data()?.tripRatePerKm === 'number' ? g.data().tripRatePerKm : 0; } catch { rate = 0; }
+    }
+    const now = new Date();
+    const b = writeBatch(db);
+    if (p) b.set(doc(C(`trips/${t.id}/points`)), { lat: p.lat, lng: p.lng, at: serverTimestamp() });
+    b.update(doc(db, 'trips', t.id), {
+      status: 'done', endAt: Timestamp.fromDate(now), endServer: serverTimestamp(), endTz: tzNow(),
+      endLat: p?.lat ?? null, endLng: p?.lng ?? null, endSiteId: site?.id || '', endSiteName: site?.name || '',
+      siteId: site?.id || t.startSiteId, siteName: site?.name || t.startSiteName,
+      distanceM: Math.round(dist), pointsCount: points, durationMin: Math.round((now - t.startAt) / 60000),
+      ratePerKm: rate, cost: Math.round((dist / 1000) * rate * 100) / 100,
+    });
+    await b.commit();
+    stopWatch();
+    toast(`Trip saved: ${(dist / 1000).toFixed(1)} km`);
+  } catch (e) { alertBox('Could not stop trip', friendlyError(e)); }
+  busy('');
 }
 
 async function checkIn(preselected = null) {

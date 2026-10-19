@@ -8,6 +8,7 @@ import '../../models/models.dart';
 import '../../services/auth_service.dart';
 import '../../services/db.dart';
 import '../../services/tracking_service.dart';
+import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
 import 'history_tab.dart';
 import 'home_tab.dart';
@@ -58,6 +59,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
         : 'Sign out of this device?';
     if (!await confirm(context, 'Sign out', msg, ok: 'Sign out')) return;
     await TrackingService.instance.stop(markStopped: true);
+    await TripService.instance.detach();
     await AuthService.signOut();
   }
 

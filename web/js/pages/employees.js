@@ -55,7 +55,7 @@ function list(el, { setHeader }) {
     <div class="card"><div class="table-wrap"><table class="t">
       <tr><th>Employee</th><th>Login ID</th><th>Phone</th><th>Weekly off</th><th>Status today</th><th class="num">Today</th><th>IDs</th><th>Last GPS</th></tr>
       ${rows.length ? rows.map((s) => `<tr class="click" data-id="${s.user.id}">
-        <td><div class="person">${avatar(s.user.name, 32)}<div><div class="nm">${esc(s.user.name)}</div><div class="small muted">${esc(s.user.designation)}</div></div></div></td>
+        <td><div class="person">${avatar(s.user.name, 32)}<div><div class="nm">${esc(s.user.name)}${s.user.isDriver ? ` <span class="pill blue" title="Driver">${icon('car', 11)} Driver</span>` : ''}</div><div class="small muted">${esc(s.user.designation)}</div></div></div></td>
         <td class="mono">${esc(s.user.loginId)}</td><td>${esc(s.user.phone)}</td>
         <td>${s.user.weeklyOffDays.length ? s.user.weeklyOffDays.map((w) => WEEKDAYS[w]).join(', ') : '<span class="muted">Flexible</span>'}</td>
         <td>${pill(STATE[s.state][0], STATE[s.state][1], s.state === 'onDuty')}${s.open ? `<div class="small muted">${esc(s.open.siteName)}</div>` : ''}</td>
@@ -111,6 +111,10 @@ export function editPerson(u) {
         <div class="chips">${[1, 2, 3, 4, 5, 6, 7].map((w) => `<span class="chip ${off.has(w) ? 'on' : ''}" data-w="${w}">${WEEKDAYS_LONG[w]}</span>`).join('')}</div></div>
       <label class="f" style="margin-top:12px"><span>Off days per month</span><input name="quota" type="number" min="0" max="15" value="${u?.monthlyOffQuota ?? 4}"></label>
       ${editing ? `<label class="f row" style="gap:8px;margin-top:34px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}> Account active</label>` : ''}
+      <div class="full" style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px">
+        <label class="row" style="gap:8px"><input type="checkbox" name="isDriver" ${u?.isDriver ? 'checked' : ''}> <b>Driver</b> <span class="small muted">— Start / Stop trip in the app, GPS distance and cost per trip</span></label></div>
+      <label class="f"><span>Usual vehicle / plate no.</span><input name="vehicle" value="${esc(u?.vehicle)}"></label>
+      <label class="f"><span>Trip rate per km (AED) — empty = company rate (${store.settings.tripRatePerKm || 0})</span><input name="tripRate" type="number" min="0" step="0.01" value="${u?.tripRatePerKm ?? ''}"></label>
     </div><div class="error" id="ef-err"></div></form>`,
     foot: `${editing && isAdmin() && u.id !== store.me.id ? `<button class="btn danger" data-delp style="margin-right:auto">${icon('trash', 16)} Delete person</button>` : ''}
       <button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>${editing ? 'Save changes' : 'Create login'}</button>`,
@@ -128,6 +132,8 @@ export function editPerson(u) {
         const data = {
           name: f.name.value.trim(), phone: f.phone.value.trim(), designation: f.designation.value.trim(), role: f.role.value,
           weeklyOffDays: [...off].sort(), monthlyOffQuota: Number(f.quota.value) || 0,
+          isDriver: f.isDriver.checked, vehicle: f.vehicle.value.trim(),
+          tripRatePerKm: f.tripRate.value === '' ? null : Number(f.tripRate.value),
         };
         btn.disabled = true;
         try {
