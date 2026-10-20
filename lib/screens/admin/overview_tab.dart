@@ -49,6 +49,94 @@ class _OverviewTabState extends State<OverviewTab> {
     if (mounted) showSnack(context, 'Session closed at ${fmtTime(at)}');
   }
 
+  /// Team today: people working now grouped by site (staff with their external workers),
+  /// then who has finished for the day, then staff not working today.
+  List<Widget> _teamBySite(List<StaffStatus> st, AdminLive live) {
+    final onDuty = st.where((s) => s.state == StaffState.onDuty && s.open != null).toList();
+    final extOn = live.externalOnSite;
+    final groups = <String, ({String name, List<StaffStatus> staff, List<WorkerEntry> ext})>{};
+    ({String name, List<StaffStatus> staff, List<WorkerEntry> ext}) g(String id, String name) =>
+        groups.putIfAbsent(id, () => (name: live.siteById(id)?.name ?? name, staff: <StaffStatus>[], ext: <WorkerEntry>[]));
+    for (final s in onDuty) {
+      g(s.open!.siteId, s.open!.siteName).staff.add(s);
+    }
+    for (final e in extOn) {
+      g(e.siteId, e.siteName).ext.add(e);
+    }
+    final sites = groups.values.toList()
+      ..sort((a, b) => (b.staff.length + b.ext.length).compareTo(a.staff.length + a.ext.length));
+    final done = st.where((s) => s.state == StaffState.done).toList();
+    final extDone = live.externalToday.where((x) => !x.onSite).toList();
+    final notWorking = st.where((s) => s.state == StaffState.notIn || s.state == StaffState.off).toList();
+
+    Widget head(String text, Color color, {Widget? trailing}) => Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+          color: color.withValues(alpha: 0.08),
+          child: Row(children: [
+            Expanded(child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w800))),
+            if (trailing != null) trailing,
+          ]),
+        );
+    Widget extTile(WorkerEntry e, {bool nested = true, Duration? time, bool onSite = true}) => Padding(
+          padding: EdgeInsets.only(left: nested ? 40 : 0),
+          child: ListTile(
+            dense: true,
+            leading: Avatar(e.workerName, size: nested ? 28 : 40, ring: kExtColor),
+            title: Text(e.workerName, style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(
+                nested ? 'External · since ${fmtTime(e.inLocal)}' : '${e.siteName} · with ${e.employeeName}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+            trailing: Text(fmtDuration(time ?? e.worked()), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+          ),
+        );
+
+    return [
+      if (sites.isEmpty)
+        const Card(child: EmptyState(icon: Icons.location_off_outlined, title: 'Nobody working right now'))
+      else
+        for (final site in sites)
+          Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            clipBehavior: Clip.antiAlias,
+            child: Column(children: [
+              head(site.name, AppColors.success,
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Pill('${site.staff.length} staff', color: kStaffColor),
+                    const SizedBox(width: 6),
+                    Pill('${site.ext.length} ext', color: kExtColor),
+                  ])),
+              for (final s in site.staff) ...[
+                _StaffRow(s, onTap: () => _openEmployee(s.user)),
+                for (final e in site.ext.where((e) => e.sessionId == s.open!.id)) extTile(e),
+              ],
+              // External workers whose employee isn't on duty here (e.g. kept on site after check-out).
+              for (final e in site.ext.where((e) => !site.staff.any((s) => s.open!.id == e.sessionId)))
+                extTile(e, nested: false),
+            ]),
+          ),
+      if (done.isNotEmpty || extDone.isNotEmpty)
+        Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: [
+            head('Finished today · ${done.length + extDone.length}', AppColors.primary),
+            for (final s in done) _StaffRow(s, onTap: () => _openEmployee(s.user)),
+            for (final x in extDone) extTile(x.e, nested: false, time: x.time, onSite: false),
+          ]),
+        ),
+      if (notWorking.isNotEmpty)
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: [
+            head('Not working today · ${notWorking.length}', AppColors.muted),
+            for (final s in notWorking) _StaffRow(s, onTap: () => _openEmployee(s.user)),
+          ]),
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -259,7 +347,7 @@ class _OverviewTabState extends State<OverviewTab> {
               SectionTitle('Team today · ${st.length} staff${ext.isEmpty ? '' : ' + ${ext.length} external'}',
                   trailing: TextButton(
                       onPressed: () => widget.onNavigate(2), child: const Text('Manage team'))),
-              if (st.isEmpty)
+              if (st.isEmpty && ext.isEmpty)
                 const Card(
                   child: EmptyState(
                     icon: Icons.group_add_outlined,
@@ -268,50 +356,7 @@ class _OverviewTabState extends State<OverviewTab> {
                   ),
                 )
               else
-                Card(
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < st.length; i++) ...[
-                        if (i > 0) const Divider(height: 1, indent: 64),
-                        _StaffRow(st[i], onTap: () => _openEmployee(st[i].user)),
-                      ]
-                    ],
-                  ),
-                ),
-              if (ext.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Card(
-                  child: Column(children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                      color: kExtColor.withValues(alpha: 0.08),
-                      child: Text('External workers today · ${ext.length}  ($extOn on site)',
-                          style: const TextStyle(color: kExtColor, fontWeight: FontWeight.w800)),
-                    ),
-                    for (var i = 0; i < ext.length; i++) ...[
-                      if (i > 0) const Divider(height: 1, indent: 64),
-                      ListTile(
-                        leading: Avatar(ext[i].e.workerName, ring: kExtColor),
-                        title: Text(ext[i].e.workerName, style: const TextStyle(fontWeight: FontWeight.w700)),
-                        subtitle: Text('${ext[i].e.siteName} · with ${ext[i].e.employeeName}',
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Pill(ext[i].onSite ? 'On site' : 'Done',
-                                color: ext[i].onSite ? AppColors.success : kExtColor),
-                            const SizedBox(height: 4),
-                            Text(fmtDuration(ext[i].time),
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ]),
-                ),
-              ],
+                ..._teamBySite(st, live),
 
               // ----------------------------------------------- schedule coverage
               if (live.schedules.isNotEmpty) ...[

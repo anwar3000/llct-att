@@ -27,6 +27,42 @@ export function mount(el, _params, { setHeader }) {
   workerEntriesInRange(from, dateKey(now)).then((list) => { extTrend = list; draw(); }).catch((e) => console.error(e));
   recentUpdates(6).then((l) => { updates = l; draw(); }).catch(() => {});
 
+  // Team today: working now grouped by site (staff with their external workers), then finished, then not working.
+  function teamBySite(st) {
+    const row = (s) => `<a class="list-item" href="#/employees/${s.user.id}" style="color:inherit">
+        ${avatar(s.user.name, 34, RING[s.state])}
+        <div class="grow"><div class="nm"><b>${esc(s.user.name)}</b></div><div class="small muted">${esc(statusLine(s))}</div></div>
+        <div class="right">${pill(s.forgot ? 'Open since earlier' : STATE[s.state][0], s.forgot ? 'red' : STATE[s.state][1], s.state === 'onDuty')}
+          ${s.minutes ? `<div class="small" style="font-weight:700;margin-top:3px">${fmtMins(s.minutes)}</div>` : ''}</div></a>`;
+    const extRow = (wid, nested) => {
+      const es = store.workersToday.filter((e) => e.workerId === wid);
+      if (!es.length) return '';
+      const w = store.worker(wid), last = es[es.length - 1], open = es.find((e) => e.open);
+      const m = es.reduce((a, e) => a + entryMinutes(e), 0);
+      return `<a class="list-item" href="#/workers/${wid}" style="color:inherit;background:#fffaf2;${nested ? 'padding-left:44px;' : ''}">${avatar(w?.name || last.workerName, nested ? 26 : 30, EXT_COLOR)}
+        <div class="grow"><b class="${nested ? 'small' : ''}">${esc(w?.name || last.workerName)}</b><div class="small muted">External${nested ? '' : ` · ${esc(last.siteName)} · with ${esc(last.employeeName)}`}</div></div>
+        <div class="right"><span class="wf-chip ext">${open ? 'On site' : 'Done'}</span><div class="small" style="font-weight:700;margin-top:3px">${fmtMins(m)}</div></div></a>`;
+    };
+    const head = (t, bg, color, extra = '') => `<div class="list-item small" style="background:${bg};color:${color};font-weight:800">${t}<span class="spacer"></span>${extra}</div>`;
+    const on = st.filter((s) => s.state === 'onDuty' && s.open);
+    const groups = new Map();
+    const grp = (id, name) => { if (!groups.has(id)) groups.set(id, { name: store.site(id)?.name || name || 'Site', staff: [], ext: [] }); return groups.get(id); };
+    on.forEach((s) => grp(s.open.siteId, s.open.siteName).staff.push(s));
+    store.extOnSite.forEach((l) => grp(l.siteId, l.siteName).ext.push(l));
+    const sites = [...groups.values()].sort((a, b) => (b.staff.length + b.ext.length) - (a.staff.length + a.ext.length));
+    const onExt = new Set(store.extOnSite.map((l) => l.workerId));
+    const done = st.filter((s) => s.state === 'done');
+    const extDone = [...new Set(store.workersToday.map((e) => e.workerId))].filter((id) => !onExt.has(id));
+    const notWorking = st.filter((s) => s.state === 'notIn' || s.state === 'off');
+    if (!st.length && !onExt.size && !extDone.length) return '<div class="empty"><b>No employees yet</b>Add staff under Employees.</div>';
+    return (sites.length ? sites.map((g) => head(`📍 ${esc(g.name)}`, '#e2f4ea', '#1f7a50', `<span class="wf-chip staff">${g.staff.length} staff</span> <span class="wf-chip ext">${g.ext.length} external</span>`)
+        + g.staff.map((s) => row(s) + g.ext.filter((l) => l.sessionId === s.open.id).map((l) => extRow(l.workerId, true)).join('')).join('')
+        + g.ext.filter((l) => !g.staff.some((s) => s.open.id === l.sessionId)).map((l) => extRow(l.workerId, false)).join('')).join('')
+      : head('Nobody working right now', '#f3f2ef', '#75757a'))
+      + (done.length || extDone.length ? head(`Finished today · ${done.length + extDone.length}`, '#eef0f3', '#404041') + done.map(row).join('') + extDone.map((id) => extRow(id, false)).join('') : '')
+      + (notWorking.length ? head(`Not working today · ${notWorking.length}`, '#f3f2ef', '#75757a') + notWorking.map(row).join('') : '');
+  }
+
   function draw() {
     if (!store.loaded) { body.innerHTML = '<div class="boot" style="height:200px"><div class="spinner"></div></div>'; return; }
     const st = staffStatuses();
@@ -99,24 +135,7 @@ export function mount(el, _params, { setHeader }) {
     <div class="grid cols-2 mt">
       <div class="card">
         <div class="card-head"><h2>Team today <span class="wf-chip staff">${st.length} staff</span> <span class="wf-chip ext">${extIds.size} external</span></h2><a class="small" href="#/employees">Manage →</a></div>
-        ${st.length ? st.map((s) => `
-          <a class="list-item" href="#/employees/${s.user.id}" style="color:inherit">
-            ${avatar(s.user.name, 34, RING[s.state])}
-            <div class="grow"><div class="nm"><b>${esc(s.user.name)}</b></div>
-              <div class="small muted">${esc(statusLine(s))}</div></div>
-            <div class="right">${pill(s.forgot ? 'Open since earlier' : STATE[s.state][0], s.forgot ? 'red' : STATE[s.state][1], s.state === 'onDuty')}
-              ${s.minutes ? `<div class="small" style="font-weight:700;margin-top:3px">${fmtMins(s.minutes)}</div>` : ''}</div>
-          </a>`).join('') : '<div class="empty"><b>No employees yet</b>Add staff under Employees.</div>'}
-        ${extIds.size ? `<div class="list-item small" style="background:#fdf6ea;color:#a8640f;font-weight:700">External workers today · ${extIds.size}</div>
-        ${[...extIds].map((wid) => {
-          const es = store.workersToday.filter((e) => e.workerId === wid);
-          const w = store.worker(wid);
-          const open = es.find((e) => e.open);
-          const m = es.reduce((a, e) => a + entryMinutes(e), 0);
-          return `<a class="list-item" href="#/workers/${wid}" style="color:inherit">${avatar(w?.name || es[0].workerName, 30, EXT_COLOR)}
-            <div class="grow"><b>${esc(w?.name || es[0].workerName)}</b><div class="small muted">${esc(es[es.length - 1].siteName)} · with ${esc(es[es.length - 1].employeeName)}</div></div>
-            <div class="right"><span class="wf-chip ext">${open ? 'On site' : 'Done'}</span><div class="small" style="font-weight:700;margin-top:3px">${fmtMins(m)}</div></div></a>`;
-        }).join('')}` : ''}
+        ${teamBySite(st)}
       </div>
       <div>
         <div class="card">
