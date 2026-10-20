@@ -12,6 +12,7 @@ import 'services/auth_service.dart';
 import 'services/db.dart';
 import 'services/tracking_service.dart';
 import 'services/trip_service.dart';
+import 'screens/driver/driver_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -115,7 +116,10 @@ class _ProfileGateState extends State<_ProfileGate> {
           );
         }
         CurrentUser.me = user;
-        return user.isManagement ? AdminShell(me: user) : EmployeeShell(me: user);
+        if (user.isManagement) return AdminShell(me: user);
+        // Driver (taxi) work profile gets its own trips app — no attendance check-in.
+        if (user.isDriver) return DriverShell(me: user);
+        return EmployeeShell(me: user);
       },
     );
   }

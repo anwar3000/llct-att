@@ -11,7 +11,7 @@ import '../../services/location_service.dart';
 import '../../services/tracking_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
-import '../../widgets/trip_card.dart';
+import '../../widgets/ride_card.dart';
 import 'worker_picker_screen.dart';
 
 class HomeTab extends StatefulWidget {
@@ -573,10 +573,8 @@ class _HomeTabState extends State<HomeTab> {
             const SizedBox(height: 14),
             _actionButton(open),
             const SizedBox(height: 12),
-            if (widget.me.isDriver) ...[
-              TripCard(me: widget.me, sites: _sites),
-              const SizedBox(height: 12),
-            ],
+            RideCard(me: widget.me, sites: _sites),
+            const SizedBox(height: 12),
             open != null || _myWorkers.isNotEmpty ? _workersCard(open) : _workersHint(),
             const SizedBox(height: 12),
             _quickActions(open),

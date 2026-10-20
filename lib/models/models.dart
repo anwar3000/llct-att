@@ -927,8 +927,15 @@ class Trip {
   final double? ratePerKm;
   final double? cost;
   final int pointsCount;
+  /// driver = a driver's own trip (paid km × rate) · taxi = employee's taxi ride (fare entered)
+  /// · withDriver = employee riding with a company driver (paid through the driver's trip).
+  final String kind;
+  final String driverId, driverName;
 
   Trip({
+    this.kind = 'driver',
+    this.driverId = '',
+    this.driverName = '',
     required this.id,
     required this.employeeId,
     required this.employeeName,
@@ -957,6 +964,10 @@ class Trip {
   });
 
   bool get isActive => status == 'active';
+  bool get isTaxi => kind == 'taxi';
+  bool get isWithDriver => kind == 'withDriver';
+  bool get isRide => isTaxi || isWithDriver;
+  String get kindLabel => isTaxi ? 'Taxi' : (isWithDriver ? 'Company driver${driverName.isEmpty ? '' : ' · $driverName'}' : 'Driver trip');
   double get km => distanceM / 1000;
   Duration get duration => (endAt ?? DateTime.now()).difference(startAt);
   DateTime get startLocal => atZone(startAt, tz);
@@ -990,6 +1001,9 @@ class Trip {
       ratePerKm: _dbl(m['ratePerKm']),
       cost: _dbl(m['cost']),
       pointsCount: _int(m['pointsCount']),
+      kind: _str(m['kind'], 'driver'),
+      driverId: _str(m['driverId']),
+      driverName: _str(m['driverName']),
     );
   }
 }

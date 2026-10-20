@@ -155,7 +155,7 @@ class _OverviewTabState extends State<OverviewTab> {
                 ),
               ]),
               if (!wide && live.tripsToday.isNotEmpty) ...[
-                const SectionTitle('Driver trips today'),
+                const SectionTitle('Trips & rides today'),
                 _TripsCard(live),
               ],
 
@@ -461,7 +461,7 @@ class _LivePanel extends StatelessWidget {
         child: SizedBox(height: 330, child: LiveMapTab(me: me, live: live, embedded: true)),
       ),
       if (live.tripsToday.isNotEmpty) ...[
-        const SectionTitle('Driver trips today'),
+        const SectionTitle('Trips & rides today'),
         _TripsCard(live),
       ],
       SectionTitle('On site now · ${live.open.length + live.externalOnSite.length}'),
@@ -527,7 +527,7 @@ class _TripsCard extends StatelessWidget {
             dense: true,
             leading: Icon(t.isActive ? Icons.local_shipping : Icons.route,
                 color: t.isActive ? AppColors.success : AppColors.muted),
-            title: Text(t.employeeName, style: const TextStyle(fontWeight: FontWeight.w700)),
+            title: Text('${t.employeeName} · ${t.kindLabel}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text(
                 '${fmtTime(t.startLocal)} ${t.startSiteName.isEmpty ? 'GPS' : t.startSiteName} → ${t.isActive ? 'driving…' : (t.endSiteName.isEmpty ? 'GPS' : t.endSiteName)}'
                 '${t.siteName.isNotEmpty && !t.isActive ? ' · charged to ${t.siteName}' : ''}',

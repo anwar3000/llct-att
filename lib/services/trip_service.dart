@@ -49,6 +49,8 @@ class TripService {
     required String vehicle,
     required String purpose,
     required List<Site> sites,
+    String kind = 'driver',
+    AppUser? driver,
   }) async {
     final p = await LocationService.current();
     final site = siteAt(p.latitude, p.longitude, sites);
@@ -59,6 +61,8 @@ class TripService {
       lat: p.latitude,
       lng: p.longitude,
       site: site,
+      kind: kind,
+      driver: driver,
     );
     _trip = Trip(
       id: id,
@@ -71,6 +75,9 @@ class TripService {
       startLng: p.longitude,
       startSiteId: site?.id ?? '',
       startSiteName: site?.name ?? '',
+      kind: kind,
+      driverId: driver?.id ?? '',
+      driverName: driver?.name ?? '',
     );
     _points = 1;
     _last = p;
@@ -154,7 +161,9 @@ class TripService {
   }
 
   /// Ends the trip, works out the drop-off site and the cost.
-  Future<Trip> stop({required AppUser user, required Trip trip, required List<Site> sites, String note = ''}) async {
+  /// Driver trip: km × rate. Taxi ride: the [fare] the employee entered. With a company driver: no cost
+  /// here (the driver's own trip is what gets paid), so it isn't counted twice.
+  Future<Trip> stop({required AppUser user, required Trip trip, required List<Site> sites, String note = '', double? fare}) async {
     if (_trip?.id != trip.id) {
       _trip = trip;
       distance.value = trip.distanceM;
@@ -167,12 +176,13 @@ class TripService {
       if (d != null && d > 0) distance.value += d;
     } catch (_) {}
     final site = p == null ? null : siteAt(p.latitude, p.longitude, sites);
-    final rate = await Db.tripRate(user);
+    final rate = trip.isRide ? null : await Db.tripRate(user);
     await Db.endTrip(
       trip: trip,
       distanceM: distance.value,
       points: _points,
       ratePerKm: rate,
+      cost: trip.isTaxi ? (fare ?? 0) : (trip.isWithDriver ? 0 : null),
       lat: p?.latitude,
       lng: p?.longitude,
       site: site,

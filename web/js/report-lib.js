@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, alertsInRange, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   fmtMoney, tzLabel, atTz, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -491,26 +491,26 @@ const tripLocal = (t, d) => (d ? atTz(d, t.tz) : null);
 /** Trip rows for a sheet (also used inside the project report). */
 export function tripLogSheet(trips, name = 'Trip log') {
   const admin = isAdmin();
-  const cols = ['Date', 'Driver', 'Vehicle', 'Purpose', 'Start', 'End', 'Pick-up', 'Drop-off', 'Charged to site', 'Duration', 'Km'];
+  const cols = ['Date', 'Person', 'Type', 'Vehicle', 'Purpose', 'Start', 'End', 'Pick-up', 'Drop-off', 'Charged to site', 'Duration', 'Km'];
   if (admin) cols.push('Rate / km (AED)', 'Cost (AED)');
   cols.push('Start GPS', 'End GPS', 'Time zone', 'Note');
   const rows = trips.map((t) => {
-    const r = [t.date, t.employeeName, t.vehicle, t.purpose, t2(tripLocal(t, t.startAt)), t.endAt ? t2(tripLocal(t, t.endAt)) : 'IN PROGRESS',
+    const r = [t.date, t.employeeName, tripKindLabel(t), t.vehicle, t.purpose, t2(tripLocal(t, t.startAt)), t.endAt ? t2(tripLocal(t, t.endAt)) : 'IN PROGRESS',
       t.startSiteName || 'GPS location', t.endAt ? (t.endSiteName || 'GPS location') : '', t.siteName || '—', fmtMins(tripMinutes(t)), km2(t.distanceM)];
-    if (admin) r.push(t.ratePerKm ?? '', money(tripCost(t)));
+    if (admin) r.push(t.ratePerKm ?? '', t.kind === 'withDriver' ? 'via driver' : money(tripCost(t)));
     r.push(gps(t.startLat, t.startLng), gps(t.endLat ?? t.lastLat, t.endLng ?? t.lastLng), tzLabel(t.tz), [t.note, t.editedBy ? `edited by ${t.editedBy}` : ''].filter(Boolean).join(' · '));
     return r;
   });
   const km = trips.reduce((a, t) => a + tripKm(t), 0);
-  const totals = ['TOTAL', `${trips.length} trips`, '', '', '', '', '', '', '', fmtMins(trips.reduce((a, t) => a + tripMinutes(t), 0)), Math.round(km * 100) / 100];
+  const totals = ['TOTAL', `${trips.length} trips`, '', '', '', '', '', '', '', '', fmtMins(trips.reduce((a, t) => a + tripMinutes(t), 0)), Math.round(km * 100) / 100];
   if (admin) totals.push('', money(trips.reduce((a, t) => a + tripCost(t), 0)));
   totals.push('', '', '', '');
-  return { name, columns: cols, widths: [11, 18, 12, 18, 7, 11, 18, 18, 18, 9, 8, ...(admin ? [10, 11] : []), 20, 20, 10, 28], rows, totals };
+  return { name, columns: cols, widths: [11, 18, 16, 12, 18, 7, 11, 18, 18, 18, 9, 8, ...(admin ? [10, 11] : []), 20, 20, 10, 28], rows, totals };
 }
 
-export async function tripsReport(from, to, driverId = null, siteId = null) {
+export async function tripsReport(from, to, driverId = null, siteId = null, kind = '') {
   const all = await tripsInRange(from, to);
-  const trips = all.filter((t) => (!driverId || t.employeeId === driverId) && (!siteId || t.siteId === siteId || t.startSiteId === siteId || t.endSiteId === siteId));
+  const trips = all.filter((t) => (!kind || (t.kind || 'driver') === kind) && (!driverId || t.employeeId === driverId || t.driverId === driverId) && (!siteId || t.siteId === siteId || t.startSiteId === siteId || t.endSiteId === siteId));
   const admin = isAdmin();
   // Daily summary per driver
   const daily = new Map();
@@ -522,7 +522,7 @@ export async function tripsReport(from, to, driverId = null, siteId = null) {
     if (t.siteName) c.sites.add(t.siteName);
     daily.set(k, c);
   }
-  const dCols = ['Date', 'Driver', 'Vehicle', 'Trips', 'Km', 'Driving time', 'Sites charged'];
+  const dCols = ['Date', 'Person', 'Vehicle', 'Trips / rides', 'Km', 'Time', 'Sites charged'];
   if (admin) dCols.push('Cost (AED)');
   const dRows = [...daily.values()].sort((a, b) => (a.date + a.name).localeCompare(b.date + b.name)).map((c) => {
     const r = [c.date, c.name, [...c.veh].join(', '), c.n, Math.round(c.km * 100) / 100, fmtMins(c.mins), [...c.sites].join(', ')];
@@ -541,7 +541,7 @@ export async function tripsReport(from, to, driverId = null, siteId = null) {
     c.days.add(t.date); c.n++; c.km += tripKm(t); c.cost += tripCost(t);
     drv.set(t.employeeId, c);
   }
-  const vCols = ['Driver', 'Days driven', 'Trips', 'Km', 'Avg km / trip'];
+  const vCols = ['Person', 'Days', 'Trips / rides', 'Km', 'Avg km / trip'];
   if (admin) vCols.push('Cost (AED)');
   const vRows = [...drv.values()].sort((a, b) => b.km - a.km).map((c) => {
     const r = [c.name, c.days.size, c.n, Math.round(c.km * 100) / 100, Math.round((c.km / c.n) * 10) / 10];
@@ -569,15 +569,15 @@ export async function tripsReport(from, to, driverId = null, siteId = null) {
 
   const who = driverId ? ` — ${store.user(driverId)?.name || ''}` : '';
   return {
-    title: `Driver trips${who}`,
-    subtitle: `${from} to ${to} · ${trips.length} trips · ${Math.round(tKm * 10) / 10} km${admin ? ` · AED ${money(tCost)}` : ''} · cost charged to the drop-off site (or pick-up site)`,
-    filename: `driver-trips-${from}-to-${to}`,
+    title: `Trips & rides${who}`,
+    subtitle: `${from} to ${to} · ${trips.length} trips · ${Math.round(tKm * 10) / 10} km${admin ? ` · AED ${money(tCost)}` : ''} · driver trips km × rate, taxi = fare paid, rides with a company driver are paid via the driver’s trip · charged to the drop-off site (or pick-up site)`,
+    filename: `trips-rides-${from}-to-${to}`,
     orientation: 'landscape',
     pdfFont: 7,
     sheets: [
       { name: 'Daily report', columns: dCols, widths: [11, 20, 16, 7, 9, 12, 40, 12], rows: dRows, totals: dTot },
       { name: 'By site', columns: sCols, widths: [30, 8, 10, 18], rows: sRows, totals: sTot },
-      { name: 'By driver', columns: vCols, widths: [22, 12, 8, 10, 12, 12], rows: vRows },
+      { name: 'By person', columns: vCols, widths: [22, 12, 8, 10, 12, 12], rows: vRows },
       tripLogSheet(trips),
     ],
   };

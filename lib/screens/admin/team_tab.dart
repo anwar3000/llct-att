@@ -106,6 +106,7 @@ class _TeamTabState extends State<TeamTab> {
           }).toList();
           final inactive = live.employees.where((u) => !u.active).toList();
           final admins = live.users.where((u) => u.isManagement).toList();
+          final drivers = live.users.where((u) => u.isEmployee && u.isDriver && u.active).toList();
           int count(StaffState st) => all.where((s) => s.state == st).length;
 
           return ListView(
@@ -183,6 +184,29 @@ class _TeamTabState extends State<TeamTab> {
                     )),
               if (!_extOnly && (_filter == null || _filter == StaffState.onDuty))
                 ..._extCards(onlyOnSite: _filter == StaffState.onDuty),
+              if (drivers.isNotEmpty) ...[
+                const SectionTitle('Drivers (taxi)'),
+                ...drivers.map((u) {
+                  final trip = live.activeTrips.where((t) => t.employeeId == u.id).firstOrNull;
+                  final today = live.tripsToday.where((t) => t.employeeId == u.id).toList();
+                  final km = today.fold<double>(0, (a, t) => a + t.km);
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: Avatar(u.name, ring: const Color(0xFF7B4FC9)),
+                      title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text([if (u.vehicle.isNotEmpty) u.vehicle, 'Today ${today.length} trips · ${km.toStringAsFixed(1)} km'].join(' · '),
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: trip != null
+                          ? const Pill('Driving', color: AppColors.success, icon: Icons.local_shipping)
+                          : const Pill('Idle', color: AppColors.muted),
+                      onTap: !widget.me.isAdmin
+                          ? null
+                          : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => EmployeeFormScreen(existing: u))),
+                    ),
+                  );
+                }),
+              ],
               if (admins.isNotEmpty) ...[
                 const SectionTitle('Admins & managers'),
                 ...admins.map((u) => Card(

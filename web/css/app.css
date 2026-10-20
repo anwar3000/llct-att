@@ -386,3 +386,4 @@ tr.short-day td { background: #fdf1f1; }
 .site-total .split { display: flex; gap: 28px; flex-wrap: wrap; }
 .site-total .split b { display: block; font-size: 18px; color: #fff; }
 .seg { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.tr-t td, .tr-t th { padding: 9px 8px; } .tr-t td:last-child { white-space: nowrap; }

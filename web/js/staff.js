@@ -26,7 +26,7 @@ const S = {
   me: null, tab: 'today', sites: [], open: null, todaySessions: [], workers: [], locks: {}, sessionWorkers: [], myWorkers: [],
   month: new Date(), monthSessions: [], monthOff: [], petty: [], myUpdates: [], idInfo: {}, idFiles: [],
   busy: '', subs: [], sessSubs: [], monthSubs: [], lastAlertAt: 0, lastPush: 0,
-  trip: null, tripsToday: [], tw: null,
+  trip: null, tripsToday: [], tripsMonth: [], tw: null, rate: null,
 };
 
 // ================================================================== helpers
@@ -162,20 +162,27 @@ function start() {
     if (f && signedIn && f > signedIn) { loginError = 'You were signed out by management. Sign in again to continue.'; logout(); }
     if (d.exists() && d.data().active === false) { loginError = 'Your account is disabled. Contact management.'; logout(); }
   }, () => {}));
+  // Ride / trip in progress (everyone). Drivers also get their trip history and rate.
+  on(query(C('trips'), where('employeeId', '==', uid), where('status', '==', 'active')), (s) => {
+    const l = s.docs.map(mapTrip);
+    S.trip = l[0] || null;
+    if (S.trip) resumeTrip(S.trip); else stopWatch();
+    draw();
+  });
   if (S.me.isDriver) {
-    on(query(C('trips'), where('employeeId', '==', uid), where('status', '==', 'active')), (s) => {
-      const l = s.docs.map(mapTrip);
-      S.trip = l[0] || null;
-      if (S.trip) resumeTrip(S.trip); else stopWatch();
-      draw();
-    });
     on(query(C('trips'), where('employeeId', '==', uid), where('date', '==', dateKey(new Date()))), (s) => {
       S.tripsToday = s.docs.map(mapTrip).filter((t) => t.status !== 'active').sort((a, b) => (b.startAt || 0) - (a.startAt || 0)); draw();
     });
+    on(query(C('trips'), where('employeeId', '==', uid), where('month', '==', monthKey(new Date()))), (s) => {
+      S.tripsMonth = s.docs.map(mapTrip).filter((t) => t.status !== 'active').sort((a, b) => (b.startAt || 0) - (a.startAt || 0)); draw();
+    });
+    getDoc(doc(db, 'settings', 'general')).then((g) => {
+      S.rate = S.me.tripRatePerKm ?? (typeof g.data()?.tripRatePerKm === 'number' ? g.data().tripRatePerKm : 0); draw();
+    }).catch(() => { S.rate = S.me.tripRatePerKm ?? 0; });
   }
   watchMonth();
   // While the app is open and you're checked in: share location every 5 min and check the geofence.
-  S._tick = setInterval(() => { tick(); if (S.tab === 'today') drawTimer(); }, 30000);
+  S._tick = setInterval(() => { tick(); if (S.tab === 'today' || S.tab === 'trips') drawTimer(); }, 30000);
   shell();
 }
 
@@ -224,8 +231,12 @@ async function tick() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { S.lastPush = 0; tick(); } });
 
 // ================================================================== shell
-const TABS = [['today', 'Today', 'clock'], ['history', 'History', 'calendar'], ['update', 'Updates', 'updates'], ['petty', 'Petty', 'wallet'], ['me', 'Me', 'idcard']];
+const STAFF_TABS = [['today', 'Today', 'clock'], ['history', 'History', 'calendar'], ['update', 'Updates', 'updates'], ['petty', 'Petty', 'wallet'], ['me', 'Me', 'idcard']];
+// Driver (taxi) work profile: a separate app — trips and profile only, no attendance.
+const DRIVER_TABS = [['trips', 'Trips', 'car'], ['me', 'Me', 'idcard']];
 function shell() {
+  const TABS = S.me.isDriver ? DRIVER_TABS : STAFF_TABS;
+  if (!TABS.some(([k]) => k === S.tab)) S.tab = TABS[0][0];
   app.innerHTML = `
   <div class="st">
     <header class="st-top"><img src="img/icon-192.png" alt=""><div class="grow"><b id="st-title"></b><span>${esc(fmtDate(new Date()))}</span></div>
@@ -242,9 +253,9 @@ function draw() {
   if (!main) return;
   if (main.querySelector('input:focus, textarea:focus, select:focus')) return; // don't wipe what you're typing
   app.querySelectorAll('[data-tab]').forEach((a) => a.classList.toggle('on', a.dataset.tab === S.tab));
-  document.getElementById('st-title').textContent = { today: 'Today', history: 'My attendance', update: 'Site updates', petty: 'Petty cash', me: 'My profile & IDs' }[S.tab];
-  document.getElementById('st-duty').innerHTML = S.open ? '<span class="st-duty">● ON DUTY</span>' : '';
-  ({ today: drawToday, history: drawHistory, update: drawUpdate, petty: drawPetty, me: drawMe })[S.tab](main);
+  document.getElementById('st-title').textContent = { today: 'Today', history: 'My attendance', update: 'Site updates', petty: 'Petty cash', me: 'My profile & IDs', trips: 'Driver trips' }[S.tab];
+  document.getElementById('st-duty').innerHTML = S.trip ? `<span class="st-duty" style="background:rgba(123,79,201,.3);color:#d9c8ff">● ${S.trip.kind === 'driver' || !S.trip.kind ? 'ON TRIP' : 'ON RIDE'}</span>` : S.open ? '<span class="st-duty">● ON DUTY</span>' : '';
+  ({ today: drawToday, history: drawHistory, update: drawUpdate, petty: drawPetty, me: drawMe, trips: drawTrips })[S.tab](main);
 }
 
 // ================================================================== TODAY
@@ -262,7 +273,7 @@ function drawToday(main) {
       <div class="timer" id="st-timer">${fmtMins(closed + (o ? minsOf(o) : 0))}</div>
     </div>
     <button class="st-big ${o ? 'out' : 'in'}" id="st-act">${o ? 'CHECK OUT' : 'CHECK IN'}</button>
-    ${S.me.isDriver ? tripCardHtml() : ''}
+    ${rideCardHtml()}
     ${o || S.myWorkers.length ? `<div class="st-card pad">
         <div class="row" style="flex-wrap:nowrap;gap:10px"><div class="st-wico">${icon('worker', 22)}</div>
           <div class="grow"><b>${S.myWorkers.length ? `${S.myWorkers.length} external worker${S.myWorkers.length === 1 ? '' : 's'} on site` : 'No external workers added'}</b>
@@ -286,7 +297,7 @@ function drawToday(main) {
         <b>${fmtMins(minsOf(s))}</b></div>`).join('') : '<div class="empty small">No check-ins yet today</div>'}</div>
     ${isIOS ? '<div class="st-note small">On iPhone, location is shared only while this app is open. Open it from time to time while you are on site.</div>' : ''}`;
   main.querySelector('#st-act').onclick = () => (o ? checkOut() : checkIn());
-  main.querySelector('#st-trip-start')?.addEventListener('click', startTrip);
+  main.querySelector('#st-ride-start')?.addEventListener('click', startRide);
   main.querySelector('#st-trip-stop')?.addEventListener('click', stopTrip);
   main.querySelector('#st-wk')?.addEventListener('click', () => workerPicker(false));
   main.querySelectorAll('[data-po]').forEach((b) => { b.onclick = () => punchOut(S.myWorkers.filter((e) => e.id === b.dataset.po)); });
@@ -321,6 +332,77 @@ function tripCardHtml() {
     ${S.tripsToday.slice(0, 5).map((x) => `<div class="row small" style="flex-wrap:nowrap;margin-top:8px"><span class="grow">${fmtTime(x.startAt)} ${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</span><b>${(x.distanceM / 1000).toFixed(1)} km</b></div>`).join('')}
   </div>`;
 }
+// Every employee: taxi or company-driver ride, right below the check-in button. No ride history here.
+function rideCardHtml() {
+  const t = S.trip;
+  if (!t) {
+    return `<div class="st-card pad st-ride"><div class="row" style="flex-wrap:nowrap;gap:10px">
+      <div class="st-wico" style="background:#f1eafb;color:#7B4FC9">${icon('car', 22)}</div>
+      <div class="grow"><b>Taxi / company driver</b><div class="small muted">Start when you get in, end when you arrive</div></div>
+      <button class="st-btn sm" id="st-ride-start" style="background:#7B4FC9;border-color:#7B4FC9;color:#fff;font-weight:800">START RIDE</button></div></div>`;
+  }
+  const taxi = t.kind === 'taxi';
+  const title = taxi ? 'Taxi ride in progress' : t.kind === 'withDriver' ? `Ride with ${esc(t.driverName || 'company driver')}` : 'Trip in progress';
+  return `<div class="st-card pad st-ride on"><div class="row" style="flex-wrap:nowrap;gap:10px">
+      <div class="st-wico" style="background:#f1eafb;color:#7B4FC9">${icon('car', 22)}</div>
+      <div class="grow"><b>${title}</b><div class="small muted">From ${esc(t.startSiteName || 'GPS location')} · ${fmtTime(t.startAt)}</div></div></div>
+    <div class="st-kpis" style="grid-template-columns:1fr 1fr;margin:12px 0 0"><div><b id="st-trip-km">${tripKmOf(t).toFixed(1)} km</b><span>Distance</span></div>
+      <div><b id="st-trip-time">${fmtMins(Math.round((Date.now() - t.startAt) / 60000))}</b><span>Time</span></div></div>
+    <button class="st-big out" id="st-trip-stop" style="height:52px;margin:12px 0 0;font-size:16px">${taxi ? 'END RIDE & ENTER FARE' : 'END RIDE'}</button>
+  </div>`;
+}
+
+function drawTrips(main) {
+  const done = S.tripsMonth;
+  const km = done.reduce((a, t) => a + t.distanceM / 1000, 0);
+  const earned = done.reduce((a, t) => a + (t.cost || 0), 0);
+  main.innerHTML = `
+    <div class="st-status" style="border-bottom-color:#7B4FC9">
+      <div class="hi">Hello, ${esc(S.me.name.split(' ')[0])}</div>
+      <div class="st-kpis" style="margin:14px 0 0;grid-template-columns:repeat(3,1fr)">
+        <div style="background:rgba(255,255,255,.08);border:0"><b style="color:#FCB040">${S.rate == null ? '…' : fmtMoney(S.rate)}</b><span style="color:#c9c9cc">per km</span></div>
+        <div style="background:rgba(255,255,255,.08);border:0"><b style="color:#FCB040">${km.toFixed(1)} km</b><span style="color:#c9c9cc">this month</span></div>
+        <div style="background:rgba(255,255,255,.08);border:0"><b style="color:#FCB040">${fmtMoney(Math.round(earned * 100) / 100)}</b><span style="color:#c9c9cc">earned</span></div>
+      </div>
+      ${S.me.vehicle ? `<div class="since">Vehicle ${esc(S.me.vehicle)}</div>` : ''}
+    </div>
+    ${tripCardHtml()}
+    <h3 class="st-h">My trips · ${esc(fmtMonth(new Date()))}</h3>
+    <div class="st-card list">${done.length ? done.map((x) => `<div class="row-i">
+        <div class="grow"><b class="small">${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</b>
+        <div class="small muted">${fmtDay(x.startAt)} · ${fmtTime(x.startAt)}–${fmtTime(x.endAt)}${x.purpose ? ` · ${esc(x.purpose)}` : ''}</div></div>
+        <div style="text-align:right"><b>${(x.distanceM / 1000).toFixed(1)} km</b>${x.cost != null ? `<div class="small">${fmtMoney(x.cost)}</div>` : ''}</div></div>`).join('')
+      : '<div class="empty small">No trips this month</div>'}</div>`;
+  main.querySelector('#st-trip-start')?.addEventListener('click', startTrip);
+  main.querySelector('#st-trip-stop')?.addEventListener('click', stopTrip);
+}
+
+function startRide() {
+  modal({
+    title: 'How are you travelling?',
+    body: `<div class="st-pick">
+      <a class="st-pick-i" data-k="taxi">${icon('car', 26)}<div class="grow"><b>Taxi</b><div class="small muted">Enter the fare when you arrive</div></div></a>
+      <a class="st-pick-i" data-k="withDriver">${icon('people', 26)}<div class="grow"><b>Company driver</b><div class="small muted">Choose the driver</div></div></a>
+    </div><div id="rd-list" style="margin-top:10px"></div>`,
+    onMount: (el, close) => {
+      el.querySelector('[data-k="taxi"]').onclick = () => { close(); beginTrip({ kind: 'taxi', vehicle: 'Taxi' }); };
+      el.querySelector('[data-k="withDriver"]').onclick = async () => {
+        const box = el.querySelector('#rd-list');
+        box.innerHTML = '<div class="small muted">Loading drivers…</div>';
+        try {
+          const snap = await getDocs(query(C('users'), where('isDriver', '==', true)));
+          const ds = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.active !== false).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          box.innerHTML = ds.length ? `<b class="small">Choose the driver</b><div class="st-pick" style="margin-top:6px">${ds.map((d) => `<a class="st-pick-i" data-d="${d.id}">${avatar(d.name || '?', 32)}<div class="grow"><b>${esc(d.name)}</b><div class="small muted">${esc([d.vehicle, d.phone].filter(Boolean).join(' · '))}</div></div></a>`).join('')}</div>`
+            : '<div class="st-note">No drivers registered yet. Ask management.</div>';
+          box.querySelectorAll('[data-d]').forEach((a) => {
+            a.onclick = () => { const d = ds.find((x) => x.id === a.dataset.d); close(); beginTrip({ kind: 'withDriver', driver: d, vehicle: d.vehicle || '' }); };
+          });
+        } catch (e) { box.innerHTML = `<div class="st-note">${esc(friendlyError(e))}</div>`; }
+      };
+    },
+  });
+}
+
 function siteAt(p) {
   let best = null, bd = Infinity;
   for (const s of visibleSites()) {
@@ -391,35 +473,66 @@ function startTrip() {
     onMount: (el, close) => {
       el.querySelectorAll('[data-p]').forEach((c) => { c.onclick = () => { el.querySelector('#tp-pur').value = c.dataset.p; }; });
       el.querySelector('[data-no]').onclick = close;
-      el.querySelector('[data-yes]').onclick = async () => {
+      el.querySelector('[data-yes]').onclick = () => {
         const vehicle = el.querySelector('#tp-veh').value.trim(), purpose = el.querySelector('#tp-pur').value.trim();
         close();
-        busy('Getting your GPS location…');
-        try {
-          const p = await locate();
-          const site = siteAt(p);
-          const now = new Date();
-          const ref = doc(C('trips'));
-          const b = writeBatch(db);
-          b.set(ref, {
-            employeeId: S.me.id, employeeName: S.me.name, vehicle, purpose, status: 'active',
-            startAt: Timestamp.fromDate(now), startServer: serverTimestamp(), tz: tzNow(), date: dateKey(now), month: monthKey(now),
-            startLat: p.lat, startLng: p.lng, lastLat: p.lat, lastLng: p.lng, lastAt: serverTimestamp(),
-            startSiteId: site?.id || '', startSiteName: site?.name || '', distanceM: 0, pointsCount: 1, platform: isIOS ? 'iphone' : 'web',
-          });
-          b.set(doc(C(`trips/${ref.id}/points`)), { lat: p.lat, lng: p.lng, at: serverTimestamp() });
-          await b.commit();
-          toast('Trip started — drive safe');
-        } catch (e) { alertBox('Could not start trip', friendlyError(e)); }
-        busy('');
+        beginTrip({ kind: 'driver', vehicle, purpose });
       };
     },
   });
 }
+async function beginTrip({ kind, vehicle = '', purpose = '', driver = null }) {
+  busy('Getting your GPS location…');
+  try {
+    const p = await locate();
+    const site = siteAt(p);
+    const now = new Date();
+    const ref = doc(C('trips'));
+    const b = writeBatch(db);
+    b.set(ref, {
+      employeeId: S.me.id, employeeName: S.me.name, vehicle, purpose, status: 'active', kind,
+      driverId: driver?.id || '', driverName: driver?.name || '',
+      startAt: Timestamp.fromDate(now), startServer: serverTimestamp(), tz: tzNow(), date: dateKey(now), month: monthKey(now),
+      startLat: p.lat, startLng: p.lng, lastLat: p.lat, lastLng: p.lng, lastAt: serverTimestamp(),
+      startSiteId: site?.id || '', startSiteName: site?.name || '', distanceM: 0, pointsCount: 1, platform: isIOS ? 'iphone' : 'web',
+    });
+    b.set(doc(C(`trips/${ref.id}/points`)), { lat: p.lat, lng: p.lng, at: serverTimestamp() });
+    await b.commit();
+    toast(kind === 'driver' ? 'Trip started — drive safe' : kind === 'taxi' ? 'Taxi ride started' : `Ride with ${driver?.name || 'driver'} started`);
+  } catch (e) { alertBox('Could not start', friendlyError(e)); }
+  busy('');
+}
+function askFare(km) {
+  return new Promise((resolve) => {
+    modal({
+      title: 'Taxi fare',
+      body: `<div class="small muted" style="margin-bottom:8px">Distance ${km.toFixed(1)} km · enter the amount you paid</div>
+        <label class="f"><span>Fare (${CURRENCY})</span><input id="fare" type="number" inputmode="decimal" min="0" step="0.01"></label>
+        <div class="error" id="fare-err"></div>`,
+      foot: '<button class="st-btn" data-no>Cancel</button><button class="st-btn primary" data-yes style="flex:1">SAVE &amp; END</button>',
+      onMount: (el, close) => {
+        const inp = el.querySelector('#fare');
+        setTimeout(() => inp.focus(), 50);
+        el.querySelector('[data-no]').onclick = () => { close(); resolve(null); };
+        el.querySelector('[data-yes]').onclick = () => {
+          const v = Number(inp.value);
+          if (!(v > 0)) { el.querySelector('#fare-err').textContent = 'Enter the fare'; return; }
+          close(); resolve(v);
+        };
+      },
+    });
+  });
+}
 async function stopTrip() {
   const t = S.trip;
-  if (!t || !await confirmBox('Stop trip', 'End this trip now? The distance and cost will be saved.', { ok: 'Stop trip', danger: true })) return;
-  busy('Saving trip…');
+  if (!t) return;
+  const kind = t.kind || 'driver';
+  let fare = null;
+  if (kind === 'taxi') {
+    fare = await askFare(tripKmOf(t));
+    if (fare == null) return;
+  } else if (!await confirmBox(kind === 'driver' ? 'Stop trip' : 'End ride', kind === 'driver' ? 'End this trip now? The distance and cost will be saved.' : `End this ride with ${t.driverName || 'the driver'}?`, { ok: kind === 'driver' ? 'Stop trip' : 'End ride', danger: true })) return;
+  busy('Saving…');
   try {
     let dist = S.tw && S.tw.id === t.id ? S.tw.dist : t.distanceM;
     let points = S.tw && S.tw.id === t.id ? S.tw.points : t.pointsCount;
@@ -430,8 +543,8 @@ async function stopTrip() {
       if (d) { dist += d; points++; }
     } catch { /* end without a final fix */ }
     const site = p ? siteAt(p) : null;
-    let rate = S.me.tripRatePerKm;
-    if (rate == null) {
+    let rate = kind === 'driver' ? S.me.tripRatePerKm : null;
+    if (kind === 'driver' && rate == null) {
       try { const g = await getDoc(doc(db, 'settings', 'general')); rate = typeof g.data()?.tripRatePerKm === 'number' ? g.data().tripRatePerKm : 0; } catch { rate = 0; }
     }
     const now = new Date();
@@ -442,11 +555,12 @@ async function stopTrip() {
       endLat: p?.lat ?? null, endLng: p?.lng ?? null, endSiteId: site?.id || '', endSiteName: site?.name || '',
       siteId: site?.id || t.startSiteId, siteName: site?.name || t.startSiteName,
       distanceM: Math.round(dist), pointsCount: points, durationMin: Math.round((now - t.startAt) / 60000),
-      ratePerKm: rate, cost: Math.round((dist / 1000) * rate * 100) / 100,
+      ratePerKm: rate,
+      cost: kind === 'taxi' ? Math.round(fare * 100) / 100 : kind === 'withDriver' ? 0 : Math.round((dist / 1000) * rate * 100) / 100,
     });
     await b.commit();
     stopWatch();
-    toast(`Trip saved: ${(dist / 1000).toFixed(1)} km`);
+    toast(`${kind === 'driver' ? 'Trip' : 'Ride'} saved: ${(dist / 1000).toFixed(1)} km${fare ? ` · ${fmtMoney(fare)}` : ''}`);
   } catch (e) { alertBox('Could not stop trip', friendlyError(e)); }
   busy('');
 }

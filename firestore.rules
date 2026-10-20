@@ -26,7 +26,8 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------- users
     match /users/{uid} {
-      allow read: if isSelf(uid) || isManagement() || isDocs();
+      // Staff can see the list of company drivers (to pick one for a ride).
+      allow read: if isSelf(uid) || isManagement() || isDocs() || (isActive() && resource.data.get('isDriver', false) == true);
       allow create, delete: if isAdmin();
       // Admins edit profiles; staff may only update their own live location.
       allow update: if isAdmin() || (isSelf(uid) && isActive() && onlyChanges(['lastLocation']));
@@ -64,7 +65,10 @@ service cloud.firestore {
     // Drivers start/stop trips from the app; GPS route points are stored under each trip.
     match /trips/{id} {
       allow read: if isManagement() || owns();
-      allow create: if createsOwn() && request.resource.data.status == 'active';
+      // kind: 'driver' (a driver's own paid trip — driver profile only), 'taxi' or 'withDriver' (an employee's ride).
+      allow create: if createsOwn() && request.resource.data.status == 'active'
+                    && (request.resource.data.get('kind', 'driver') in ['taxi', 'withDriver']
+                        || me().get('isDriver', false) == true);
       allow update: if isManagement() || (owns() && resource.data.status == 'active'
                       && request.resource.data.employeeId == request.auth.uid
                       && onlyChanges(['distanceM', 'pointsCount', 'lastLat', 'lastLng', 'lastAt', 'endAt', 'endLat', 'endLng',

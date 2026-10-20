@@ -252,7 +252,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
               contentPadding: EdgeInsets.zero,
               leading: const CircleAvatar(backgroundColor: kTripColor, child: Icon(Icons.local_shipping, color: Colors.white)),
               title: Text(t.employeeName, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text('Driving${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}${t.purpose.isEmpty ? '' : ' · ${t.purpose}'}'),
+              subtitle: Text('${t.kindLabel}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}${t.purpose.isEmpty ? '' : ' · ${t.purpose}'}'),
             ),
             InfoRow(Icons.trip_origin, 'From', t.startSiteName.isEmpty ? 'GPS location' : t.startSiteName),
             InfoRow(Icons.schedule, 'Started', '${fmtTime(t.startLocal)} · ${fmtDuration(t.duration)} ago'),
@@ -400,7 +400,7 @@ class _LiveMapTabState extends State<LiveMapTab> {
               dense: true,
               leading: const CircleAvatar(radius: 17, backgroundColor: kTripColor, child: Icon(Icons.local_shipping, color: Colors.white, size: 17)),
               title: Text(t.employeeName, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text('${t.startSiteName.isEmpty ? 'GPS' : t.startSiteName} → … · ${fmtDuration(t.duration)}',
+              subtitle: Text('${t.kindLabel} · ${t.startSiteName.isEmpty ? 'GPS' : t.startSiteName} → … · ${fmtDuration(t.duration)}',
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               trailing: Text('${t.km.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w800)),
               onTap: () {

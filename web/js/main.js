@@ -28,7 +28,7 @@ const NAV = [
   { path: 'sites', label: 'Sites', icon: 'site', page: sites },
   { path: 'schedule', label: 'Schedule', icon: 'calendar', page: schedule },
   { path: 'updates', label: 'Site updates', icon: 'updates', page: updates },
-  { path: 'trips', label: 'Driver trips', icon: 'car', page: trips, badge: () => store.tripsActive.length, badgeColor: 'green' },
+  { path: 'trips', label: 'Trips & rides', icon: 'car', page: trips, badge: () => store.tripsActive.length, badgeColor: 'green' },
   { sep: 'People' },
   { path: 'employees', label: 'Employees', icon: 'people', page: employees },
   { path: 'workers', label: 'External workers', icon: 'worker', page: workers },

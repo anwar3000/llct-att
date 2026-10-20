@@ -854,6 +854,19 @@ class Db {
     }
   }
 
+  /// Drivers, for "ride with a company driver".
+  static Stream<List<AppUser>> driversStream() => _fs
+      .collection('users')
+      .where('isDriver', isEqualTo: true)
+      .snapshots()
+      .map((q) => q.docs.map(AppUser.fromDoc).where((u) => u.active).toList()..sort((a, b) => a.name.compareTo(b.name)));
+
+  static Stream<List<Trip>> tripsForMonth(String uid, String month) => trips
+      .where('employeeId', isEqualTo: uid)
+      .where('month', isEqualTo: month)
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
+
   static Future<String> startTrip({
     required AppUser user,
     required String vehicle,
@@ -861,6 +874,8 @@ class Db {
     required double lat,
     required double lng,
     Site? site,
+    String kind = 'driver',
+    AppUser? driver,
   }) async {
     final now = DateTime.now();
     final ref = trips.doc();
@@ -886,6 +901,9 @@ class Db {
       'distanceM': 0,
       'pointsCount': 1,
       'platform': 'android',
+      'kind': kind,
+      'driverId': driver?.id ?? '',
+      'driverName': driver?.name ?? '',
     });
     batch.set(ref.collection('points').doc(), {'lat': lat, 'lng': lng, 'at': FieldValue.serverTimestamp()});
     await batch.commit();
@@ -911,7 +929,8 @@ class Db {
     required Trip trip,
     required double distanceM,
     required int points,
-    required double ratePerKm,
+    double? ratePerKm,
+    double? cost,
     double? lat,
     double? lng,
     Site? site,
@@ -942,7 +961,7 @@ class Db {
       'pointsCount': points + (lat != null ? 1 : 0),
       'durationMin': now.difference(trip.startAt).inMinutes,
       'ratePerKm': ratePerKm,
-      'cost': (km * ratePerKm * 100).round() / 100,
+      'cost': cost ?? ((km * (ratePerKm ?? 0) * 100).round() / 100),
       if (note.isNotEmpty) 'note': note,
     });
     await batch.commit();

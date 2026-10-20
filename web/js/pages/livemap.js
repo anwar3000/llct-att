@@ -97,7 +97,7 @@ export function mount(el, _p, { setHeader }) {
       if (lat == null || lng == null) return;
       const m = window.L.marker([lat, lng], { icon: window.L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
         html: `<div style="width:30px;height:30px;border-radius:50%;background:#7B4FC9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:grid;place-items:center">${icon('car', 16, '#fff')}</div>` }) })
-        .bindPopup(`<b>${esc(t.employeeName)}</b> <span style="color:#7B4FC9;font-weight:700">· Driving</span><br>
+        .bindPopup(`<b>${esc(t.employeeName)}</b> <span style="color:#7B4FC9;font-weight:700">· ${t.kind === 'taxi' ? 'Taxi ride' : t.kind === 'withDriver' ? `Ride with ${esc(t.driverName || 'driver')}` : 'Driving'}</span><br>
           ${t.vehicle ? `${esc(t.vehicle)}<br>` : ''}From ${esc(t.startSiteName || 'GPS location')} · since ${fmtTime(atTz(t.startAt, t.tz))}<br>
           <b>${((t.distanceM || 0) / 1000).toFixed(1)} km</b> so far · GPS ${timeAgo(t.lastAt)}<br><a href="#/trips">Open trips →</a>`);
       empGroup.addLayer(m);

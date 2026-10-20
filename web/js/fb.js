@@ -202,12 +202,22 @@ export function mapTrip(d) {
     siteId: m.siteId || '', siteName: m.siteName || '',
     distanceM: num(m.distanceM), ratePerKm: n(m.ratePerKm), cost: n(m.cost),
     pointsCount: num(m.pointsCount), platform: m.platform || '',
+    kind: m.kind || 'driver', driverId: m.driverId || '', driverName: m.driverName || '',
     editedAt: toDate(m.editedAt), editedBy: m.editedBy || '', originalDistanceM: n(m.originalDistanceM),
   };
 }
 export const tripKm = (t) => (t.distanceM || 0) / 1000;
-/** Cost of a trip: the saved cost, or (for a trip still running) km × the rate that will apply. */
-export const tripCost = (t) => (t.cost != null ? t.cost : Math.round(tripKm(t) * tripRateFor(t.employeeId) * 100) / 100);
+export const TRIP_KINDS = { driver: 'Driver trip', taxi: 'Taxi', withDriver: 'With company driver' };
+export const tripKindLabel = (t) => (t.kind === 'withDriver' && t.driverName ? `With ${t.driverName}` : TRIP_KINDS[t.kind] || 'Driver trip');
+/**
+ * Cost of a trip. Driver trip: saved cost, or (still running) km × the rate that will apply.
+ * Taxi: the fare entered. Ride with a company driver: 0 — it's paid through the driver's own trip.
+ */
+export const tripCost = (t) => {
+  if (t.kind === 'withDriver') return 0;
+  if (t.kind === 'taxi') return t.cost || 0;
+  return t.cost != null ? t.cost : Math.round(tripKm(t) * tripRateFor(t.employeeId) * 100) / 100;
+};
 export const tripRateFor = (uid) => {
   const u = store.user(uid);
   return u?.tripRatePerKm != null ? u.tripRatePerKm : (store.settings.tripRatePerKm || 0);
@@ -233,11 +243,12 @@ export async function tripPoints(id) {
     .sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 /** Admin correction: distance, rate, charged site, purpose. Cost is recalculated. */
-export async function editTrip(t, { km, ratePerKm, siteId, purpose, vehicle, note }) {
+export async function editTrip(t, { km, ratePerKm, fare, siteId, purpose, vehicle, note }) {
   const site = siteId ? store.site(siteId) : null;
-  const rate = ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.employeeId));
+  const rate = t.kind === 'driver' ? (ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.employeeId))) : null;
+  const cost = t.kind === 'taxi' ? Math.round((fare ?? t.cost ?? 0) * 100) / 100 : t.kind === 'withDriver' ? 0 : Math.round(km * rate * 100) / 100;
   const data = {
-    distanceM: Math.round(km * 1000), ratePerKm: rate, cost: Math.round(km * rate * 100) / 100,
+    distanceM: Math.round(km * 1000), ratePerKm: rate, cost,
     siteId: siteId || '', siteName: site?.name || (siteId ? t.siteName : ''),
     purpose: purpose ?? t.purpose, vehicle: vehicle ?? t.vehicle, note: note ?? t.note,
     editedAt: serverTimestamp(), editedBy: store.me?.name || '',
@@ -247,14 +258,14 @@ export async function editTrip(t, { km, ratePerKm, siteId, purpose, vehicle, not
 }
 /** Ends a trip the driver forgot to stop (at the last GPS point). */
 export async function endTripNow(t) {
-  const rate = tripRateFor(t.employeeId);
+  const rate = t.kind === 'driver' ? tripRateFor(t.employeeId) : null;
   const km = tripKm(t);
   const end = t.lastAt || new Date();
   return updateDoc(doc(db, 'trips', t.id), {
     status: 'done', endAt: Timestamp.fromDate(end), endLat: t.lastLat, endLng: t.lastLng,
     siteId: t.siteId || t.startSiteId, siteName: t.siteName || t.startSiteName,
     durationMin: t.startAt ? Math.round((end - t.startAt) / 60000) : 0,
-    ratePerKm: rate, cost: Math.round(km * rate * 100) / 100, note: (t.note ? t.note + ' · ' : '') + `Ended by ${store.me?.name || 'management'}`,
+    ratePerKm: rate, cost: rate == null ? (t.kind === 'taxi' ? (t.cost || 0) : 0) : Math.round(km * rate * 100) / 100, note: (t.note ? t.note + ' · ' : '') + `Ended by ${store.me?.name || 'management'}`,
   });
 }
 export async function deleteTrip(id) {
@@ -390,11 +401,12 @@ export const store = {
 };
 
 /** Today's status for every active employee. */
-export function staffStatuses() {
+/** Drivers (taxi work profile) don't check in, so they're left out of attendance unless asked for. */
+export function staffStatuses({ drivers = false } = {}) {
   const now = new Date();
   const today = dateKey(now);
   const order = { onDuty: 0, done: 1, off: 2, notIn: 3 };
-  return store.activeEmployees.map((u) => {
+  return store.activeEmployees.filter((u) => drivers || !u.isDriver).map((u) => {
     const sessions = store.today.filter((s) => s.employeeId === u.id);
     const open = store.open.find((s) => s.employeeId === u.id) || null;
     const off = u.weeklyOffDays.includes(isoWeekday(now)) ||

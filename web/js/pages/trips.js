@@ -1,5 +1,5 @@
 // Driver trips — live trips in progress, daily list with km and cost, route map, admin corrections.
-import { store, isAdmin, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor } from '../fb.js';
+import { store, isAdmin, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -8,10 +8,10 @@ const TRIP_COLOR = '#7B4FC9';
 
 export function mount(el, _p, { setHeader }) {
   const admin = isAdmin();
-  setHeader('Driver trips', 'Car trips by drivers — GPS distance, time and cost, charged to the pick-up / drop-off site',
+  setHeader('Trips & rides', 'Driver trips (paid per km) and staff taxi / company-driver rides — GPS distance, time and cost, charged to the pick-up / drop-off site',
     `<button class="btn ghost" id="tr-xlsx">${icon('download', 16)} Excel</button><button class="btn ghost" id="tr-pdf">${icon('download', 16)} PDF</button>`);
   const today = dateKey(new Date());
-  let from = today, to = today, driver = '', site = '';
+  let from = today, to = today, driver = '', site = '', kind = '';
   let fetched = [];
   let loading = false;
 
@@ -26,7 +26,7 @@ export function mount(el, _p, { setHeader }) {
     const m = new Map(fetched.map((t) => [t.id, t]));
     for (const t of store.tripsToday) if (t.date >= from && t.date <= to) m.set(t.id, t);
     return [...m.values()]
-      .filter((t) => (!driver || t.employeeId === driver) && (!site || t.siteId === site || t.startSiteId === site || t.endSiteId === site))
+      .filter((t) => (!kind || (t.kind || 'driver') === kind) && (!driver || t.employeeId === driver || t.driverId === driver) && (!site || t.siteId === site || t.startSiteId === site || t.endSiteId === site))
       .sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
   }
 
@@ -36,6 +36,8 @@ export function mount(el, _p, { setHeader }) {
     const km = list.reduce((a, t) => a + tripKm(t), 0);
     const cost = list.reduce((a, t) => a + tripCost(t), 0);
     const drivers = store.users.filter((u) => u.isDriver);
+    const people = store.users.filter((u) => u.role === 'employee');
+    const costOf = (k) => list.filter((t) => (t.kind || 'driver') === k).reduce((a, t) => a + tripCost(t), 0);
     const bySite = new Map();
     for (const t of list) {
       // A trip still running is shown against its pick-up site until it ends.
@@ -56,22 +58,23 @@ export function mount(el, _p, { setHeader }) {
       <div class="seg">${[['today', 'Today'], ['yday', 'Yesterday'], ['7', 'Last 7 days'], ['month', 'This month']].map(([k, l]) => `<button class="btn sm ghost" data-quick="${k}">${l}</button>`).join('')}</div>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">From <input type="date" id="tr-from" value="${from}" style="width:150px"></label>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">To <input type="date" id="tr-to" value="${to}" style="width:150px"></label>
-      <select id="tr-driver" style="width:auto;min-width:150px"><option value="">All drivers</option>${drivers.map((u) => `<option value="${u.id}" ${u.id === driver ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>
+      <select id="tr-kind" style="width:auto;min-width:140px">${[['', 'All types'], ['driver', 'Driver trips'], ['taxi', 'Taxi rides'], ['withDriver', 'Rides with driver']].map(([v, l]) => `<option value="${v}" ${v === kind ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="tr-driver" style="width:auto;min-width:150px"><option value="">All people</option>${people.map((u) => `<option value="${u.id}" ${u.id === driver ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>
       <select id="tr-site" style="width:auto;min-width:150px"><option value="">All sites</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === site ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
       <span class="spacer"></span>
       ${admin ? `<span class="small muted">Company rate</span><input id="tr-rate" type="number" min="0" step="0.01" value="${store.settings.tripRatePerKm || 0}" style="width:90px"> <span class="small muted">AED / km</span> <button class="btn sm" id="tr-rate-save">Save</button>` : ''}
     </div>
-    ${!drivers.length ? `<div class="card pad" style="background:#fff4e2;margin-bottom:12px">${icon('warn', 16)} No drivers yet. Open <a href="#/employees">Employees</a>, edit a person and tick <b>Driver</b> — they get Start / Stop trip in the app.</div>` : ''}
+    ${!drivers.length ? `<div class="card pad" style="background:#fff4e2;margin-bottom:12px">${icon('warn', 16)} No drivers yet. Open <a href="#/employees">Employees</a> → edit a person → <b>Work profile: Driver (taxi)</b>. Their login opens the driver app with Start / Stop trip. Staff can already start taxi rides below their check-in button.</div>` : ''}
     <div class="grid kpis">
-      ${kpi('Trips', list.length, `${byDriver.size} driver${byDriver.size === 1 ? '' : 's'}`, TRIP_COLOR)}
+      ${kpi('Trips & rides', list.length, `${list.filter((t) => (t.kind || 'driver') === 'driver').length} driver · ${list.filter((t) => t.kind === 'taxi').length} taxi · ${list.filter((t) => t.kind === 'withDriver').length} with driver`, TRIP_COLOR)}
       ${kpi('Distance', `${km.toFixed(1)} km`, list.length ? `avg ${(km / list.length).toFixed(1)} km / trip` : '—', '#2E9E6A')}
-      ${admin ? kpi('Cost', fmtMoney(Math.round(cost * 100) / 100), `${bySite.size} site${bySite.size === 1 ? '' : 's'} charged`, '#D98A1A') : kpi('Driving time', fmtMins(list.reduce((a, t) => a + tripMinutes(t), 0)), 'total', '#D98A1A')}
+      ${admin ? kpi('Cost', fmtMoney(Math.round(cost * 100) / 100), `drivers ${fmtMoney(Math.round(costOf('driver') * 100) / 100)} · taxi ${fmtMoney(Math.round(costOf('taxi') * 100) / 100)}`, '#D98A1A') : kpi('Driving time', fmtMins(list.reduce((a, t) => a + tripMinutes(t), 0)), 'total', '#D98A1A')}
       ${kpi('In progress', active.length, active.length ? 'driving now' : 'no trip running', active.length ? '#2E9E6A' : '#404041')}
     </div>
     ${active.length ? `<div class="card mt" style="border:2px solid #2E9E6A"><div class="card-head"><h2>Driving now</h2><span class="spacer"></span>${pill('Live', 'green', true)}</div>
       ${active.map((t) => `<div class="list-item">
         ${avatar(t.employeeName, 32, '#2E9E6A')}
-        <div class="grow"><b>${esc(t.employeeName)}</b>${t.vehicle ? ` <span class="small muted">· ${esc(t.vehicle)}</span>` : ''}
+        <div class="grow"><b>${esc(t.employeeName)}</b> ${kindPill(t)}${t.vehicle && t.kind !== 'taxi' ? ` <span class="small muted">· ${esc(t.vehicle)}</span>` : ''}
           <div class="small muted">From ${esc(t.startSiteName || 'GPS location')} · started ${fmtTime(atTz(t.startAt, t.tz))} · ${fmtMins(tripMinutes(t))}${t.purpose ? ` · ${esc(t.purpose)}` : ''} · last GPS ${timeAgo(t.lastAt)}</div></div>
         <b>${tripKm(t).toFixed(1)} km</b>
         <button class="btn sm ghost" data-route="${t.id}">${icon('map', 14)} Route</button>
@@ -79,15 +82,16 @@ export function mount(el, _p, { setHeader }) {
       </div>`).join('')}</div>` : ''}
     <div class="grid cols-2-1 mt">
       <div class="card"><div class="card-head"><h2>Trips</h2><span class="spacer"></span><span class="small muted">${loading ? 'Loading…' : `${list.length} trip${list.length === 1 ? '' : 's'}`}</span></div>
-        ${list.length ? `<div class="table-wrap"><table class="t"><thead><tr><th>Date</th><th>Driver</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th>' : ''}<th></th></tr></thead><tbody>
+        ${list.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th>' : ''}<th></th></tr></thead><tbody>
         ${list.map((t) => `<tr>
           <td>${esc(t.date.slice(5))}</td>
-          <td><b>${esc(t.employeeName)}</b>${t.vehicle ? `<div class="small muted">${esc(t.vehicle)}</div>` : ''}</td>
+          <td><b>${esc(t.employeeName)}</b>${t.vehicle && t.kind !== 'taxi' ? `<div class="small muted">${esc(t.vehicle)}</div>` : ''}</td>
+          <td>${kindPill(t)}</td>
           <td>${esc(t.startSiteName || 'GPS')} → ${t.status === 'active' ? '<i class="muted">driving…</i>' : esc(t.endSiteName || 'GPS')}${t.purpose ? `<div class="small muted">${esc(t.purpose)}</div>` : ''}</td>
           <td>${t.siteId ? `<a href="#/sites/${t.siteId}">${esc(t.siteName)}</a>` : t.status === 'active' ? '<span class="muted">—</span>' : '<span class="muted">No site</span>'}</td>
           <td class="small">${fmtTime(atTz(t.startAt, t.tz))} – ${t.endAt ? fmtTime(atTz(t.endAt, t.tz)) : 'now'}<div class="muted">${fmtMins(tripMinutes(t))} · ${tzLabel(t.tz)}</div></td>
           <td class="num"><b>${tripKm(t).toFixed(1)}</b>${t.editedBy ? `<div class="small muted" title="Edited by ${esc(t.editedBy)}">edited</div>` : ''}</td>
-          ${admin ? `<td class="num">${fmtMoney(tripCost(t))}${t.status === 'active' ? '<div class="small muted">est.</div>' : ''}</td>` : ''}
+          ${admin ? `<td class="num">${t.kind === 'withDriver' ? '<span class="small muted" title="Paid through the driver’s own trip">via driver</span>' : t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' ? '<div class="small muted">est.</div>' : ''}</td>` : ''}
           <td style="white-space:nowrap"><button class="btn sm ghost icon" data-route="${t.id}" title="Route map">${icon('map', 15)}</button>${admin ? `<button class="btn sm ghost icon" data-edit="${t.id}" title="Edit">${icon('edit', 15)}</button><button class="btn sm ghost icon" data-del="${t.id}" title="Delete">${icon('trash', 15)}</button>` : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : `<div class="empty"><b>No trips in this period</b>Drivers start and stop trips from the app.</div>`}
       </div>
@@ -98,9 +102,9 @@ export function mount(el, _p, { setHeader }) {
             ${admin ? `<b>${fmtMoney(Math.round(c.cost * 100) / 100)}</b>` : ''}</div>`).join('') || '<div class="empty">—</div>'}
           <div class="small muted" style="padding:8px 14px">A trip is charged to the site where it ends; if it doesn’t end at a site, to the site where it started.</div>
         </div>
-        <div class="card mt"><div class="card-head"><h2>By driver</h2></div>
+        <div class="card mt"><div class="card-head"><h2>By person</h2></div>
           ${[...byDriver.values()].sort((a, b) => b.km - a.km).map((c) => `<div class="list-item">${avatar(c.name, 28, TRIP_COLOR)}
-            <div class="grow"><b>${esc(c.name)}</b><div class="small muted">${c.n} trip${c.n === 1 ? '' : 's'} · ${fmtMins(c.mins)}${admin ? ` · ${tripRateFor(c.id)} AED/km` : ''}</div></div>
+            <div class="grow"><b>${esc(c.name)}</b><div class="small muted">${c.n} trip${c.n === 1 ? '' : 's'} · ${fmtMins(c.mins)}${admin && store.user(c.id)?.isDriver ? ` · ${tripRateFor(c.id)} AED/km` : ''}</div></div>
             <div style="text-align:right"><b>${c.km.toFixed(1)} km</b>${admin ? `<div class="small">${fmtMoney(Math.round(c.cost * 100) / 100)}</div>` : ''}</div></div>`).join('') || '<div class="empty">—</div>'}
         </div>
       </div>
@@ -123,6 +127,7 @@ export function mount(el, _p, { setHeader }) {
     el.querySelector('#tr-from').onchange = (e) => { from = e.target.value || today; if (to < from) to = from; load(); };
     el.querySelector('#tr-to').onchange = (e) => { to = e.target.value || today; if (to < from) from = to; load(); };
     el.querySelector('#tr-driver').onchange = (e) => { driver = e.target.value; draw(); };
+    el.querySelector('#tr-kind').onchange = (e) => { kind = e.target.value; draw(); };
     el.querySelector('#tr-site').onchange = (e) => { site = e.target.value; draw(); };
     const rs = el.querySelector('#tr-rate-save');
     if (rs) rs.onclick = async () => {
@@ -149,7 +154,7 @@ export function mount(el, _p, { setHeader }) {
   }
 
   const exp = (fmt) => async () => {
-    try { toast('Preparing report…'); await downloadReport(await tripsReport(from, to, driver || null, site || null), fmt); } catch (e) { toast(friendlyError(e), true); }
+    try { toast('Preparing report…'); await downloadReport(await tripsReport(from, to, driver || null, site || null, kind), fmt); } catch (e) { toast(friendlyError(e), true); }
   };
   document.getElementById('tr-xlsx').onclick = exp('xlsx');
   document.getElementById('tr-pdf').onclick = exp('pdf');
@@ -160,6 +165,11 @@ export function mount(el, _p, { setHeader }) {
     const sig = JSON.stringify([store.tripsToday.map((t) => [t.id, t.distanceM, t.status, t.siteId, +t.lastAt]), store.tripsActive.map((t) => t.id), store.users.length, store.settings]);
     if (sig !== last) { last = sig; draw(); }
   });
+}
+
+function kindPill(t) {
+  const k = t.kind || 'driver';
+  return pill(tripKindLabel(t), k === 'taxi' ? 'amber' : k === 'withDriver' ? 'blue' : 'purple');
 }
 
 function kpi(label, value, sub, color) {
@@ -193,11 +203,13 @@ export async function routeDialog(t) {
 
 function editDialog(t, onDone) {
   modal({
-    title: 'Edit trip',
+    title: `Edit ${tripKindLabel(t).toLowerCase()}`,
     body: `<div class="small muted" style="margin-bottom:10px">${esc(t.employeeName)} · ${esc(t.date)} · GPS measured ${(t.originalDistanceM ?? t.distanceM) / 1000 > 0 ? ((t.originalDistanceM ?? t.distanceM) / 1000).toFixed(2) : '0'} km</div>
       <div class="grid cols-2" style="gap:10px">
         <label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${tripKm(t).toFixed(2)}"></label>
-        <label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.employeeId)}"></label>
+        ${t.kind === 'taxi' ? `<label class="f"><span>Taxi fare (AED)</span><input id="et-fare" type="number" min="0" step="0.01" value="${t.cost ?? 0}"></label>`
+          : t.kind === 'withDriver' ? '<div class="small muted" style="padding-top:22px">Ride with a company driver — paid through the driver’s trip.</div>'
+          : `<label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.employeeId)}"></label>`}
         <label class="f"><span>Vehicle</span><input id="et-veh" value="${esc(t.vehicle)}"></label>
         <label class="f"><span>Purpose</span><input id="et-pur" value="${esc(t.purpose)}"></label>
       </div>
@@ -207,14 +219,18 @@ function editDialog(t, onDone) {
     foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Save</button>',
     onMount: (el, close) => {
       const v = (id) => el.querySelector(id).value;
-      const upd = () => { el.querySelector('#et-cost').textContent = `Cost: ${fmtMoney(Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100)}`; };
-      el.querySelector('#et-km').oninput = upd; el.querySelector('#et-rate').oninput = upd; upd();
+      const has = (id) => !!el.querySelector(id);
+      const upd = () => {
+        el.querySelector('#et-cost').textContent = has('#et-rate') ? `Cost: ${fmtMoney(Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100)}`
+          : has('#et-fare') ? `Cost: ${fmtMoney(Number(v('#et-fare')) || 0)}` : 'Cost: none (paid via the driver)';
+      };
+      el.querySelector('#et-km').oninput = upd; if (has('#et-rate')) el.querySelector('#et-rate').oninput = upd; if (has('#et-fare')) el.querySelector('#et-fare').oninput = upd; upd();
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-yes]').onclick = async () => {
-        const km = Number(v('#et-km')), rate = Number(v('#et-rate'));
-        if (!(km >= 0) || !(rate >= 0)) { toast('Enter valid numbers', true); return; }
+        const km = Number(v('#et-km')), rate = has('#et-rate') ? Number(v('#et-rate')) : null, fare = has('#et-fare') ? Number(v('#et-fare')) : null;
+        if (!(km >= 0) || (rate != null && !(rate >= 0)) || (fare != null && !(fare >= 0))) { toast('Enter valid numbers', true); return; }
         try {
-          await editTrip(t, { km, ratePerKm: rate, siteId: v('#et-site'), vehicle: v('#et-veh').trim(), purpose: v('#et-pur').trim(), note: v('#et-note').trim() });
+          await editTrip(t, { km, ratePerKm: rate, fare, siteId: v('#et-site'), vehicle: v('#et-veh').trim(), purpose: v('#et-pur').trim(), note: v('#et-note').trim() });
           toast('Trip updated'); close(); onDone && onDone();
         } catch (e) { toast(friendlyError(e), true); }
       };

@@ -56,12 +56,12 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           'weeklyOffDays': weekly,
           'monthlyOffQuota': _quota,
           'active': _active,
-          'isDriver': _driver,
+          'isDriver': _role == 'employee' && _driver,
           'vehicle': _vehicle.text.trim(),
           'tripRatePerKm': double.tryParse(_rate.text.trim()),
         });
       } else {
-        await AuthService.createStaffAccount(
+        final uid = await AuthService.createStaffAccount(
           loginId: _login.text.trim(),
           password: _pass.text,
           name: _name.text.trim(),
@@ -71,6 +71,13 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           weeklyOffDays: weekly,
           monthlyOffQuota: _quota,
         );
+        if (_role == 'employee' && _driver) {
+          await Db.updateUser(uid, {
+            'isDriver': true,
+            'vehicle': _vehicle.text.trim(),
+            'tripRatePerKm': double.tryParse(_rate.text.trim()),
+          });
+        }
       }
       if (!mounted) return;
       Navigator.pop(context);
@@ -181,6 +188,43 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
               ),
             ),
             if (_role == 'employee') ...[
+              _section('Work profile'),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Staff'), icon: Icon(Icons.engineering)),
+                  ButtonSegment(value: true, label: Text('Driver (taxi)'), icon: Icon(Icons.local_taxi)),
+                ],
+                selected: {_driver},
+                onSelectionChanged: (v) => setState(() => _driver = v.first),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _driver
+                      ? 'Driver app only: Start / Stop trip with GPS distance, paid per km. No attendance check-in.'
+                      : 'Attendance app: check in, workers, site updates, petty cash, and taxi / company-driver rides.',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+                ),
+              ),
+              if (_driver) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _vehicle,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(labelText: 'Vehicle / plate no.', prefixIcon: Icon(Icons.directions_car_outlined)),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _rate,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      labelText: 'Rate per km ($kCurrency)',
+                      prefixIcon: Icon(Icons.speed),
+                      helperText: 'Leave empty to use the company rate (Driver trips page on the web dashboard)'),
+                ),
+              ],
+            ],
+            if (_role == 'employee' && !_driver) ...[
               _section('Off days'),
               const Text(
                 'Pick the weekly off day(s) — e.g. Sunday or Friday. '
@@ -222,41 +266,6 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
               ),
             ],
             if (_editing) ...[
-              _section('Driver trips'),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 4, 12, 12),
-                  child: Column(children: [
-                    SwitchListTile(
-                      title: const Text('This person is a driver'),
-                      subtitle: const Text('Shows Start / Stop trip with GPS distance and cost in their app'),
-                      value: _driver,
-                      onChanged: (v) => setState(() => _driver = v),
-                    ),
-                    if (_driver) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: TextField(
-                          controller: _vehicle,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: const InputDecoration(labelText: 'Usual vehicle / plate no.'),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: TextField(
-                          controller: _rate,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                              labelText: 'Rate per km ($kCurrency)',
-                              helperText: 'Leave empty to use the company rate (Settings in the web dashboard)'),
-                        ),
-                      ),
-                    ],
-                  ]),
-                ),
-              ),
               _section('Status'),
               Card(
                 child: SwitchListTile(
