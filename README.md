@@ -32,6 +32,7 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 ---
 
 ## What's new
+- **Driver costs and payments (v1.5.2):** drivers can enter or change a trip's cost at any time: during the trip, when they stop (it starts at km × rate), or later by tapping the trip in their list. Admin sees these trips marked *entered*. On the web, admin records payments to drivers under **Trips & rides → Driver accounts & payments**. Each driver's account shows earned (trip costs) − paid = balance due, with a statement you can download (Excel/PDF). Drivers see the same tally and the payments they received in their app.
 - **Rides and driver profile (v1.5.1):**
   - **Every employee** has a **Start ride** button under the check-in card. They choose **Taxi** or **Company driver** (picked from the list of drivers). When a taxi ride ends, they enter the fare. Employees don't see ride history.
   - **Driver (taxi) work profile:** choose it when adding a person (web: Employees → Work profile; app: Team → Add person). A driver's login opens a separate driver app with Start / Stop trip, their rate per km, and their trips and earnings for the month. It has no attendance check-in, and drivers are left out of attendance lists.

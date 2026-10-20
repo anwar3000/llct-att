@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/theme.dart';
 import '../core/utils.dart';
@@ -27,11 +28,15 @@ class _TripCardState extends State<TripCard> {
   final List<StreamSubscription> _subs = [];
   String _day = dateKey(DateTime.now());
   Timer? _dayTimer;
+  double _rate = 0;
 
   @override
   void initState() {
     super.initState();
     _listen();
+    Db.tripRate(widget.me).then((r) {
+      if (mounted) setState(() => _rate = r);
+    });
     _dayTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       final k = dateKey(DateTime.now());
       if (k != _day) {
@@ -123,12 +128,34 @@ class _TripCardState extends State<TripCard> {
     }
   }
 
+  double _estimate() => (TripService.instance.distance.value / 1000 * _rate * 100).round() / 100;
+
+  /// During the trip: enter (or change) the cost now.
+  Future<void> _enterCost(Trip t) async {
+    final v = await askTripCost(context,
+        initial: t.costEntered ? t.cost : _estimate(), km: TripService.instance.distance.value / 1000, rate: _rate);
+    if (v == null) return;
+    try {
+      await Db.setTripCost(t.id, v);
+      if (mounted) showSnack(context, 'Cost saved: ${fmtMoney(v)}');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not save cost: $e', error: true);
+    }
+  }
+
   Future<void> _stop(Trip t) async {
-    if (!await confirm(context, 'Stop trip', 'End this trip now? The distance and cost will be saved.', ok: 'Stop trip')) return;
+    // End of trip: confirm the cost (km × rate filled in, or what was entered during the trip).
+    final cost = await askTripCost(context,
+        title: 'End trip — cost',
+        okLabel: 'SAVE & END TRIP',
+        initial: t.costEntered ? t.cost : _estimate(),
+        km: TripService.instance.distance.value / 1000,
+        rate: _rate);
+    if (cost == null) return;
     setState(() => _busy = true);
     try {
-      await TripService.instance.stop(user: widget.me, trip: t, sites: widget.sites);
-      if (mounted) showSnack(context, 'Trip saved: ${fmtDistance(TripService.instance.distance.value)}');
+      await TripService.instance.stop(user: widget.me, trip: t, sites: widget.sites, fare: cost);
+      if (mounted) showSnack(context, 'Trip saved: ${fmtDistance(TripService.instance.distance.value)} · ${fmtMoney(cost)}');
     } catch (e) {
       if (mounted) showSnack(context, 'Could not stop trip: $e', error: true);
     } finally {
@@ -187,7 +214,31 @@ class _TripCardState extends State<TripCard> {
               ),
               const SizedBox(width: 8),
               Expanded(child: _metric('Time', LiveTimer(since: t.startAt, style: _big))),
+              const SizedBox(width: 8),
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _enterCost(t),
+                  child: _metric(
+                    t.costEntered ? 'Cost ✎' : 'Cost (est.) ✎',
+                    t.costEntered
+                        ? Text(fmtMoney(t.cost ?? 0), style: _big)
+                        : ValueListenableBuilder<double>(
+                            valueListenable: TripService.instance.distance,
+                            builder: (_, m, __) => Text(fmtMoney((m / 1000 * _rate * 100).round() / 100), style: _big),
+                          ),
+                  ),
+                ),
+              ),
             ]),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _enterCost(t),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: Text(t.costEntered ? 'Change cost' : 'Enter cost now'),
+              ),
+            ),
             if (t.vehicle.isNotEmpty || t.purpose.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -221,7 +272,9 @@ class _TripCardState extends State<TripCard> {
           if (_today.isNotEmpty) ...[
             const SizedBox(height: 8),
             for (final x in _today.take(5))
-              Padding(
+              InkWell(
+                onTap: x.isRide ? null : () => editTripCost(context, x),
+                child: Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Row(children: [
                   const Icon(Icons.route, size: 16, color: AppColors.muted),
@@ -234,8 +287,10 @@ class _TripCardState extends State<TripCard> {
                       style: const TextStyle(fontSize: 12.5),
                     ),
                   ),
-                  Text('${x.km.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                  Text('${x.km.toStringAsFixed(1)} km${x.cost != null ? ' · ${fmtMoney(x.cost!)}' : ''}',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
                 ]),
+              ),
               ),
           ],
         ]),
@@ -243,7 +298,7 @@ class _TripCardState extends State<TripCard> {
     );
   }
 
-  static const _big = TextStyle(fontSize: 22, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()]);
+  static const _big = TextStyle(fontSize: 19, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()]);
 
   Widget _metric(String label, Widget value) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -253,4 +308,62 @@ class _TripCardState extends State<TripCard> {
           value,
         ]),
       );
+}
+
+/// Asks the driver for a trip cost. Returns null if cancelled.
+Future<double?> askTripCost(BuildContext context,
+    {double? initial, double? km, double? rate, String title = 'Trip cost', String okLabel = 'SAVE'}) {
+  final ctrl = TextEditingController(text: initial == null || initial == 0 ? '' : initial.toStringAsFixed(2));
+  String? err;
+  return showDialog<double>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, set) => AlertDialog(
+        title: Text(title),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (km != null)
+            Text(
+                '${km.toStringAsFixed(1)} km'
+                '${rate != null && rate > 0 ? ' × ${fmtMoney(rate)}/km = ${fmtMoney((km * rate * 100).round() / 100)}' : ''}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+            decoration: InputDecoration(labelText: 'Cost ($kCurrency)', prefixIcon: const Icon(Icons.payments_outlined), errorText: err),
+          ),
+          const SizedBox(height: 6),
+          const Text('You can change it later from your trip list.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final v = double.tryParse(ctrl.text.trim());
+              if (v == null || v < 0) {
+                set(() => err = 'Enter the cost');
+                return;
+              }
+              Navigator.pop(c, v);
+            },
+            child: Text(okLabel),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Change the cost of a finished trip.
+Future<void> editTripCost(BuildContext context, Trip t) async {
+  final v = await askTripCost(context, initial: t.cost, km: t.km, rate: t.ratePerKm, title: 'Edit trip cost');
+  if (v == null) return;
+  try {
+    await Db.setTripCost(t.id, v);
+    if (context.mounted) showSnack(context, 'Cost updated: ${fmtMoney(v)}');
+  } catch (e) {
+    if (context.mounted) showSnack(context, 'Could not update: $e', error: true);
+  }
 }

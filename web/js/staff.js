@@ -26,7 +26,7 @@ const S = {
   me: null, tab: 'today', sites: [], open: null, todaySessions: [], workers: [], locks: {}, sessionWorkers: [], myWorkers: [],
   month: new Date(), monthSessions: [], monthOff: [], petty: [], myUpdates: [], idInfo: {}, idFiles: [],
   busy: '', subs: [], sessSubs: [], monthSubs: [], lastAlertAt: 0, lastPush: 0,
-  trip: null, tripsToday: [], tripsMonth: [], tw: null, rate: null,
+  trip: null, tripsToday: [], tripsMonth: [], tripsDone: [], payments: [], tw: null, rate: null,
 };
 
 // ================================================================== helpers
@@ -176,6 +176,10 @@ function start() {
     on(query(C('trips'), where('employeeId', '==', uid), where('month', '==', monthKey(new Date()))), (s) => {
       S.tripsMonth = s.docs.map(mapTrip).filter((t) => t.status !== 'active').sort((a, b) => (b.startAt || 0) - (a.startAt || 0)); draw();
     });
+    on(query(C('trips'), where('employeeId', '==', uid), where('status', '==', 'done')), (s) => { S.tripsDone = s.docs.map(mapTrip); draw(); });
+    S.subs.push(onSnapshot(query(C('driverPayments'), where('employeeId', '==', uid)), (s) => {
+      S.payments = s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.date || '').localeCompare(a.date || '')); draw();
+    }, () => {}));
     getDoc(doc(db, 'settings', 'general')).then((g) => {
       S.rate = S.me.tripRatePerKm ?? (typeof g.data()?.tripRatePerKm === 'number' ? g.data().tripRatePerKm : 0); draw();
     }).catch(() => { S.rate = S.me.tripRatePerKm ?? 0; });
@@ -317,6 +321,40 @@ function drawTimer() {
 // Start → Stop with GPS distance. On iPhone the GPS only runs while this app is open, so the
 // screen is kept awake during a trip; a gap is bridged with the straight line between points.
 const tripKmOf = (t) => (S.tw && S.tw.id === t.id ? S.tw.dist : t.distanceM) / 1000;
+const estCost = (t) => Math.round(tripKmOf(t) * (S.rate || 0) * 100) / 100;
+// Driver enters / changes a trip cost: during the trip, at the end, or later from the list.
+function askCost({ title = 'Trip cost', ok = 'SAVE', initial = null, km = null } = {}) {
+  return new Promise((resolve) => {
+    modal({
+      title,
+      body: `${km != null ? `<div class="small muted" style="margin-bottom:8px">${km.toFixed(1)} km${S.rate ? ` × ${fmtMoney(S.rate)}/km = ${fmtMoney(Math.round(km * S.rate * 100) / 100)}` : ''}</div>` : ''}
+        <label class="f"><span>Cost (${CURRENCY})</span><input id="tc" type="number" inputmode="decimal" min="0" step="0.01" value="${initial != null && initial > 0 ? initial : ''}"></label>
+        <div class="small muted">You can change it later from your trip list.</div><div class="error" id="tc-err"></div>`,
+      foot: `<button class="st-btn" data-no>Cancel</button><button class="st-btn primary" data-yes style="flex:1">${ok}</button>`,
+      onMount: (el, close) => {
+        const inp = el.querySelector('#tc');
+        setTimeout(() => inp.focus(), 50);
+        el.querySelector('[data-no]').onclick = () => { close(); resolve(null); };
+        el.querySelector('[data-yes]').onclick = () => {
+          const v = Number(inp.value);
+          if (inp.value === '' || !(v >= 0)) { el.querySelector('#tc-err').textContent = 'Enter the cost'; return; }
+          close(); resolve(Math.round(v * 100) / 100);
+        };
+      },
+    });
+  });
+}
+async function setTripCost(t, km) {
+  const v = await askCost({ title: t.status === 'active' ? 'Enter trip cost' : 'Edit trip cost', initial: t.costEntered || t.status !== 'active' ? t.cost : estCost(t), km });
+  if (v == null) return;
+  try { await updateDoc(doc(db, 'trips', t.id), { cost: v, costEntered: true, costEditedAt: serverTimestamp() }); toast(`Cost saved: ${fmtMoney(v)}`); } catch (e) { alertBox('Could not save', friendlyError(e)); }
+}
+function wireTripCost(main) {
+  main.querySelector('#st-trip-cost-btn')?.addEventListener('click', () => setTripCost(S.trip, tripKmOf(S.trip)));
+  main.querySelectorAll('[data-tc]').forEach((r) => {
+    r.onclick = () => { const t = [...S.tripsMonth, ...S.tripsToday, ...S.tripsDone].find((x) => x.id === r.dataset.tc); if (t) setTripCost(t, t.distanceM / 1000); };
+  });
+}
 function tripCardHtml() {
   const t = S.trip;
   const km = S.tripsToday.reduce((a, x) => a + x.distanceM / 1000, 0);
@@ -326,10 +364,12 @@ function tripCardHtml() {
       <div class="small muted">${t ? `From ${esc(t.startSiteName || 'GPS location')} · ${fmtTime(t.startAt)}${t.vehicle ? ` · ${esc(t.vehicle)}` : ''}` : `Today: ${S.tripsToday.length} trip${S.tripsToday.length === 1 ? '' : 's'} · ${km.toFixed(1)} km`}</div></div></div>
     ${t ? `<div class="st-kpis" style="grid-template-columns:1fr 1fr;margin:12px 0 0"><div><b id="st-trip-km">${tripKmOf(t).toFixed(2)} km</b><span>Distance</span></div>
       <div><b id="st-trip-time">${fmtMins(Math.round((Date.now() - t.startAt) / 60000))}</b><span>Time</span></div></div>
+      <div class="row" style="flex-wrap:nowrap;margin-top:10px"><span class="grow small">Cost: <b id="st-trip-cost">${t.costEntered ? fmtMoney(t.cost || 0) : `${fmtMoney(estCost(t))} (est.)`}</b></span>
+        <button class="st-btn sm" id="st-trip-cost-btn">${t.costEntered ? 'Change cost' : 'Enter cost'}</button></div>
       <div class="st-note small" style="margin:10px 0 0">Keep this app open on screen while driving — the iPhone only records GPS while it’s open.</div>
       <button class="st-big out" id="st-trip-stop" style="height:54px;margin:12px 0 0">STOP TRIP</button>`
     : '<button class="st-big" id="st-trip-start" style="height:54px;margin:12px 0 0;background:#3A7BD5;color:#fff">START TRIP</button>'}
-    ${S.tripsToday.slice(0, 5).map((x) => `<div class="row small" style="flex-wrap:nowrap;margin-top:8px"><span class="grow">${fmtTime(x.startAt)} ${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</span><b>${(x.distanceM / 1000).toFixed(1)} km</b></div>`).join('')}
+    ${S.tripsToday.slice(0, 5).map((x) => `<div class="row small" data-tc="${x.id}" style="flex-wrap:nowrap;margin-top:8px;cursor:pointer"><span class="grow">${fmtTime(x.startAt)} ${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</span><b>${(x.distanceM / 1000).toFixed(1)} km${x.cost != null ? ` · ${fmtMoney(x.cost)}` : ''} ✎</b></div>`).join('')}
   </div>`;
 }
 // Every employee: taxi or company-driver ride, right below the check-in button. No ride history here.
@@ -367,14 +407,26 @@ function drawTrips(main) {
       ${S.me.vehicle ? `<div class="since">Vehicle ${esc(S.me.vehicle)}</div>` : ''}
     </div>
     ${tripCardHtml()}
-    <h3 class="st-h">My trips · ${esc(fmtMonth(new Date()))}</h3>
-    <div class="st-card list">${done.length ? done.map((x) => `<div class="row-i">
+    ${(() => {
+      const earned = S.tripsDone.reduce((a, t) => a + (t.cost || 0), 0);
+      const paid = S.payments.reduce((a, p) => a + (p.amount || 0), 0);
+      const bal = Math.round((earned - paid) * 100) / 100;
+      return `<h3 class="st-h">My account</h3>
+      <div class="st-kpis"><div><b>${fmtMoney(Math.round(earned * 100) / 100)}</b><span>Earned · ${S.tripsDone.length} trips</span></div>
+        <div><b style="color:#2E9E6A">${fmtMoney(Math.round(paid * 100) / 100)}</b><span>Paid</span></div>
+        <div><b style="color:${bal > 0 ? '#D98A1A' : '#2E9E6A'}">${fmtMoney(Math.abs(bal))}</b><span>${bal >= 0 ? 'Balance due' : 'Overpaid'}</span></div></div>
+      ${S.payments.length ? `<div class="st-card list">${S.payments.slice(0, 10).map((p) => `<div class="row-i"><div class="grow"><b class="small">Payment received</b>
+        <div class="small muted">${esc(p.date || '')}${p.method ? ` · ${esc(p.method)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''}</div></div><b style="color:#2E9E6A">${fmtMoney(p.amount || 0)}</b></div>`).join('')}</div>` : ''}`;
+    })()}
+    <h3 class="st-h">My trips · ${esc(fmtMonth(new Date()))} <span class="small muted" style="font-weight:500">· tap to change cost</span></h3>
+    <div class="st-card list">${done.length ? done.map((x) => `<div class="row-i" data-tc="${x.id}" style="cursor:pointer">
         <div class="grow"><b class="small">${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</b>
         <div class="small muted">${fmtDay(x.startAt)} · ${fmtTime(x.startAt)}–${fmtTime(x.endAt)}${x.purpose ? ` · ${esc(x.purpose)}` : ''}</div></div>
-        <div style="text-align:right"><b>${(x.distanceM / 1000).toFixed(1)} km</b>${x.cost != null ? `<div class="small">${fmtMoney(x.cost)}</div>` : ''}</div></div>`).join('')
+        <div style="text-align:right"><b>${(x.distanceM / 1000).toFixed(1)} km</b><div class="small" style="color:#D98A1A;font-weight:700">${x.cost != null ? fmtMoney(x.cost) : 'Add cost'} ✎</div></div></div>`).join('')
       : '<div class="empty small">No trips this month</div>'}</div>`;
   main.querySelector('#st-trip-start')?.addEventListener('click', startTrip);
   main.querySelector('#st-trip-stop')?.addEventListener('click', stopTrip);
+  wireTripCost(main);
 }
 
 function startRide() {
@@ -452,6 +504,8 @@ function resumeTrip(t) {
     tw.dist += d; tw.points++;
     const k = document.getElementById('st-trip-km');
     if (k) k.textContent = `${(tw.dist / 1000).toFixed(2)} km`;
+    const ce = document.getElementById('st-trip-cost');
+    if (ce && S.trip && !S.trip.costEntered) ce.textContent = `${fmtMoney(estCost(S.trip))} (est.)`;
     if (!tw.saving && (Date.now() - tw.savedAt >= 30000 || tw.dist - tw.savedDist >= 250)) {
       tw.saving = true;
       const b = writeBatch(db);
@@ -531,7 +585,10 @@ async function stopTrip() {
   if (kind === 'taxi') {
     fare = await askFare(tripKmOf(t));
     if (fare == null) return;
-  } else if (!await confirmBox(kind === 'driver' ? 'Stop trip' : 'End ride', kind === 'driver' ? 'End this trip now? The distance and cost will be saved.' : `End this ride with ${t.driverName || 'the driver'}?`, { ok: kind === 'driver' ? 'Stop trip' : 'End ride', danger: true })) return;
+  } else if (kind === 'driver') {
+    fare = await askCost({ title: 'End trip — cost', ok: 'SAVE & END TRIP', initial: t.costEntered ? t.cost : estCost(t), km: tripKmOf(t) });
+    if (fare == null) return;
+  } else if (!await confirmBox('End ride', `End this ride with ${t.driverName || 'the driver'}?`, { ok: 'End ride', danger: true })) return;
   busy('Saving…');
   try {
     let dist = S.tw && S.tw.id === t.id ? S.tw.dist : t.distanceM;
@@ -556,7 +613,8 @@ async function stopTrip() {
       siteId: site?.id || t.startSiteId, siteName: site?.name || t.startSiteName,
       distanceM: Math.round(dist), pointsCount: points, durationMin: Math.round((now - t.startAt) / 60000),
       ratePerKm: rate,
-      cost: kind === 'taxi' ? Math.round(fare * 100) / 100 : kind === 'withDriver' ? 0 : Math.round((dist / 1000) * rate * 100) / 100,
+      cost: kind === 'withDriver' ? 0 : Math.round(fare * 100) / 100,
+      ...(kind === 'driver' ? { costEntered: true } : {}),
     });
     await b.commit();
     stopWatch();

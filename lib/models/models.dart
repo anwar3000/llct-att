@@ -931,8 +931,11 @@ class Trip {
   /// · withDriver = employee riding with a company driver (paid through the driver's trip).
   final String kind;
   final String driverId, driverName;
+  /// Driver typed the cost themselves (instead of km × rate).
+  final bool costEntered;
 
   Trip({
+    this.costEntered = false,
     this.kind = 'driver',
     this.driverId = '',
     this.driverName = '',
@@ -1004,6 +1007,39 @@ class Trip {
       kind: _str(m['kind'], 'driver'),
       driverId: _str(m['driverId']),
       driverName: _str(m['driverName']),
+      costEntered: m['costEntered'] == true,
+    );
+  }
+}
+
+/// Money paid to a driver by admin. Balance = trip costs − payments.
+class DriverPayment {
+  final String id;
+  final String employeeId;
+  final double amount;
+  final String date; // yyyy-MM-dd
+  final String method;
+  final String note;
+  final String createdBy;
+  DriverPayment({
+    required this.id,
+    required this.employeeId,
+    required this.amount,
+    required this.date,
+    this.method = '',
+    this.note = '',
+    this.createdBy = '',
+  });
+  factory DriverPayment.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return DriverPayment(
+      id: d.id,
+      employeeId: _str(m['employeeId']),
+      amount: _dbl(m['amount']) ?? 0,
+      date: _str(m['date']),
+      method: _str(m['method']),
+      note: _str(m['note']),
+      createdBy: _str(m['createdBy']),
     );
   }
 }

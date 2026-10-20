@@ -30,6 +30,8 @@ class _DriverShellState extends State<DriverShell> {
   DateTime _monthOf = DateTime(DateTime.now().year, DateTime.now().month);
   double? _rate;
   StreamSubscription? _monthSub;
+  List<Trip> _allDone = [];
+  List<DriverPayment> _payments = [];
 
   @override
   void initState() {
@@ -38,6 +40,12 @@ class _DriverShellState extends State<DriverShell> {
       if (mounted) setState(() => _sites = l);
     }, onError: (_) {}));
     _watchMonth();
+    _subs.add(Db.myDoneTrips(widget.me.id).listen((l) {
+      if (mounted) setState(() => _allDone = l);
+    }, onError: (_) {}));
+    _subs.add(Db.myDriverPayments(widget.me.id).listen((l) {
+      if (mounted) setState(() => _payments = l);
+    }, onError: (_) {}));
     Db.tripRate(widget.me).then((r) {
       if (mounted) setState(() => _rate = r);
     });
@@ -152,10 +160,54 @@ class _DriverShellState extends State<DriverShell> {
       ]),
     );
 
+    // Tally: everything earned on finished trips minus everything paid by the office.
+    final totalEarned = _allDone.fold<double>(0, (a, t) => a + (t.cost ?? 0));
+    final totalPaid = _payments.fold<double>(0, (a, p) => a + p.amount);
+    final balance = ((totalEarned - totalPaid) * 100).round() / 100;
+    final tally = Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('My account', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
+          const SizedBox(height: 10),
+          Row(children: [
+            _tallyBox('Earned', fmtMoney((totalEarned * 100).round() / 100), '${_allDone.length} trips', AppColors.primary),
+            const SizedBox(width: 8),
+            _tallyBox('Paid', fmtMoney((totalPaid * 100).round() / 100), '${_payments.length} payments', AppColors.success),
+            const SizedBox(width: 8),
+            _tallyBox(balance >= 0 ? 'Balance due' : 'Overpaid', fmtMoney(balance.abs()), 'earned − paid',
+                balance > 0 ? AppColors.warning : AppColors.success),
+          ]),
+          if (_payments.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text('Payments received', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+            for (final p in _payments.take(10))
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(children: [
+                  const Icon(Icons.check_circle, size: 16, color: AppColors.success),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                        '${p.date.length == 10 ? fmtDateShort(parseDateKey(p.date)) : p.date}${p.method.isEmpty ? '' : ' · ${p.method}'}${p.note.isEmpty ? '' : ' · ${p.note}'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12.5)),
+                  ),
+                  Text(fmtMoney(p.amount), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                ]),
+              ),
+          ],
+        ]),
+      ),
+    );
+
     final left = <Widget>[
       header,
       const SizedBox(height: 12),
       TripCard(me: me, sites: _sites),
+      const SizedBox(height: 4),
+      tally,
     ];
     final right = <Widget>[
       SectionTitle('My trips · ${fmtMonth(_monthOf)}',
@@ -179,6 +231,7 @@ class _DriverShellState extends State<DriverShell> {
               if (i > 0) const Divider(height: 1, indent: 16),
               ListTile(
                 dense: true,
+                onTap: () => editTripCost(context, done[i]),
                 title: Text(
                     '${done[i].startSiteName.isEmpty ? 'GPS' : done[i].startSiteName} → ${done[i].endSiteName.isEmpty ? 'GPS' : done[i].endSiteName}',
                     maxLines: 1,
@@ -189,7 +242,8 @@ class _DriverShellState extends State<DriverShell> {
                     '${done[i].purpose.isEmpty ? '' : ' · ${done[i].purpose}'}'),
                 trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text('${done[i].km.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w800)),
-                  if (done[i].cost != null) Text(fmtMoney(done[i].cost!), style: const TextStyle(fontSize: 12)),
+                  Text(done[i].cost == null ? 'Add cost ✎' : '${fmtMoney(done[i].cost!)} ✎',
+                      style: const TextStyle(fontSize: 12, color: AppColors.accentDark, fontWeight: FontWeight.w700)),
                 ]),
               ),
             ],
@@ -226,6 +280,22 @@ class _DriverShellState extends State<DriverShell> {
       }),
     );
   }
+
+  Widget _tallyBox(String label, String value, String sub, Color color) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: color)),
+            ),
+            Text(sub, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+          ]),
+        ),
+      );
 
   Widget _stat(String label, String value) => Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

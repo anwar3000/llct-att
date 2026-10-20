@@ -204,6 +204,7 @@ export function mapTrip(d) {
     pointsCount: num(m.pointsCount), platform: m.platform || '',
     kind: m.kind || 'driver', driverId: m.driverId || '', driverName: m.driverName || '',
     editedAt: toDate(m.editedAt), editedBy: m.editedBy || '', originalDistanceM: n(m.originalDistanceM),
+    costEntered: m.costEntered === true, costEditedAt: toDate(m.costEditedAt),
   };
 }
 export const tripKm = (t) => (t.distanceM || 0) / 1000;
@@ -268,6 +269,27 @@ export async function endTripNow(t) {
     ratePerKm: rate, cost: rate == null ? (t.kind === 'taxi' ? (t.cost || 0) : 0) : Math.round(km * rate * 100) / 100, note: (t.note ? t.note + ' · ' : '') + `Ended by ${store.me?.name || 'management'}`,
   });
 }
+// ------------------------------------------------------------------ driver payments (accounts → admin)
+export function mapPayment(d) {
+  const m = d.data() || {};
+  return { id: d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', amount: num(m.amount), date: m.date || '',
+    method: m.method || '', note: m.note || '', createdBy: m.createdBy || '', createdAt: toDate(m.createdAt) };
+}
+export const addDriverPayment = ({ driver, amount, date, method, note }) => addDoc(C('driverPayments'), {
+  employeeId: driver.id, employeeName: driver.name, amount: Math.round(amount * 100) / 100, date, method, note,
+  createdBy: store.me?.name || '', createdById: store.me?.id || '', createdAt: serverTimestamp(),
+});
+export const deleteDriverPayment = (id) => deleteDoc(doc(db, 'driverPayments', id));
+/** Every finished trip of these drivers (all time) — for earned / paid / balance. */
+export async function finishedTripsFor(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 30) {
+    const snap = await getDocs(query(C('trips'), where('employeeId', 'in', ids.slice(i, i + 30))));
+    out.push(...snap.docs.map(mapTrip).filter((t) => t.status === 'done'));
+  }
+  return out.sort((a, b) => (a.startAt || 0) - (b.startAt || 0));
+}
+
 export async function deleteTrip(id) {
   const pts = await getDocs(collection(db, 'trips', id, 'points'));
   for (let i = 0; i < pts.docs.length; i += 400) {
@@ -301,7 +323,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8, tripRatePerKm: 0 }, rates: {}, _tToday: [], _tActive: [],
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8, tripRatePerKm: 0 }, rates: {}, _tToday: [], _tActive: [], payments: [],
   _subs: [], _listeners: new Set(), _day: null, errors: {},
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -350,6 +372,7 @@ export const store = {
     // Today's worker entries PLUS any still open from earlier (e.g. checked in before midnight).
     sub(query(C('workerAttendance'), where('date', '==', this._day)), '_wToday', mapWorkerEntry);
     sub(query(C('workerAttendance'), where('open', '==', true)), '_wOpen', mapWorkerEntry);
+    if (isAdmin()) sub(C('driverPayments'), 'payments', mapPayment, (l) => l.sort((a, b) => (b.date || '').localeCompare(a.date || '')));
     // Driver trips: today's plus any still running from before midnight.
     sub(query(C('trips'), where('date', '==', this._day)), '_tToday', mapTrip);
     sub(query(C('trips'), where('status', '==', 'active')), '_tActive', mapTrip);

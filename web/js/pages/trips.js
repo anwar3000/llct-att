@@ -1,5 +1,5 @@
 // Driver trips — live trips in progress, daily list with km and cost, route map, admin corrections.
-import { store, isAdmin, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel } from '../fb.js';
+import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -14,6 +14,7 @@ export function mount(el, _p, { setHeader }) {
   let from = today, to = today, driver = '', site = '', kind = '';
   let fetched = [];
   let loading = false;
+  let view = 'trips', acctTrips = null, acctLoading = false;
 
   async function load() {
     loading = true; draw();
@@ -30,7 +31,74 @@ export function mount(el, _p, { setHeader }) {
       .sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
   }
 
+  async function loadAccounts() {
+    acctLoading = true; draw();
+    try { acctTrips = await finishedTripsFor(store.users.filter((u) => u.isDriver).map((u) => u.id)); } catch (e) { toast(friendlyError(e), true); acctTrips = []; }
+    acctLoading = false; draw();
+  }
+
+  function tabs() {
+    return admin ? `<div class="chips" style="margin-bottom:12px">${[['trips', 'Trips & rides'], ['accounts', 'Driver accounts & payments']]
+      .map(([k, l]) => `<span class="chip ${view === k ? 'on' : ''}" data-view="${k}">${l}</span>`).join('')}</div>` : '';
+  }
+  function wireTabs() {
+    el.querySelectorAll('[data-view]').forEach((c) => {
+      c.onclick = () => { view = c.dataset.view; if (view === 'accounts') loadAccounts(); else draw(); };
+    });
+  }
+
+  // ------------------------------------------------ driver accounts: earned (trip costs) − paid = balance
+  function drawAccounts() {
+    const drivers = store.users.filter((u) => u.isDriver);
+    const all = acctTrips || [];
+    const rows = drivers.map((u) => {
+      const tr = all.filter((t) => t.employeeId === u.id);
+      const pays = store.payments.filter((p) => p.employeeId === u.id);
+      const earned = tr.reduce((a, t) => a + (t.cost || 0), 0);
+      const paid = pays.reduce((a, p) => a + p.amount, 0);
+      return { u, tr, pays, earned, paid, balance: Math.round((earned - paid) * 100) / 100, km: tr.reduce((a, t) => a + tripKm(t), 0),
+        edited: tr.filter((t) => t.costEntered).length };
+    }).sort((a, b) => b.balance - a.balance);
+    const T = (k) => rows.reduce((a, r) => a + r[k], 0);
+    el.innerHTML = `${tabs()}
+    <div class="grid kpis">
+      ${kpi('Earned by drivers', fmtMoney(Math.round(T('earned') * 100) / 100), `${all.length} finished trips · all time`, '#404041')}
+      ${kpi('Paid', fmtMoney(Math.round(T('paid') * 100) / 100), `${store.payments.length} payments`, '#2E9E6A')}
+      ${kpi('Balance due', fmtMoney(Math.round(T('balance') * 100) / 100), 'earned − paid', '#D98A1A')}
+    </div>
+    <div class="card mt"><div class="card-head"><h2>Driver accounts</h2><span class="spacer"></span><span class="small muted">${acctLoading ? 'Loading…' : 'All time'}</span></div>
+      ${drivers.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Driver</th><th class="num">Trips</th><th class="num">Km</th><th class="num">Earned</th><th class="num">Paid</th><th class="num">Balance</th><th>Last payment</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td><div class="person">${avatar(r.u.name, 30, TRIP_COLOR)}<div><b>${esc(r.u.name)}</b><div class="small muted">${esc(r.u.vehicle || '')} · ${tripRateFor(r.u.id)} AED/km</div></div></div></td>
+        <td class="num">${r.tr.length}${r.edited ? `<div class="small muted" title="Trips where the driver entered the cost">${r.edited} entered</div>` : ''}</td>
+        <td class="num">${r.km.toFixed(1)}</td>
+        <td class="num">${fmtMoney(Math.round(r.earned * 100) / 100)}</td>
+        <td class="num" style="color:#1f7a50">${fmtMoney(Math.round(r.paid * 100) / 100)}</td>
+        <td class="num"><b style="color:${r.balance > 0 ? '#a8640f' : '#1f7a50'}">${r.balance < 0 ? 'Overpaid ' : ''}${fmtMoney(Math.abs(r.balance))}</b></td>
+        <td class="small">${r.pays[0] ? `${esc(r.pays[0].date)} · ${fmtMoney(r.pays[0].amount)}` : '—'}</td>
+        <td style="white-space:nowrap"><button class="btn sm" data-pay="${r.u.id}">+ Payment</button> <button class="btn sm ghost" data-stmt="${r.u.id}">Statement</button></td>
+      </tr>`).join('')}</tbody></table></div>` : '<div class="empty"><b>No drivers yet</b>Set Work profile: Driver (taxi) on an employee.</div>'}
+    </div>
+    <div class="card mt"><div class="card-head"><h2>Payments</h2></div>
+      ${store.payments.length ? store.payments.slice(0, 50).map((p) => `<div class="list-item">
+        ${avatar(p.employeeName, 28, '#2E9E6A')}<div class="grow"><b>${esc(p.employeeName)}</b> <span class="small muted">· ${esc(p.date)}${p.method ? ` · ${esc(p.method)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''} · by ${esc(p.createdBy)}</span></div>
+        <b>${fmtMoney(p.amount)}</b><button class="btn sm ghost icon" data-delpay="${p.id}" title="Delete payment">${icon('trash', 15)}</button></div>`).join('')
+        : '<div class="empty">No payments recorded yet</div>'}
+    </div>`;
+    wireTabs();
+    el.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => payDialog(store.user(b.dataset.pay), rows.find((r) => r.u.id === b.dataset.pay)?.balance || 0); });
+    el.querySelectorAll('[data-stmt]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.stmt); if (r) statementDialog(r.u, r.tr, r.pays); }; });
+    el.querySelectorAll('[data-delpay]').forEach((b) => {
+      b.onclick = async () => {
+        const p = store.payments.find((x) => x.id === b.dataset.delpay);
+        if (!p || !await confirmBox('Delete payment', `Delete the payment of ${fmtMoney(p.amount)} to ${p.employeeName} on ${p.date}?`, { ok: 'Delete', danger: true })) return;
+        try { await deleteDriverPayment(p.id); toast('Payment deleted'); } catch (e) { toast(friendlyError(e), true); }
+      };
+    });
+  }
+
   function draw() {
+    if (view === 'accounts') { drawAccounts(); return; }
     const list = trips();
     const active = store.tripsActive;
     const km = list.reduce((a, t) => a + tripKm(t), 0);
@@ -53,7 +121,7 @@ export function mount(el, _p, { setHeader }) {
       byDriver.set(t.employeeId, c);
     }
 
-    el.innerHTML = `
+    el.innerHTML = `${tabs()}
     <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <div class="seg">${[['today', 'Today'], ['yday', 'Yesterday'], ['7', 'Last 7 days'], ['month', 'This month']].map(([k, l]) => `<button class="btn sm ghost" data-quick="${k}">${l}</button>`).join('')}</div>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">From <input type="date" id="tr-from" value="${from}" style="width:150px"></label>
@@ -91,7 +159,7 @@ export function mount(el, _p, { setHeader }) {
           <td>${t.siteId ? `<a href="#/sites/${t.siteId}">${esc(t.siteName)}</a>` : t.status === 'active' ? '<span class="muted">—</span>' : '<span class="muted">No site</span>'}</td>
           <td class="small">${fmtTime(atTz(t.startAt, t.tz))} – ${t.endAt ? fmtTime(atTz(t.endAt, t.tz)) : 'now'}<div class="muted">${fmtMins(tripMinutes(t))} · ${tzLabel(t.tz)}</div></td>
           <td class="num"><b>${tripKm(t).toFixed(1)}</b>${t.editedBy ? `<div class="small muted" title="Edited by ${esc(t.editedBy)}">edited</div>` : ''}</td>
-          ${admin ? `<td class="num">${t.kind === 'withDriver' ? '<span class="small muted" title="Paid through the driver’s own trip">via driver</span>' : t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' ? '<div class="small muted">est.</div>' : ''}</td>` : ''}
+          ${admin ? `<td class="num">${t.kind === 'withDriver' ? '<span class="small muted" title="Paid through the driver’s own trip">via driver</span>' : t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' && !t.costEntered ? '<div class="small muted">est.</div>' : ''}${t.costEntered ? '<div class="small" style="color:#a8640f" title="Cost entered by the driver">entered</div>' : ''}</td>` : ''}
           <td style="white-space:nowrap"><button class="btn sm ghost icon" data-route="${t.id}" title="Route map">${icon('map', 15)}</button>${admin ? `<button class="btn sm ghost icon" data-edit="${t.id}" title="Edit">${icon('edit', 15)}</button><button class="btn sm ghost icon" data-del="${t.id}" title="Delete">${icon('trash', 15)}</button>` : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : `<div class="empty"><b>No trips in this period</b>Drivers start and stop trips from the app.</div>`}
       </div>
@@ -113,6 +181,7 @@ export function mount(el, _p, { setHeader }) {
   }
 
   function wire(list) {
+    wireTabs();
     const find = (id) => list.find((t) => t.id === id) || store.tripsActive.find((t) => t.id === id);
     el.querySelectorAll('[data-quick]').forEach((b) => {
       b.onclick = () => {
@@ -162,7 +231,7 @@ export function mount(el, _p, { setHeader }) {
   load();
   let last = '';
   return store.on(() => {
-    const sig = JSON.stringify([store.tripsToday.map((t) => [t.id, t.distanceM, t.status, t.siteId, +t.lastAt]), store.tripsActive.map((t) => t.id), store.users.length, store.settings]);
+    const sig = JSON.stringify([store.payments.map((p) => [p.id, p.amount]), store.tripsToday.map((t) => [t.id, t.distanceM, t.status, t.siteId, +t.lastAt, t.cost]), store.tripsActive.map((t) => t.id), store.users.length, store.settings]);
     if (sig !== last) { last = sig; draw(); }
   });
 }
@@ -234,6 +303,68 @@ function editDialog(t, onDone) {
           toast('Trip updated'); close(); onDone && onDone();
         } catch (e) { toast(friendlyError(e), true); }
       };
+    },
+  });
+}
+
+function payDialog(u, balance) {
+  if (!u) return;
+  modal({
+    title: `Payment to ${u.name}`,
+    body: `<div class="small muted" style="margin-bottom:10px">Balance due now: <b>${fmtMoney(balance)}</b></div>
+      <div class="grid cols-2" style="gap:10px">
+        <label class="f"><span>Amount (AED)</span><input id="pd-amt" type="number" min="0" step="0.01" value="${balance > 0 ? balance : ''}"></label>
+        <label class="f"><span>Date</span><input id="pd-date" type="date" value="${dateKey(new Date())}"></label>
+        <label class="f"><span>Method</span><select id="pd-m"><option>Cash</option><option>Bank transfer</option><option>Cheque</option><option>Other</option></select></label>
+        <label class="f"><span>Note / reference</span><input id="pd-note"></label>
+      </div><div class="error" id="pd-err"></div>`,
+    foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Save payment</button>',
+    onMount: (el, close) => {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = async () => {
+        const amount = Number(el.querySelector('#pd-amt').value), date = el.querySelector('#pd-date').value;
+        if (!(amount > 0) || !date) { el.querySelector('#pd-err').textContent = 'Enter the amount and date.'; return; }
+        try {
+          await addDriverPayment({ driver: u, amount, date, method: el.querySelector('#pd-m').value, note: el.querySelector('#pd-note').value.trim() });
+          toast(`Payment of ${fmtMoney(amount)} saved — it shows in ${u.name}'s app`); close();
+        } catch (e) { el.querySelector('#pd-err').textContent = friendlyError(e); }
+      };
+    },
+  });
+}
+
+/** Ledger: trips (+) and payments (−) in date order with a running balance. */
+function statementRows(trips, pays) {
+  const items = [
+    ...trips.map((t) => ({ date: t.date, at: t.startAt || new Date(0), type: 'Trip', desc: `${t.startSiteName || 'GPS'} → ${t.endSiteName || 'GPS'}${t.purpose ? ` · ${t.purpose}` : ''}`,
+      km: Math.round(tripKm(t) * 10) / 10, plus: t.cost || 0, minus: 0, flag: t.costEntered ? 'cost entered by driver' : '' })),
+    ...pays.map((p) => ({ date: p.date, at: new Date(`${p.date}T23:59:00`), type: 'Payment', desc: [p.method, p.note].filter(Boolean).join(' · '), km: '', plus: 0, minus: p.amount, flag: p.createdBy ? `by ${p.createdBy}` : '' })),
+  ].sort((a, b) => a.at - b.at);
+  let bal = 0;
+  return items.map((i) => { bal = Math.round((bal + i.plus - i.minus) * 100) / 100; return { ...i, bal }; });
+}
+function statementDialog(u, trips, pays) {
+  const rows = statementRows(trips, pays);
+  const rep = {
+    title: `Driver statement — ${u.name}`,
+    subtitle: `${u.vehicle ? `${u.vehicle} · ` : ''}generated ${dateKey(new Date())} · balance ${rows.length ? rows[rows.length - 1].bal : 0} AED`,
+    filename: `driver-statement-${u.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+    orientation: 'portrait',
+    sheets: [{ name: 'Statement', columns: ['Date', 'Type', 'Details', 'Km', 'Earned (AED)', 'Paid (AED)', 'Balance (AED)', 'Note'], widths: [11, 9, 36, 7, 12, 12, 13, 22],
+      rows: rows.map((r) => [r.date, r.type, r.desc, r.km, r.plus || '', r.minus || '', r.bal, r.flag]),
+      totals: ['TOTAL', '', '', '', Math.round(rows.reduce((a, r) => a + r.plus, 0) * 100) / 100, Math.round(rows.reduce((a, r) => a + r.minus, 0) * 100) / 100, rows.length ? rows[rows.length - 1].bal : 0, ''] }],
+  };
+  modal({
+    title: rep.title, wide: true,
+    body: `<div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="t tr-t"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="num">Earned</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${esc(r.date)}</td><td>${r.type === 'Payment' ? pill('Payment', 'green') : pill('Trip', 'purple')}</td>
+        <td class="small">${esc(r.desc)}${r.km !== '' ? ` · ${r.km} km` : ''}${r.flag ? `<div class="muted">${esc(r.flag)}</div>` : ''}</td>
+        <td class="num">${r.plus ? fmtMoney(r.plus) : ''}</td><td class="num" style="color:#1f7a50">${r.minus ? fmtMoney(r.minus) : ''}</td><td class="num"><b>${fmtMoney(r.bal)}</b></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">Nothing yet</div></td></tr>'}
+      </tbody></table></div>`,
+    foot: '<button class="btn ghost" data-x2>Close</button><button class="btn ghost" data-f="pdf">PDF</button><button class="btn" data-f="xlsx">Excel</button>',
+    onMount: (el, close) => {
+      el.querySelector('[data-x2]').onclick = close;
+      el.querySelectorAll('[data-f]').forEach((b) => { b.onclick = async () => { try { await downloadReport(rep, b.dataset.f); } catch (e) { toast(friendlyError(e), true); } }; });
     },
   });
 }

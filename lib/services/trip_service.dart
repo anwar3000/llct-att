@@ -161,7 +161,7 @@ class TripService {
   }
 
   /// Ends the trip, works out the drop-off site and the cost.
-  /// Driver trip: km × rate. Taxi ride: the [fare] the employee entered. With a company driver: no cost
+  /// Driver trip: the cost the driver entered ([fare]), else km × rate. Taxi ride: the [fare] the employee entered. With a company driver: no cost
   /// here (the driver's own trip is what gets paid), so it isn't counted twice.
   Future<Trip> stop({required AppUser user, required Trip trip, required List<Site> sites, String note = '', double? fare}) async {
     if (_trip?.id != trip.id) {
@@ -182,7 +182,8 @@ class TripService {
       distanceM: distance.value,
       points: _points,
       ratePerKm: rate,
-      cost: trip.isTaxi ? (fare ?? 0) : (trip.isWithDriver ? 0 : null),
+      cost: trip.isWithDriver ? 0 : (fare ?? (trip.isTaxi ? 0 : null)),
+      costEntered: !trip.isRide && fare != null,
       lat: p?.latitude,
       lng: p?.longitude,
       site: site,

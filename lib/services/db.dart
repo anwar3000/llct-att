@@ -831,6 +831,26 @@ class Db {
       .snapshots()
       .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
 
+  /// Every finished trip of a driver (for the earned / paid / balance tally).
+  static Stream<List<Trip>> myDoneTrips(String uid) => trips
+      .where('employeeId', isEqualTo: uid)
+      .where('status', isEqualTo: 'done')
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
+
+  static Stream<List<DriverPayment>> myDriverPayments(String uid) => _fs
+      .collection('driverPayments')
+      .where('employeeId', isEqualTo: uid)
+      .snapshots()
+      .map((q) => q.docs.map(DriverPayment.fromDoc).toList()..sort((a, b) => b.date.compareTo(a.date)));
+
+  /// Driver enters / changes the cost of a trip (during or after it).
+  static Future<void> setTripCost(String tripId, double cost) => trips.doc(tripId).update({
+        'cost': (cost * 100).round() / 100,
+        'costEntered': true,
+        'costEditedAt': FieldValue.serverTimestamp(),
+      });
+
   /// Management: every trip running now / every trip on a date.
   static Stream<List<Trip>> activeTripsAll() => trips
       .where('status', isEqualTo: 'active')
@@ -931,6 +951,7 @@ class Db {
     required int points,
     double? ratePerKm,
     double? cost,
+    bool costEntered = false,
     double? lat,
     double? lng,
     Site? site,
@@ -962,6 +983,7 @@ class Db {
       'durationMin': now.difference(trip.startAt).inMinutes,
       'ratePerKm': ratePerKm,
       'cost': cost ?? ((km * (ratePerKm ?? 0) * 100).round() / 100),
+      if (costEntered) 'costEntered': true,
       if (note.isNotEmpty) 'note': note,
     });
     await batch.commit();

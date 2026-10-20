@@ -73,7 +73,11 @@ service cloud.firestore {
                       && request.resource.data.employeeId == request.auth.uid
                       && onlyChanges(['distanceM', 'pointsCount', 'lastLat', 'lastLng', 'lastAt', 'endAt', 'endLat', 'endLng',
                            'endSiteId', 'endSiteName', 'siteId', 'siteName', 'durationMin', 'ratePerKm', 'cost', 'status',
-                           'note', 'endTz', 'endServer']));
+                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt']))
+                    // A driver can enter / change the cost of their own trip at any time (flagged for admin).
+                    || (owns() && resource.data.get('kind', 'driver') == 'driver'
+                        && request.resource.data.employeeId == request.auth.uid
+                        && onlyChanges(['cost', 'costEntered', 'costEditedAt', 'costNote']));
       allow delete: if isAdmin();
       match /points/{pid} {
         allow read: if isManagement() || (isActive() && get(/databases/$(database)/documents/trips/$(id)).data.employeeId == request.auth.uid);
@@ -86,6 +90,12 @@ service cloud.firestore {
                           && get(/databases/$(database)/documents/trips/$(id)).data.status == 'active'));
         allow update, delete: if isAdmin();
       }
+    }
+
+    // Payments made to drivers (accounts → admin). Each driver sees their own, so the balance tallies.
+    match /driverPayments/{id} {
+      allow read: if isAdmin() || owns();
+      allow write: if isAdmin();
     }
 
     // Claims on a place / site name so the same new site can't be added twice (first one wins).
