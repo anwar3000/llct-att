@@ -271,10 +271,14 @@ class _DriverShellState extends State<DriverShell> {
       ),
       body: LayoutBuilder(builder: (context, c) {
         if (c.maxWidth >= 700) {
-          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 10, 32), children: left)),
-            Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(10, 0, 20, 32), children: right)),
-          ]);
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: left)),
+              const SizedBox(width: 16),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: right)),
+            ]),
+          );
         }
         return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [...left, ...right]);
       }),

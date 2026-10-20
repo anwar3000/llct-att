@@ -634,12 +634,18 @@ class _HomeTabState extends State<HomeTab> {
             child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [...left, ...right]),
           );
         }
+        // One scroll for the whole page (two columns side by side) so it scrolls like a normal page.
         return RefreshIndicator(
           onRefresh: () async => _subscribe(),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 10, 32), children: left)),
-            Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(10, 0, 20, 32), children: right)),
-          ]),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: left)),
+              const SizedBox(width: 16),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: right)),
+            ]),
+          ),
         );
       }),
       if (_busy)

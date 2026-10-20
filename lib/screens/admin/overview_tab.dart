@@ -85,11 +85,7 @@ class _OverviewTabState extends State<OverviewTab> {
         return LayoutBuilder(builder: (context, c) {
         // Big screens (unfolded Fold, tablets): live map + live lists on the right.
         final wide = c.maxWidth >= 700;
-        final list = RefreshIndicator(
-          onRefresh: () async {},
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-            children: [
+        final kids = <Widget>[
               Text(fmtDate(DateTime.now()),
                   style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
@@ -413,14 +409,22 @@ class _OverviewTabState extends State<OverviewTab> {
                             .toList(),
                       ),
               ),
-            ],
-          ),
+        ];
+        if (!wide) {
+          return RefreshIndicator(
+            onRefresh: () async {},
+            child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: kids),
+          );
+        }
+        // Big screen: one scroll for the whole page, dashboard on the left, live column on the right.
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(flex: 11, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: kids)),
+            const SizedBox(width: 16),
+            Expanded(flex: 9, child: _LivePanel(me: widget.me, live: live, onNavigate: widget.onNavigate)),
+          ]),
         );
-        if (!wide) return list;
-        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(flex: 11, child: list),
-          Expanded(flex: 9, child: _LivePanel(me: widget.me, live: live, onNavigate: widget.onNavigate)),
-        ]);
         });
       },
     );
@@ -447,7 +451,7 @@ class _LivePanel extends StatelessWidget {
     }
     final groups = bySite.values.toList()
       ..sort((a, b) => (b.staff.length + b.ext.length).compareTo(a.staff.length + a.ext.length));
-    return ListView(padding: const EdgeInsets.fromLTRB(4, 4, 16, 32), children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         Container(width: 9, height: 9, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
         const SizedBox(width: 6),

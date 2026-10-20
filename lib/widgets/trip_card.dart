@@ -104,7 +104,7 @@ class _TripCardState extends State<TripCard> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('START')),
+            FilledButton(style: kDialogButton, onPressed: () => Navigator.pop(c, true), child: const Text('START')),
           ],
         ),
       ),
@@ -214,29 +214,37 @@ class _TripCardState extends State<TripCard> {
               ),
               const SizedBox(width: 8),
               Expanded(child: _metric('Time', LiveTimer(since: t.startAt, style: _big))),
-              const SizedBox(width: 8),
-              Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _enterCost(t),
-                  child: _metric(
-                    t.costEntered ? 'Cost ✎' : 'Cost (est.) ✎',
-                    t.costEntered
-                        ? Text(fmtMoney(t.cost ?? 0), style: _big)
-                        : ValueListenableBuilder<double>(
-                            valueListenable: TripService.instance.distance,
-                            builder: (_, m, __) => Text(fmtMoney((m / 1000 * _rate * 100).round() / 100), style: _big),
-                          ),
-                  ),
-                ),
-              ),
             ]),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => _enterCost(t),
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                label: Text(t.costEntered ? 'Change cost' : 'Enter cost now'),
+            const SizedBox(height: 8),
+            // Cost: estimate (km × rate) until the driver enters their own — tap to enter / change.
+            Material(
+              color: AppColors.accentSoft,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _enterCost(t),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(children: [
+                    const Icon(Icons.payments_outlined, color: AppColors.accentDark),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(t.costEntered ? 'Trip cost' : 'Trip cost (estimate)',
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                        t.costEntered
+                            ? Text(fmtMoney(t.cost ?? 0), style: _big)
+                            : ValueListenableBuilder<double>(
+                                valueListenable: TripService.instance.distance,
+                                builder: (_, m, __) => Text(fmtMoney((m / 1000 * _rate * 100).round() / 100), style: _big),
+                              ),
+                      ]),
+                    ),
+                    Text(t.costEntered ? 'Change' : 'Enter cost',
+                        style: const TextStyle(color: AppColors.accentDark, fontWeight: FontWeight.w800)),
+                    const Icon(Icons.chevron_right, color: AppColors.accentDark),
+                  ]),
+                ),
               ),
             ),
             if (t.vehicle.isNotEmpty || t.purpose.isNotEmpty)
@@ -340,6 +348,7 @@ Future<double?> askTripCost(BuildContext context,
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
           FilledButton(
+            style: kDialogButton,
             onPressed: () {
               final v = double.tryParse(ctrl.text.trim());
               if (v == null || v < 0) {
@@ -367,3 +376,6 @@ Future<void> editTripCost(BuildContext context, Trip t) async {
     if (context.mounted) showSnack(context, 'Could not update: $e', error: true);
   }
 }
+
+/// Dialog / inline buttons: the app theme makes filled buttons full-width, which breaks rows and dialogs.
+final ButtonStyle kDialogButton = FilledButton.styleFrom(minimumSize: const Size(96, 44), padding: const EdgeInsets.symmetric(horizontal: 18));

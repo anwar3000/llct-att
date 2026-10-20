@@ -11,6 +11,7 @@ import '../services/location_service.dart';
 import '../services/trip_service.dart';
 import 'common.dart';
 import 'tiles.dart';
+import 'trip_card.dart' show kDialogButton;
 
 /// Below the check-in card for every employee: start / end a ride by taxi or with a company driver.
 /// Employees see only the ride in progress (no history). Taxi fare is entered when the ride ends.
@@ -119,6 +120,7 @@ class _RideCardState extends State<RideCard> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
             FilledButton(
+              style: kDialogButton,
               onPressed: () {
                 final v = double.tryParse(ctrl.text.trim());
                 if (v == null || v <= 0) {
@@ -140,12 +142,10 @@ class _RideCardState extends State<RideCard> {
     final t = _active;
     if (t == null) {
       return Card(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: _busy ? null : _start,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-            child: Row(children: [
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
               Container(
                 width: 42,
                 height: 42,
@@ -155,17 +155,24 @@ class _RideCardState extends State<RideCard> {
               const SizedBox(width: 12),
               const Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Taxi / company driver', style: TextStyle(fontWeight: FontWeight.w800)),
-                  Text('Start when you get in, end when you arrive', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                  Text('Taxi / company driver', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  SizedBox(height: 2),
+                  Text('Start when you get in, end when you arrive',
+                      style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
                 ]),
               ),
-              FilledButton(
+            ]),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: _rideColor),
                 onPressed: _busy ? null : _start,
-                child: const Text('START RIDE', style: TextStyle(fontWeight: FontWeight.w800)),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('START RIDE', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5)),
               ),
-            ]),
-          ),
+            ),
+          ]),
         ),
       );
     }
@@ -176,7 +183,7 @@ class _RideCardState extends State<RideCard> {
           leading: const Icon(Icons.local_shipping, color: _rideColor),
           title: const Text('Trip in progress'),
           trailing: FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger, minimumSize: const Size(80, 40)),
             onPressed: _busy ? null : () => _end(t),
             child: const Text('STOP'),
           ),

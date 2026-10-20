@@ -286,6 +286,9 @@ class _LiveMapTabState extends State<LiveMapTab> {
           options: MapOptions(
             initialCenter: pts.isNotEmpty ? pts.first : kDefaultCenter,
             initialZoom: pts.isNotEmpty ? 12 : 4,
+            // The small map on the Overview is a preview: no dragging, so the page scrolls normally.
+            interactionOptions: InteractionOptions(
+                flags: widget.embedded ? InteractiveFlag.none : InteractiveFlag.all & ~InteractiveFlag.rotate),
             onMapReady: () {
               _ready = true;
               if (pts.isNotEmpty) {
