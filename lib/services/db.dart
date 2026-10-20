@@ -851,6 +851,57 @@ class Db {
         'costEditedAt': FieldValue.serverTimestamp(),
       });
 
+  /// Management: trips & rides between two dates (yyyy-MM-dd, inclusive).
+  static Stream<List<Trip>> tripsInRange(String from, String to) => trips
+      .where('date', isGreaterThanOrEqualTo: from)
+      .where('date', isLessThanOrEqualTo: to)
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
+
+  /// Every finished trip (for driver accounts: earned − paid).
+  static Stream<List<Trip>> doneTripsAll() => trips
+      .where('status', isEqualTo: 'done')
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList());
+
+  static Future<List<({double lat, double lng})>> tripPoints(String id) async {
+    final q = await trips.doc(id).collection('points').get();
+    final pts = q.docs.map((d) => d.data()).where((m) => m['lat'] is num && m['lng'] is num).toList()
+      ..sort((a, b) {
+        final x = a['at'], y = b['at'];
+        if (x is Timestamp && y is Timestamp) return x.compareTo(y);
+        return 0;
+      });
+    return pts.map((m) => (lat: (m['lat'] as num).toDouble(), lng: (m['lng'] as num).toDouble())).toList();
+  }
+
+  static Stream<List<DriverPayment>> allDriverPayments() => _fs
+      .collection('driverPayments')
+      .snapshots()
+      .map((q) => q.docs.map(DriverPayment.fromDoc).toList()..sort((a, b) => b.date.compareTo(a.date)));
+
+  static Future<void> addDriverPayment({
+    required AppUser driver,
+    required double amount,
+    required String date,
+    required String method,
+    required String note,
+    required AppUser by,
+  }) =>
+      _fs.collection('driverPayments').add({
+        'employeeId': driver.id,
+        'employeeName': driver.name,
+        'amount': (amount * 100).round() / 100,
+        'date': date,
+        'method': method,
+        'note': note,
+        'createdBy': by.name,
+        'createdById': by.id,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+  static Future<void> deleteDriverPayment(String id) => _fs.collection('driverPayments').doc(id).delete();
+
   /// Management: every trip running now / every trip on a date.
   static Stream<List<Trip>> activeTripsAll() => trips
       .where('status', isEqualTo: 'active')

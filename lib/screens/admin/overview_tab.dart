@@ -140,7 +140,7 @@ class _OverviewTabState extends State<OverviewTab> {
                   icon: Icons.pending_actions_outlined,
                   color: AppColors.warning,
                   sub: '${live.pendingPetty.length} petty · ${live.pendingOff.length} off-day',
-                  onTap: widget.me.isAdmin ? () => widget.onNavigate(4) : null,
+                  onTap: widget.me.isAdmin ? () => widget.onNavigate(5) : null,
                 ),
                 StatTile(
                   label: 'Flagged check-ins',
@@ -151,7 +151,8 @@ class _OverviewTabState extends State<OverviewTab> {
                 ),
               ]),
               if (!wide && live.tripsToday.isNotEmpty) ...[
-                const SectionTitle('Trips & rides today'),
+                SectionTitle('Trips & rides today',
+                    trailing: TextButton(onPressed: () => widget.onNavigate(4), child: const Text('All details'))),
                 _TripsCard(live),
               ],
 
@@ -216,7 +217,7 @@ class _OverviewTabState extends State<OverviewTab> {
                     trailing: !widget.me.isAdmin
                         ? null
                         : TextButton(
-                            onPressed: () => widget.onNavigate(4), child: const Text('All petty'))),
+                            onPressed: () => widget.onNavigate(5), child: const Text('All petty'))),
                 ...live.pendingSites.map((st) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Card(
@@ -465,7 +466,8 @@ class _LivePanel extends StatelessWidget {
         child: SizedBox(height: 330, child: LiveMapTab(me: me, live: live, embedded: true)),
       ),
       if (live.tripsToday.isNotEmpty) ...[
-        const SectionTitle('Trips & rides today'),
+        SectionTitle('Trips & rides today',
+            trailing: TextButton(onPressed: () => onNavigate(4), child: const Text('All details'))),
         _TripsCard(live),
       ],
       SectionTitle('On site now · ${live.open.length + live.externalOnSite.length}'),

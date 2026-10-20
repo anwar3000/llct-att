@@ -11,6 +11,7 @@ import 'overview_tab.dart';
 import 'petty_admin_tab.dart';
 import 'sites_tab.dart';
 import 'team_tab.dart';
+import 'trips_tab.dart';
 
 /// Management dashboard. Uses a side rail on tablets/desktop and a bottom bar on phones.
 class AdminShell extends StatefulWidget {
@@ -39,15 +40,16 @@ class _AdminShellState extends State<AdminShell> {
 
   static const _allItems = [
     (icon: Icons.dashboard_outlined, active: Icons.dashboard, label: 'Overview'),
-    (icon: Icons.map_outlined, active: Icons.map, label: 'Live Map'),
+    (icon: Icons.map_outlined, active: Icons.map, label: 'Map'),
     (icon: Icons.groups_outlined, active: Icons.groups, label: 'Team'),
     (icon: Icons.location_city_outlined, active: Icons.location_city, label: 'Sites'),
+    (icon: Icons.local_taxi_outlined, active: Icons.local_taxi, label: 'Trips'),
     (icon: Icons.account_balance_wallet_outlined, active: Icons.account_balance_wallet, label: 'Petty'),
   ];
 
   /// Managers don't see accounts (Petty tab).
   List<({IconData icon, IconData active, String label})> get _items =>
-      widget.me.isAdmin ? _allItems : _allItems.sublist(0, 4);
+      widget.me.isAdmin ? _allItems : _allItems.sublist(0, 5);
 
   void go(int i) => setState(() => _index = i.clamp(0, _items.length - 1));
 
@@ -68,6 +70,7 @@ class _AdminShellState extends State<AdminShell> {
       LiveMapTab(me: widget.me, live: _live),
       TeamTab(me: widget.me, live: _live),
       SitesTab(me: widget.me, live: _live),
+      TripsTab(me: widget.me, live: _live),
       if (widget.me.isAdmin) PettyAdminTab(me: widget.me, live: _live),
     ];
     final body = IndexedStack(index: _index, children: pages);

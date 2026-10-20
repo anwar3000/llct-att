@@ -11,7 +11,8 @@ export function mount(el, _p, { setHeader }) {
   setHeader('Trips & rides', 'Driver trips (paid per km) and staff taxi / company-driver rides — GPS distance, time and cost, charged to the pick-up / drop-off site',
     `<button class="btn ghost" id="tr-xlsx">${icon('download', 16)} Excel</button><button class="btn ghost" id="tr-pdf">${icon('download', 16)} PDF</button>`);
   const today = dateKey(new Date());
-  let from = today, to = today, driver = '', site = '', kind = '';
+  // Default: this month, so the full list of trips & rides is visible.
+  let from = dateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to = today, driver = '', site = '', kind = '';
   let fetched = [];
   let loading = false;
   let view = 'trips', acctTrips = null, acctLoading = false;
@@ -151,7 +152,7 @@ export function mount(el, _p, { setHeader }) {
     <div class="grid cols-2-1 mt">
       <div class="card"><div class="card-head"><h2>Trips</h2><span class="spacer"></span><span class="small muted">${loading ? 'Loading…' : `${list.length} trip${list.length === 1 ? '' : 's'}`}</span></div>
         ${list.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th>' : ''}<th></th></tr></thead><tbody>
-        ${list.map((t) => `<tr>
+        ${list.map((t) => `<tr class="click" data-row="${t.id}">
           <td>${esc(t.date.slice(5))}</td>
           <td><b>${esc(t.employeeName)}</b>${t.vehicle && t.kind !== 'taxi' ? `<div class="small muted">${esc(t.vehicle)}</div>` : ''}</td>
           <td>${kindPill(t)}</td>
@@ -204,7 +205,8 @@ export function mount(el, _p, { setHeader }) {
       if (!(v >= 0)) { toast('Enter a rate (AED per km)', true); return; }
       try { await saveSettings({ tripRatePerKm: v }); toast(`Company rate set to ${v} AED / km (for new trips)`); } catch (e) { toast(friendlyError(e), true); }
     };
-    el.querySelectorAll('[data-route]').forEach((b) => { b.onclick = () => { const t = find(b.dataset.route); if (t) routeDialog(t); }; });
+    el.querySelectorAll('[data-route]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.route); if (t) routeDialog(t); }; });
+    el.querySelectorAll('[data-row]').forEach((r) => { r.onclick = (e) => { if (e.target.closest('button, a')) return; const t = find(r.dataset.row); if (t) routeDialog(t); }; });
     el.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => { const t = find(b.dataset.edit); if (t) editDialog(t, load); }; });
     el.querySelectorAll('[data-del]').forEach((b) => {
       b.onclick = async () => {
@@ -251,7 +253,17 @@ export async function routeDialog(t) {
     title: `${t.employeeName} — ${t.date}`, wide: true,
     body: `<div class="small muted" style="margin-bottom:8px">${esc(t.startSiteName || 'GPS location')} → ${esc(t.status === 'active' ? 'driving…' : (t.endSiteName || 'GPS location'))}
       · ${tripKm(t).toFixed(2)} km · ${fmtMins(tripMinutes(t))}${t.vehicle ? ` · ${esc(t.vehicle)}` : ''}${t.siteName ? ` · charged to <b>${esc(t.siteName)}</b>` : ''}</div>
-      <div id="rt-map" class="map" style="height:420px"></div><div id="rt-info" class="small muted" style="margin-top:6px">Loading route…</div>`,
+      <div class="grid cols-2" style="gap:6px 16px;margin-bottom:10px;font-size:13px">
+        <div><span class="muted">Type</span> <b>${esc(tripKindLabel(t))}</b></div>
+        <div><span class="muted">Time</span> <b>${fmtTime(atTz(t.startAt, t.tz))} – ${t.endAt ? fmtTime(atTz(t.endAt, t.tz)) : 'now'}</b> ${esc(tzLabel(t.tz))}</div>
+        <div><span class="muted">Pick-up</span> <b>${esc(t.startSiteName || 'GPS location')}</b></div>
+        <div><span class="muted">Drop-off</span> <b>${esc(t.status === 'active' ? '—' : (t.endSiteName || 'GPS location'))}</b></div>
+        <div><span class="muted">Charged to</span> <b>${esc(t.siteName || '—')}</b></div>
+        ${isAdmin() ? `<div><span class="muted">Cost</span> <b>${t.kind === 'withDriver' ? 'paid via the driver’s trip' : fmtMoney(tripCost(t))}</b>${t.costEntered ? ' <span class="small" style="color:#a8640f">entered by driver</span>' : ''}${t.ratePerKm != null ? ` <span class="small muted">· ${t.ratePerKm} AED/km</span>` : ''}</div>` : ''}
+        ${t.purpose ? `<div><span class="muted">Purpose</span> <b>${esc(t.purpose)}</b></div>` : ''}
+        ${t.note ? `<div><span class="muted">Note</span> ${esc(t.note)}</div>` : ''}
+      </div>
+      <div id="rt-map" class="map" style="height:380px"></div><div id="rt-info" class="small muted" style="margin-top:6px">Loading route…</div>`,
   });
   const map = makeMap(el.querySelector('#rt-map'));
   const L = window.L;
