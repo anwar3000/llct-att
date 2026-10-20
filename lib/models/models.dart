@@ -933,8 +933,11 @@ class Trip {
   final String driverId, driverName;
   /// Driver typed the cost themselves (instead of km × rate).
   final bool costEntered;
+  final String note, editedBy;
 
   Trip({
+    this.note = '',
+    this.editedBy = '',
     this.costEntered = false,
     this.kind = 'driver',
     this.driverId = '',
@@ -1008,6 +1011,8 @@ class Trip {
       driverId: _str(m['driverId']),
       driverName: _str(m['driverName']),
       costEntered: m['costEntered'] == true,
+      note: _str(m['note']),
+      editedBy: _str(m['editedBy']),
     );
   }
 }

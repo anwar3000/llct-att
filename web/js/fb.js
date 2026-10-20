@@ -247,7 +247,8 @@ export async function tripPoints(id) {
 export async function editTrip(t, { km, ratePerKm, fare, siteId, purpose, vehicle, note }) {
   const site = siteId ? store.site(siteId) : null;
   const rate = t.kind === 'driver' ? (ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.employeeId))) : null;
-  const cost = t.kind === 'taxi' ? Math.round((fare ?? t.cost ?? 0) * 100) / 100 : t.kind === 'withDriver' ? 0 : Math.round(km * rate * 100) / 100;
+  // Taxi: fare. Driver trip: the cost typed in the edit box (defaults to km × rate). With driver: 0.
+  const cost = t.kind === 'withDriver' ? 0 : fare != null ? Math.round(fare * 100) / 100 : t.kind === 'taxi' ? (t.cost ?? 0) : Math.round(km * rate * 100) / 100;
   const data = {
     distanceM: Math.round(km * 1000), ratePerKm: rate, cost,
     siteId: siteId || '', siteName: site?.name || (siteId ? t.siteName : ''),

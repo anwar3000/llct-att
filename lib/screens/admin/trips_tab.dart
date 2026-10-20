@@ -277,6 +277,124 @@ class _TripsTabState extends State<TripsTab> {
     );
   }
 
+  Future<void> _delete(Trip t) async {
+    if (!await confirm(context, 'Delete trip',
+        'Delete ${t.employeeName}\'s ${t.kindLabel.toLowerCase()} on ${fmtDateShort(t.startLocal)} (${t.km.toStringAsFixed(1)} km)? This cannot be undone.',
+        ok: 'Delete', danger: true)) {
+      return;
+    }
+    try {
+      await Db.deleteTrip(t.id);
+      if (mounted) showSnack(context, 'Trip deleted');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not delete: $e', error: true);
+    }
+  }
+
+  Future<void> _edit(Trip t) async {
+    final kmC = TextEditingController(text: t.km.toStringAsFixed(2));
+    final costC = TextEditingController(text: _costOf(t).toStringAsFixed(2));
+    final purposeC = TextEditingController(text: t.purpose);
+    final noteC = TextEditingController(text: t.note);
+    final user = widget.live.userById(t.employeeId);
+    final rate = t.ratePerKm ?? user?.tripRatePerKm;
+    String siteId = t.siteId;
+    final sites = widget.live.sites.where((x) => x.approved || x.id == t.siteId).toList();
+    String? err;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: Text('Edit ${t.kindLabel.toLowerCase()}'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('${t.employeeName} · ${fmtDateShort(t.startLocal)}', style: const TextStyle(color: AppColors.muted)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: kmC,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Distance (km)', prefixIcon: Icon(Icons.straighten)),
+              ),
+              const SizedBox(height: 10),
+              if (!t.isWithDriver) ...[
+                TextField(
+                  controller: costC,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                      labelText: t.isTaxi ? 'Taxi fare ($kCurrency)' : 'Cost ($kCurrency)',
+                      prefixIcon: const Icon(Icons.payments_outlined),
+                      errorText: err),
+                ),
+                if (!t.isRide && rate != null && rate > 0)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () {
+                        final km = double.tryParse(kmC.text.trim()) ?? 0;
+                        set(() => costC.text = (km * rate).toStringAsFixed(2));
+                      },
+                      child: Text('Use km × ${fmtMoney(rate)}/km'),
+                    ),
+                  ),
+                const SizedBox(height: 6),
+              ] else
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: Text('Ride with a company driver — paid through the driver’s trip.',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                ),
+              DropdownButtonFormField<String>(
+                value: sites.any((x) => x.id == siteId) ? siteId : '',
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Charge to site', prefixIcon: Icon(Icons.location_city_outlined)),
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('— No site —')),
+                  for (final x in sites) DropdownMenuItem(value: x.id, child: Text(x.name, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => set(() => siteId = v ?? ''),
+              ),
+              const SizedBox(height: 10),
+              TextField(controller: purposeC, decoration: const InputDecoration(labelText: 'Purpose')),
+              const SizedBox(height: 10),
+              TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Note (reason for change)')),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            FilledButton(
+              style: kDialogButton,
+              onPressed: () {
+                final km = double.tryParse(kmC.text.trim());
+                final cost = t.isWithDriver ? 0.0 : double.tryParse(costC.text.trim());
+                if (km == null || km < 0 || cost == null || cost < 0) {
+                  set(() => err = 'Enter valid numbers');
+                  return;
+                }
+                Navigator.pop(c, true);
+              },
+              child: const Text('SAVE'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Db.adminEditTrip(
+        trip: t,
+        km: double.parse(kmC.text.trim()),
+        cost: t.isWithDriver ? 0 : double.parse(costC.text.trim()),
+        site: widget.live.siteById(siteId),
+        purpose: purposeC.text.trim(),
+        note: noteC.text.trim(),
+        by: widget.me,
+      );
+      if (mounted) showSnack(context, 'Trip updated');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not save: $e', error: true);
+    }
+  }
+
   void _details(Trip t) {
     showModalBottomSheet(
       context: context,
@@ -310,6 +428,51 @@ class _TripsTabState extends State<TripsTab> {
             if (!t.isRide && t.ratePerKm != null) InfoRow(Icons.speed, 'Rate', '${fmtMoney(t.ratePerKm!)} / km'),
             InfoRow(Icons.payments_outlined, 'Cost',
                 t.isWithDriver ? 'Paid through the driver’s trip' : '${fmtMoney((_costOf(t) * 100).round() / 100)}${t.costEntered ? ' (entered by driver)' : (t.isActive ? ' (estimate)' : '')}'),
+          ],
+          if (t.note.isNotEmpty) InfoRow(Icons.sticky_note_2_outlined, 'Note', t.note),
+          if (t.editedBy.isNotEmpty) InfoRow(Icons.edit_note, 'Edited by', t.editedBy),
+          const SizedBox(height: 14),
+          if (t.isActive)
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(c);
+                if (!await confirm(context, 'End trip', 'End ${t.employeeName}\'s trip now at the last GPS point (${t.km.toStringAsFixed(1)} km)?', ok: 'End trip')) return;
+                try {
+                  await Db.adminEndTrip(t, widget.me, widget.live.userById(t.employeeId)?.tripRatePerKm ?? await Db.tripRate(widget.live.userById(t.employeeId) ?? widget.me));
+                  if (mounted) showSnack(context, 'Trip ended');
+                } catch (e) {
+                  if (mounted) showSnack(context, 'Could not end: $e', error: true);
+                }
+              },
+              icon: const Icon(Icons.stop_circle_outlined),
+              label: const Text('End this trip now'),
+            ),
+          if (widget.me.isAdmin) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () {
+                    Navigator.pop(c);
+                    _edit(t);
+                  },
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger, side: const BorderSide(color: AppColors.danger)),
+                  onPressed: () {
+                    Navigator.pop(c);
+                    _delete(t);
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                ),
+              ),
+            ]),
           ],
         ]),
       ),

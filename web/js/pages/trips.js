@@ -290,7 +290,8 @@ function editDialog(t, onDone) {
         <label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${tripKm(t).toFixed(2)}"></label>
         ${t.kind === 'taxi' ? `<label class="f"><span>Taxi fare (AED)</span><input id="et-fare" type="number" min="0" step="0.01" value="${t.cost ?? 0}"></label>`
           : t.kind === 'withDriver' ? '<div class="small muted" style="padding-top:22px">Ride with a company driver — paid through the driver’s trip.</div>'
-          : `<label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.employeeId)}"></label>`}
+          : `<label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.employeeId)}"></label>
+             <label class="f"><span>Cost (AED) — km × rate, or type an amount</span><input id="et-costv" type="number" min="0" step="0.01" value="${tripCost(t)}"></label>`}
         <label class="f"><span>Vehicle</span><input id="et-veh" value="${esc(t.vehicle)}"></label>
         <label class="f"><span>Purpose</span><input id="et-pur" value="${esc(t.purpose)}"></label>
       </div>
@@ -302,13 +303,14 @@ function editDialog(t, onDone) {
       const v = (id) => el.querySelector(id).value;
       const has = (id) => !!el.querySelector(id);
       const upd = () => {
-        el.querySelector('#et-cost').textContent = has('#et-rate') ? `Cost: ${fmtMoney(Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100)}`
+        el.querySelector('#et-cost').textContent = has('#et-costv') ? '' : has('#et-rate') ? `Cost: ${fmtMoney(Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100)}`
           : has('#et-fare') ? `Cost: ${fmtMoney(Number(v('#et-fare')) || 0)}` : 'Cost: none (paid via the driver)';
       };
-      el.querySelector('#et-km').oninput = upd; if (has('#et-rate')) el.querySelector('#et-rate').oninput = upd; if (has('#et-fare')) el.querySelector('#et-fare').oninput = upd; upd();
+      const recalc = () => { if (has('#et-costv')) el.querySelector('#et-costv').value = Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100; upd(); };
+      el.querySelector('#et-km').oninput = has('#et-rate') ? recalc : upd; if (has('#et-rate')) el.querySelector('#et-rate').oninput = recalc; if (has('#et-fare')) el.querySelector('#et-fare').oninput = upd; upd();
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-yes]').onclick = async () => {
-        const km = Number(v('#et-km')), rate = has('#et-rate') ? Number(v('#et-rate')) : null, fare = has('#et-fare') ? Number(v('#et-fare')) : null;
+        const km = Number(v('#et-km')), rate = has('#et-rate') ? Number(v('#et-rate')) : null, fare = has('#et-fare') ? Number(v('#et-fare')) : has('#et-costv') ? Number(v('#et-costv')) : null;
         if (!(km >= 0) || (rate != null && !(rate >= 0)) || (fare != null && !(fare >= 0))) { toast('Enter valid numbers', true); return; }
         try {
           await editTrip(t, { km, ratePerKm: rate, fare, siteId: v('#et-site'), vehicle: v('#et-veh').trim(), purpose: v('#et-pur').trim(), note: v('#et-note').trim() });

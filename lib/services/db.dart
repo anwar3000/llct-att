@@ -875,6 +875,58 @@ class Db {
     return pts.map((m) => (lat: (m['lat'] as num).toDouble(), lng: (m['lng'] as num).toDouble())).toList();
   }
 
+  /// Admin correction of a trip / ride. Keeps the GPS distance it replaced the first time.
+  static Future<void> adminEditTrip({
+    required Trip trip,
+    required double km,
+    required double cost,
+    Site? site,
+    required String purpose,
+    required String note,
+    required AppUser by,
+  }) {
+    return trips.doc(trip.id).update({
+      'distanceM': (km * 1000).round(),
+      'cost': trip.isWithDriver ? 0 : (cost * 100).round() / 100,
+      'siteId': site?.id ?? '',
+      'siteName': site?.name ?? '',
+      'purpose': purpose,
+      'note': note,
+      'editedAt': FieldValue.serverTimestamp(),
+      'editedBy': by.name,
+      if ((km * 1000).round() != trip.distanceM.round()) 'originalDistanceM': trip.distanceM,
+    });
+  }
+
+  /// Ends a trip someone forgot to stop, at its last GPS point.
+  static Future<void> adminEndTrip(Trip t, AppUser by, double rate) {
+    final end = DateTime.now();
+    return trips.doc(t.id).update({
+      'status': 'done',
+      'endAt': Timestamp.fromDate(end),
+      'endLat': t.lastLat,
+      'endLng': t.lastLng,
+      'siteId': t.siteId.isNotEmpty ? t.siteId : t.startSiteId,
+      'siteName': t.siteName.isNotEmpty ? t.siteName : t.startSiteName,
+      'durationMin': end.difference(t.startAt).inMinutes,
+      'cost': t.isWithDriver ? 0 : (t.cost ?? (t.isTaxi ? 0 : (t.km * rate * 100).round() / 100)),
+      'note': 'Ended by ${by.name}',
+    });
+  }
+
+  /// Admin: deletes a trip and its GPS route.
+  static Future<void> deleteTrip(String id) async {
+    final pts = await trips.doc(id).collection('points').get();
+    for (var i = 0; i < pts.docs.length; i += 400) {
+      final b = _fs.batch();
+      for (final d in pts.docs.skip(i).take(400)) {
+        b.delete(d.reference);
+      }
+      await b.commit();
+    }
+    await trips.doc(id).delete();
+  }
+
   static Stream<List<DriverPayment>> allDriverPayments() => _fs
       .collection('driverPayments')
       .snapshots()
