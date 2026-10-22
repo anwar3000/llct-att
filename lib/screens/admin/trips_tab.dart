@@ -87,13 +87,20 @@ class _TripsTabState extends State<TripsTab> {
     super.dispose();
   }
 
+  /// Driver trip: km × driver's rate. Company-driver ride: km × that driver's rate. Taxi: the fare.
   double _costOf(Trip t) {
-    if (t.isWithDriver) return 0;
     if (t.cost != null) return t.cost!;
     if (t.isTaxi) return 0;
-    final u = widget.live.userById(t.employeeId);
-    return t.km * (u?.tripRatePerKm ?? 0);
+    final u = widget.live.userById(t.isWithDriver ? t.driverId : t.employeeId);
+    return t.km * (t.ratePerKm ?? u?.tripRatePerKm ?? 0);
   }
+
+  /// "Company driver: Basheer · DXB 1234" / "Taxi: DXB T 12345" / "Driver trip · DXB 777".
+  String _who(Trip t) => t.isWithDriver
+      ? 'Company driver: ${t.driverName.isEmpty ? '—' : t.driverName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'
+      : t.isTaxi
+          ? (t.vehicle.isEmpty || t.vehicle == 'Taxi' ? 'Taxi' : t.vehicle)
+          : 'Driver trip${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}';
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +207,14 @@ class _TripsTabState extends State<TripsTab> {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(t.employeeName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Row(children: [
+                    Icon(t.isTaxi ? Icons.local_taxi : (t.isWithDriver ? Icons.directions_car : Icons.local_shipping), size: 14, color: _purple),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(_who(t), maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: _purple)),
+                    ),
+                  ]),
                   Text('${fmtDateShort(t.startLocal)} · ${fmtTime(t.startLocal)}–${t.isActive ? 'now' : fmtTime(t.endLocal)} · ${fmtDuration(t.duration)}',
                       style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                 ]),
@@ -225,8 +240,7 @@ class _TripsTabState extends State<TripsTab> {
                 child: Text(
                   [
                     if (t.siteName.isNotEmpty) 'Charged to ${t.siteName}',
-                    if (t.isWithDriver && t.driverName.isNotEmpty) 'Driver ${t.driverName}',
-                    if (!t.isRide && t.vehicle.isNotEmpty) t.vehicle,
+
                     if (t.purpose.isNotEmpty) t.purpose,
                   ].join(' · '),
                   maxLines: 2,
@@ -237,8 +251,7 @@ class _TripsTabState extends State<TripsTab> {
               Text('${t.km.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w800)),
               if (_money) ...[
                 const SizedBox(width: 10),
-                Text(t.isWithDriver ? 'via driver' : fmtMoney((cost * 100).round() / 100),
-                    style: TextStyle(fontWeight: FontWeight.w800, color: t.isWithDriver ? AppColors.muted : AppColors.accentDark)),
+                Text(fmtMoney((cost * 100).round() / 100), style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.accentDark)),
               ],
             ]),
             if (t.costEntered)
@@ -297,7 +310,7 @@ class _TripsTabState extends State<TripsTab> {
     final purposeC = TextEditingController(text: t.purpose);
     final noteC = TextEditingController(text: t.note);
     final user = widget.live.userById(t.employeeId);
-    final rate = t.ratePerKm ?? user?.tripRatePerKm;
+    final rate = t.ratePerKm ?? (t.isWithDriver ? widget.live.userById(t.driverId)?.tripRatePerKm : user?.tripRatePerKm);
     String siteId = t.siteId;
     final sites = widget.live.sites.where((x) => x.approved || x.id == t.siteId).toList();
     String? err;
@@ -316,7 +329,7 @@ class _TripsTabState extends State<TripsTab> {
                 decoration: const InputDecoration(labelText: 'Distance (km)', prefixIcon: Icon(Icons.straighten)),
               ),
               const SizedBox(height: 10),
-              if (!t.isWithDriver) ...[
+              ...[
                 TextField(
                   controller: costC,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -325,7 +338,7 @@ class _TripsTabState extends State<TripsTab> {
                       prefixIcon: const Icon(Icons.payments_outlined),
                       errorText: err),
                 ),
-                if (!t.isRide && rate != null && rate > 0)
+                if (!t.isTaxi && rate != null && rate > 0)
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
@@ -337,12 +350,7 @@ class _TripsTabState extends State<TripsTab> {
                     ),
                   ),
                 const SizedBox(height: 6),
-              ] else
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 10),
-                  child: Text('Ride with a company driver — paid through the driver’s trip.',
-                      style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
-                ),
+              ],
               DropdownButtonFormField<String>(
                 value: sites.any((x) => x.id == siteId) ? siteId : '',
                 isExpanded: true,
@@ -365,7 +373,7 @@ class _TripsTabState extends State<TripsTab> {
               style: kDialogButton,
               onPressed: () {
                 final km = double.tryParse(kmC.text.trim());
-                final cost = t.isWithDriver ? 0.0 : double.tryParse(costC.text.trim());
+                final cost = double.tryParse(costC.text.trim());
                 if (km == null || km < 0 || cost == null || cost < 0) {
                   set(() => err = 'Enter valid numbers');
                   return;
@@ -383,7 +391,7 @@ class _TripsTabState extends State<TripsTab> {
       await Db.adminEditTrip(
         trip: t,
         km: double.parse(kmC.text.trim()),
-        cost: t.isWithDriver ? 0 : double.parse(costC.text.trim()),
+        cost: double.parse(costC.text.trim()),
         site: widget.live.siteById(siteId),
         purpose: purposeC.text.trim(),
         note: noteC.text.trim(),
@@ -414,6 +422,12 @@ class _TripsTabState extends State<TripsTab> {
             borderRadius: BorderRadius.circular(14),
             child: SizedBox(height: 260, child: _RouteMap(t)),
           ),
+          if (!t.isActive && t.pointsCount <= 2)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('Very few GPS points: the ride was very short, or the phone’s location was off during the ride.',
+                  style: TextStyle(fontSize: 12, color: AppColors.warning)),
+            ),
           const SizedBox(height: 10),
           InfoRow(Icons.event, 'Date', '${fmtDate(t.startLocal)} ${tzLabel(t.tz)}'),
           InfoRow(Icons.schedule, 'Time', '${fmtTime(t.startLocal)} – ${t.isActive ? 'in progress' : fmtTime(t.endLocal)} (${fmtDuration(t.duration)})'),
@@ -421,13 +435,14 @@ class _TripsTabState extends State<TripsTab> {
           InfoRow(Icons.flag_outlined, 'Drop-off', t.isActive ? '—' : (t.endSiteName.isEmpty ? 'GPS location' : t.endSiteName)),
           InfoRow(Icons.location_city_outlined, 'Charged to', t.siteName.isEmpty ? '—' : t.siteName),
           InfoRow(Icons.straighten, 'Distance', '${t.km.toStringAsFixed(2)} km (${t.pointsCount} GPS points)'),
-          if (t.isWithDriver) InfoRow(Icons.person_pin, 'Driver', t.driverName),
+          if (t.isWithDriver) InfoRow(Icons.person_pin, 'Company driver', '${t.driverName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'),
+          if (t.isTaxi) InfoRow(Icons.local_taxi, 'Taxi', t.vehicle.isEmpty || t.vehicle == 'Taxi' ? 'Not entered' : t.vehicle),
           if (!t.isRide && t.vehicle.isNotEmpty) InfoRow(Icons.directions_car_outlined, 'Vehicle', t.vehicle),
           if (t.purpose.isNotEmpty) InfoRow(Icons.notes, 'Purpose', t.purpose),
           if (_money) ...[
-            if (!t.isRide && t.ratePerKm != null) InfoRow(Icons.speed, 'Rate', '${fmtMoney(t.ratePerKm!)} / km'),
+            if (!t.isTaxi && t.ratePerKm != null) InfoRow(Icons.speed, 'Rate', '${fmtMoney(t.ratePerKm!)} / km'),
             InfoRow(Icons.payments_outlined, 'Cost',
-                t.isWithDriver ? 'Paid through the driver’s trip' : '${fmtMoney((_costOf(t) * 100).round() / 100)}${t.costEntered ? ' (entered by driver)' : (t.isActive ? ' (estimate)' : '')}'),
+                '${fmtMoney((_costOf(t) * 100).round() / 100)}${t.costEntered ? ' (entered by driver)' : (t.isActive ? ' (estimate)' : '')}'),
           ],
           if (t.note.isNotEmpty) InfoRow(Icons.sticky_note_2_outlined, 'Note', t.note),
           if (t.editedBy.isNotEmpty) InfoRow(Icons.edit_note, 'Edited by', t.editedBy),
@@ -525,8 +540,13 @@ class _RouteMapState extends State<_RouteMap> {
         osmTiles(),
         if (pts.length > 1) PolylineLayer(polylines: [Polyline(points: pts, strokeWidth: 5, color: _purple)]),
         MarkerLayer(markers: [
-          Marker(point: pts.first, width: 90, height: 46, alignment: Alignment.topCenter, child: _pin('Pick-up', AppColors.success)),
-          if (pts.length > 1)
+          // Pick-up and drop-off at the same spot (very short ride) → one combined pin, so neither hides the other.
+          if (pts.length == 1 || Distance()(pts.first, pts.last) < 30)
+            Marker(point: pts.first, width: 150, height: 46, alignment: Alignment.topCenter,
+                child: _pin(t.isActive ? 'Pick-up · now' : 'Pick-up & drop-off', AppColors.success))
+          else
+            Marker(point: pts.first, width: 90, height: 46, alignment: Alignment.topCenter, child: _pin('Pick-up', AppColors.success)),
+          if (pts.length > 1 && Distance()(pts.first, pts.last) >= 30)
             Marker(point: pts.last, width: 90, height: 46, alignment: Alignment.topCenter,
                 child: _pin(t.isActive ? 'Now' : 'Drop-off', t.isActive ? _purple : AppColors.danger)),
         ]),
@@ -570,7 +590,7 @@ class _AccountsState extends State<_Accounts> {
     super.initState();
     _subs.add(Db.doneTripsAll().listen((l) {
       if (mounted) setState(() {
-        _done = l.where((t) => !t.isRide).toList();
+        _done = l.where((t) => !t.isTaxi).toList();
         _loaded = true;
       });
     }, onError: (_) {
@@ -640,7 +660,8 @@ class _AccountsState extends State<_Accounts> {
     final drivers = widget.live.users.where((u) => u.isDriver).toList();
     if (drivers.isEmpty) return const Card(child: EmptyState(icon: Icons.no_crash_outlined, title: 'No drivers yet'));
     final rows = drivers.map((u) {
-      final tr = _done.where((t) => t.employeeId == u.id).toList();
+      // Driver's own trips + staff rides with this driver (costed at the driver's rate).
+      final tr = _done.where((t) => (!t.isRide && t.employeeId == u.id) || (t.isWithDriver && t.driverId == u.id)).toList();
       final pays = _pays.where((p) => p.employeeId == u.id).toList();
       final earned = tr.fold<double>(0, (a, t) => a + (t.cost ?? 0));
       final paid = pays.fold<double>(0, (a, p) => a + p.amount);

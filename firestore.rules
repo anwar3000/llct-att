@@ -66,7 +66,8 @@ service cloud.firestore {
     // ------------------------------------------------------------ driver trips
     // Drivers start/stop trips from the app; GPS route points are stored under each trip.
     match /trips/{id} {
-      allow read: if isManagement() || owns();
+      // A driver can also see staff rides taken with them (they count in the driver's account).
+      allow read: if isManagement() || owns() || (isActive() && resource.data.get('driverId', '') == request.auth.uid);
       // kind: 'driver' (a driver's own paid trip — driver profile only), 'taxi' or 'withDriver' (an employee's ride).
       allow create: if createsOwn() && request.resource.data.status == 'active'
                     && (request.resource.data.get('kind', 'driver') in ['taxi', 'withDriver']
@@ -75,7 +76,7 @@ service cloud.firestore {
                       && request.resource.data.employeeId == request.auth.uid
                       && onlyChanges(['distanceM', 'pointsCount', 'lastLat', 'lastLng', 'lastAt', 'endAt', 'endLat', 'endLng',
                            'endSiteId', 'endSiteName', 'siteId', 'siteName', 'durationMin', 'ratePerKm', 'cost', 'status',
-                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt']))
+                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt', 'vehicle']))
                     // A driver can enter / change the cost of their own trip at any time (flagged for admin).
                     || (owns() && resource.data.get('kind', 'driver') == 'driver'
                         && request.resource.data.employeeId == request.auth.uid

@@ -53,9 +53,9 @@ export function mount(el, _p, { setHeader }) {
     const drivers = store.users.filter((u) => u.isDriver);
     const all = acctTrips || [];
     const rows = drivers.map((u) => {
-      const tr = all.filter((t) => t.employeeId === u.id);
+      const tr = all.filter((t) => (t.kind === 'withDriver' ? t.driverId : t.employeeId) === u.id);
       const pays = store.payments.filter((p) => p.employeeId === u.id);
-      const earned = tr.reduce((a, t) => a + (t.cost || 0), 0);
+      const earned = tr.reduce((a, t) => a + tripCost(t), 0);
       const paid = pays.reduce((a, p) => a + p.amount, 0);
       return { u, tr, pays, earned, paid, balance: Math.round((earned - paid) * 100) / 100, km: tr.reduce((a, t) => a + tripKm(t), 0),
         edited: tr.filter((t) => t.costEntered).length };
@@ -154,13 +154,13 @@ export function mount(el, _p, { setHeader }) {
         ${list.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th>' : ''}<th></th></tr></thead><tbody>
         ${list.map((t) => `<tr class="click" data-row="${t.id}">
           <td>${esc(t.date.slice(5))}</td>
-          <td><b>${esc(t.employeeName)}</b>${t.vehicle && t.kind !== 'taxi' ? `<div class="small muted">${esc(t.vehicle)}</div>` : ''}</td>
+          <td><b>${esc(t.employeeName)}</b><div class="small" style="color:#7B4FC9;font-weight:600">${esc(t.kind === 'withDriver' ? `Driver: ${t.driverName || '—'}` : t.kind === 'taxi' ? (t.vehicle && t.vehicle !== 'Taxi' ? t.vehicle : 'Taxi') : (t.vehicle || 'Driver trip'))}</div></td>
           <td>${kindPill(t)}</td>
           <td>${esc(t.startSiteName || 'GPS')} → ${t.status === 'active' ? '<i class="muted">driving…</i>' : esc(t.endSiteName || 'GPS')}${t.purpose ? `<div class="small muted">${esc(t.purpose)}</div>` : ''}</td>
           <td>${t.siteId ? `<a href="#/sites/${t.siteId}">${esc(t.siteName)}</a>` : t.status === 'active' ? '<span class="muted">—</span>' : '<span class="muted">No site</span>'}</td>
           <td class="small">${fmtTime(atTz(t.startAt, t.tz))} – ${t.endAt ? fmtTime(atTz(t.endAt, t.tz)) : 'now'}<div class="muted">${fmtMins(tripMinutes(t))} · ${tzLabel(t.tz)}</div></td>
           <td class="num"><b>${tripKm(t).toFixed(1)}</b>${t.editedBy ? `<div class="small muted" title="Edited by ${esc(t.editedBy)}">edited</div>` : ''}</td>
-          ${admin ? `<td class="num">${t.kind === 'withDriver' ? '<span class="small muted" title="Paid through the driver’s own trip">via driver</span>' : t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' && !t.costEntered ? '<div class="small muted">est.</div>' : ''}${t.costEntered ? '<div class="small" style="color:#a8640f" title="Cost entered by the driver">entered</div>' : ''}</td>` : ''}
+          ${admin ? `<td class="num">${t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' && !t.costEntered ? '<div class="small muted">est.</div>' : ''}${t.costEntered ? '<div class="small" style="color:#a8640f" title="Cost entered by the driver">entered</div>' : ''}</td>` : ''}
           <td style="white-space:nowrap"><button class="btn sm ghost icon" data-route="${t.id}" title="Route map">${icon('map', 15)}</button>${admin ? `<button class="btn sm ghost icon" data-edit="${t.id}" title="Edit">${icon('edit', 15)}</button><button class="btn sm ghost icon" data-del="${t.id}" title="Delete">${icon('trash', 15)}</button>` : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : `<div class="empty"><b>No trips in this period</b>Drivers start and stop trips from the app.</div>`}
       </div>
@@ -259,7 +259,7 @@ export async function routeDialog(t) {
         <div><span class="muted">Pick-up</span> <b>${esc(t.startSiteName || 'GPS location')}</b></div>
         <div><span class="muted">Drop-off</span> <b>${esc(t.status === 'active' ? '—' : (t.endSiteName || 'GPS location'))}</b></div>
         <div><span class="muted">Charged to</span> <b>${esc(t.siteName || '—')}</b></div>
-        ${isAdmin() ? `<div><span class="muted">Cost</span> <b>${t.kind === 'withDriver' ? 'paid via the driver’s trip' : fmtMoney(tripCost(t))}</b>${t.costEntered ? ' <span class="small" style="color:#a8640f">entered by driver</span>' : ''}${t.ratePerKm != null ? ` <span class="small muted">· ${t.ratePerKm} AED/km</span>` : ''}</div>` : ''}
+        ${isAdmin() ? `<div><span class="muted">Cost</span> <b>${fmtMoney(tripCost(t))}</b>${t.costEntered ? ' <span class="small" style="color:#a8640f">entered by driver</span>' : ''}${t.ratePerKm != null ? ` <span class="small muted">· ${t.ratePerKm} AED/km</span>` : ''}</div>` : ''}
         ${t.purpose ? `<div><span class="muted">Purpose</span> <b>${esc(t.purpose)}</b></div>` : ''}
         ${t.note ? `<div><span class="muted">Note</span> ${esc(t.note)}</div>` : ''}
       </div>
@@ -282,8 +282,15 @@ export async function routeDialog(t) {
   const pin = (ll, text, color) => L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [80, 40], iconAnchor: [40, 38],
     html: `<div style="display:flex;flex-direction:column;align-items:center"><span style="background:${color};color:#fff;font:800 11px Inter,sans-serif;padding:2px 6px;border-radius:6px;white-space:nowrap">${text}</span><span style="width:16px;height:16px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span></div>` }) }).addTo(map);
   if (line.length) {
-    pin(line[0], 'Pick-up', '#2E9E6A');
-    if (line.length > 1) pin(line[line.length - 1], t.status === 'active' ? 'Now' : 'Drop-off', t.status === 'active' ? TRIP_COLOR : '#D64545');
+    const lastP = line[line.length - 1];
+    const metres = (a, b) => Math.hypot((a[0] - b[0]) * 111320, (a[1] - b[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180));
+    const same = line.length === 1 || metres(line[0], lastP) < 30;
+    // Pick-up and drop-off at the same spot (very short ride): one combined pin so neither hides the other.
+    if (same) pin(line[0], t.status === 'active' ? 'Pick-up · now' : 'Pick-up & drop-off', '#2E9E6A');
+    else {
+      pin(line[0], 'Pick-up', '#2E9E6A');
+      pin(lastP, t.status === 'active' ? 'Now' : 'Drop-off', t.status === 'active' ? TRIP_COLOR : '#D64545');
+    }
     setTimeout(() => fitTo(map, line), 80);
   }
   el.querySelector('#rt-info').textContent = `${pts.length <= 2 ? 'Few GPS points during the ride (phone GPS off, or app closed on iPhone) — showing pick-up and drop-off. ' : ''}${pts.length} GPS points recorded${pts.length && pts[0].at ? ` · ${fmtTime(pts[0].at)} – ${fmtTime(pts[pts.length - 1].at)} (your time)` : ''}`;
@@ -296,10 +303,9 @@ function editDialog(t, onDone) {
       <div class="grid cols-2" style="gap:10px">
         <label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${tripKm(t).toFixed(2)}"></label>
         ${t.kind === 'taxi' ? `<label class="f"><span>Taxi fare (AED)</span><input id="et-fare" type="number" min="0" step="0.01" value="${t.cost ?? 0}"></label>`
-          : t.kind === 'withDriver' ? '<div class="small muted" style="padding-top:22px">Ride with a company driver — paid through the driver’s trip.</div>'
-          : `<label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.employeeId)}"></label>
+          : `<label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.kind === 'withDriver' ? t.driverId : t.employeeId)}"></label>
              <label class="f"><span>Cost (AED) — km × rate, or type an amount</span><input id="et-costv" type="number" min="0" step="0.01" value="${tripCost(t)}"></label>`}
-        <label class="f"><span>Vehicle</span><input id="et-veh" value="${esc(t.vehicle)}"></label>
+        <label class="f"><span>${t.kind === 'taxi' ? 'Taxi no. / company' : 'Vehicle'}</span><input id="et-veh" value="${esc(t.vehicle)}"></label>
         <label class="f"><span>Purpose</span><input id="et-pur" value="${esc(t.purpose)}"></label>
       </div>
       <label class="f"><span>Charge to site</span><select id="et-site"><option value="">— No site —</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === t.siteId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
@@ -357,8 +363,9 @@ function payDialog(u, balance) {
 /** Ledger: trips (+) and payments (−) in date order with a running balance. */
 function statementRows(trips, pays) {
   const items = [
-    ...trips.map((t) => ({ date: t.date, at: t.startAt || new Date(0), type: 'Trip', desc: `${t.startSiteName || 'GPS'} → ${t.endSiteName || 'GPS'}${t.purpose ? ` · ${t.purpose}` : ''}`,
-      km: Math.round(tripKm(t) * 10) / 10, plus: t.cost || 0, minus: 0, flag: t.costEntered ? 'cost entered by driver' : '' })),
+    ...trips.map((t) => ({ date: t.date, at: t.startAt || new Date(0), type: t.kind === 'withDriver' ? 'Staff ride' : 'Trip',
+      desc: `${t.kind === 'withDriver' ? `${t.employeeName}: ` : ''}${t.startSiteName || 'GPS'} → ${t.endSiteName || 'GPS'}${t.purpose ? ` · ${t.purpose}` : ''}`,
+      km: Math.round(tripKm(t) * 10) / 10, plus: tripCost(t), minus: 0, flag: t.costEntered ? 'cost entered by driver' : '' })),
     ...pays.map((p) => ({ date: p.date, at: new Date(`${p.date}T23:59:00`), type: 'Payment', desc: [p.method, p.note].filter(Boolean).join(' · '), km: '', plus: 0, minus: p.amount, flag: p.createdBy ? `by ${p.createdBy}` : '' })),
   ].sort((a, b) => a.at - b.at);
   let bal = 0;

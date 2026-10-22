@@ -221,11 +221,11 @@ export const TRIP_KINDS = { driver: 'Driver trip', taxi: 'Taxi', withDriver: 'Wi
 export const tripKindLabel = (t) => (t.kind === 'withDriver' && t.driverName ? `With ${t.driverName}` : TRIP_KINDS[t.kind] || 'Driver trip');
 /**
  * Cost of a trip. Driver trip: saved cost, or (still running) km × the rate that will apply.
- * Taxi: the fare entered. Ride with a company driver: 0 — it's paid through the driver's own trip.
+ * Taxi: the fare entered. Ride with a company driver: km × that driver's rate.
  */
 export const tripCost = (t) => {
-  if (t.kind === 'withDriver') return 0;
   if (t.kind === 'taxi') return t.cost || 0;
+  if (t.kind === 'withDriver') return t.cost != null ? t.cost : Math.round(tripKm(t) * (t.ratePerKm ?? tripRateFor(t.driverId)) * 100) / 100;
   return t.cost != null ? t.cost : Math.round(tripKm(t) * tripRateFor(t.employeeId) * 100) / 100;
 };
 export const tripRateFor = (uid) => {
@@ -255,9 +255,9 @@ export async function tripPoints(id) {
 /** Admin correction: distance, rate, charged site, purpose. Cost is recalculated. */
 export async function editTrip(t, { km, ratePerKm, fare, siteId, purpose, vehicle, note }) {
   const site = siteId ? store.site(siteId) : null;
-  const rate = t.kind === 'driver' ? (ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.employeeId))) : null;
-  // Taxi: fare. Driver trip: the cost typed in the edit box (defaults to km × rate). With driver: 0.
-  const cost = t.kind === 'withDriver' ? 0 : fare != null ? Math.round(fare * 100) / 100 : t.kind === 'taxi' ? (t.cost ?? 0) : Math.round(km * rate * 100) / 100;
+  const rate = t.kind !== 'taxi' ? (ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.kind === 'withDriver' ? t.driverId : t.employeeId))) : null;
+  // Taxi: fare. Driver trip / ride with driver: the cost typed in the edit box (defaults to km × rate).
+  const cost = fare != null ? Math.round(fare * 100) / 100 : t.kind === 'taxi' ? (t.cost ?? 0) : Math.round(km * rate * 100) / 100;
   const data = {
     distanceM: Math.round(km * 1000), ratePerKm: rate, cost,
     siteId: siteId || '', siteName: site?.name || (siteId ? t.siteName : ''),
@@ -295,7 +295,10 @@ export async function finishedTripsFor(ids) {
   const out = [];
   for (let i = 0; i < ids.length; i += 30) {
     const snap = await getDocs(query(C('trips'), where('employeeId', 'in', ids.slice(i, i + 30))));
-    out.push(...snap.docs.map(mapTrip).filter((t) => t.status === 'done'));
+    out.push(...snap.docs.map(mapTrip).filter((t) => t.status === 'done' && t.kind === 'driver'));
+    // Staff rides with these drivers count in the drivers' accounts too.
+    const rides = await getDocs(query(C('trips'), where('driverId', 'in', ids.slice(i, i + 30))));
+    out.push(...rides.docs.map(mapTrip).filter((t) => t.status === 'done' && t.kind === 'withDriver'));
   }
   return out.sort((a, b) => (a.startAt || 0) - (b.startAt || 0));
 }

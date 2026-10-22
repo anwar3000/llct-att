@@ -512,7 +512,7 @@ export function tripLogSheet(trips, name = 'Trip log') {
   const rows = trips.map((t) => {
     const r = [t.date, t.employeeName, tripKindLabel(t), t.vehicle, t.purpose, t2(tripLocal(t, t.startAt)), t.endAt ? t2(tripLocal(t, t.endAt)) : 'IN PROGRESS',
       t.startSiteName || 'GPS location', t.endAt ? (t.endSiteName || 'GPS location') : '', t.siteName || '—', fmtMins(tripMinutes(t)), km2(t.distanceM)];
-    if (admin) r.push(t.ratePerKm ?? '', t.kind === 'withDriver' ? 'via driver' : money(tripCost(t)));
+    if (admin) r.push(t.ratePerKm ?? '', money(tripCost(t)));
     r.push(gps(t.startLat, t.startLng), gps(t.endLat ?? t.lastLat, t.endLng ?? t.lastLng), tzLabel(t.tz), [t.note, t.editedBy ? `edited by ${t.editedBy}` : ''].filter(Boolean).join(' · '));
     return r;
   });

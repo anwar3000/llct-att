@@ -57,6 +57,8 @@ class _RideCardState extends State<RideCard> {
     if (choice == null || !mounted) return;
     setState(() => _busy = true);
     try {
+      // Company driver: the ride is costed at that driver's rate per km.
+      final rate = choice.driver == null ? null : await Db.tripRate(choice.driver!);
       await TripService.instance.start(
         user: widget.me,
         vehicle: choice.kind == 'taxi' ? 'Taxi' : (choice.driver?.vehicle ?? ''),
@@ -64,6 +66,7 @@ class _RideCardState extends State<RideCard> {
         sites: widget.sites,
         kind: choice.kind,
         driver: choice.driver,
+        ratePerKm: rate,
       );
       if (mounted) showSnack(context, choice.kind == 'taxi' ? 'Taxi ride started' : 'Ride with ${choice.driver?.name} started');
     } on LocationException catch (e) {
@@ -77,15 +80,27 @@ class _RideCardState extends State<RideCard> {
 
   Future<void> _end(Trip t) async {
     double? fare;
+    String? taxiNo;
     if (t.isTaxi) {
-      fare = await _askFare();
-      if (fare == null) return;
-    } else if (!await confirm(context, 'End ride', 'End this ride with ${t.driverName.isEmpty ? 'the driver' : t.driverName}?', ok: 'End ride')) {
-      return;
+      final r = await _askFare();
+      if (r == null) return;
+      fare = r.fare;
+      taxiNo = r.taxiNo.isEmpty ? null : 'Taxi ${r.taxiNo}';
+    } else {
+      final km = TripService.instance.distance.value / 1000;
+      final rate = t.ratePerKm ?? 0;
+      if (!await confirm(
+          context,
+          'End ride',
+          'End this ride with ${t.driverName.isEmpty ? 'the driver' : t.driverName}?\n\n'
+              '${km.toStringAsFixed(1)} km${rate > 0 ? ' × ${fmtMoney(rate)}/km = ${fmtMoney((km * rate * 100).round() / 100)}' : ''}',
+          ok: 'End ride')) {
+        return;
+      }
     }
     setState(() => _busy = true);
     try {
-      await TripService.instance.stop(user: widget.me, trip: t, sites: widget.sites, fare: fare);
+      await TripService.instance.stop(user: widget.me, trip: t, sites: widget.sites, fare: fare, vehicle: taxiNo);
       if (mounted) showSnack(context, 'Ride saved${fare != null ? ' · ${fmtMoney(fare)}' : ''}');
     } catch (e) {
       if (mounted) showSnack(context, 'Could not end ride: $e', error: true);
@@ -94,10 +109,11 @@ class _RideCardState extends State<RideCard> {
     }
   }
 
-  Future<double?> _askFare() async {
+  Future<({double fare, String taxiNo})?> _askFare() async {
     final ctrl = TextEditingController();
+    final taxi = TextEditingController();
     String? err;
-    return showDialog<double>(
+    return showDialog<({double fare, String taxiNo})>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
@@ -116,6 +132,13 @@ class _RideCardState extends State<RideCard> {
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
               decoration: InputDecoration(labelText: 'Fare ($kCurrency)', prefixIcon: const Icon(Icons.payments_outlined), errorText: err),
             ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: taxi,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                  labelText: 'Taxi no. / company (optional)', hintText: 'e.g. DXB T 12345, Careem', prefixIcon: Icon(Icons.local_taxi_outlined)),
+            ),
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
@@ -127,7 +150,7 @@ class _RideCardState extends State<RideCard> {
                   set(() => err = 'Enter the fare');
                   return;
                 }
-                Navigator.pop(c, v);
+                Navigator.pop(c, (fare: v, taxiNo: taxi.text.trim()));
               },
               child: const Text('SAVE & END'),
             ),

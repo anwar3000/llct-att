@@ -551,6 +551,11 @@ function startTrip() {
     },
   });
 }
+// A company driver's rate per km: their own, or the company rate.
+async function driverRate(d) {
+  if (typeof d?.tripRatePerKm === 'number') return d.tripRatePerKm;
+  try { const g = await getDoc(doc(db, 'settings', 'general')); return typeof g.data()?.tripRatePerKm === 'number' ? g.data().tripRatePerKm : 0; } catch { return 0; }
+}
 async function beginTrip({ kind, vehicle = '', purpose = '', driver = null }) {
   busy('Getting your GPS location…');
   try {
@@ -562,6 +567,7 @@ async function beginTrip({ kind, vehicle = '', purpose = '', driver = null }) {
     b.set(ref, {
       employeeId: S.me.id, employeeName: S.me.name, vehicle, purpose, status: 'active', kind,
       driverId: driver?.id || '', driverName: driver?.name || '',
+      ...(kind === 'withDriver' ? { ratePerKm: await driverRate(driver) } : {}),
       startAt: Timestamp.fromDate(now), startServer: serverTimestamp(), tz: tzNow(), date: dateKey(now), month: monthKey(now),
       startLat: p.lat, startLng: p.lng, lastLat: p.lat, lastLng: p.lng, lastAt: serverTimestamp(),
       startSiteId: site?.id || '', startSiteName: site?.name || '', distanceM: 0, pointsCount: 1, platform: isIOS ? 'iphone' : 'web',
@@ -578,6 +584,7 @@ function askFare(km) {
       title: 'Taxi fare',
       body: `<div class="small muted" style="margin-bottom:8px">Distance ${km.toFixed(1)} km · enter the amount you paid</div>
         <label class="f"><span>Fare (${CURRENCY})</span><input id="fare" type="number" inputmode="decimal" min="0" step="0.01"></label>
+        <label class="f"><span>Taxi no. / company (optional)</span><input id="taxi-no" placeholder="e.g. DXB T 12345, Careem" autocapitalize="characters"></label>
         <div class="error" id="fare-err"></div>`,
       foot: '<button class="st-btn" data-no>Cancel</button><button class="st-btn primary" data-yes style="flex:1">SAVE &amp; END</button>',
       onMount: (el, close) => {
@@ -587,6 +594,8 @@ function askFare(km) {
         el.querySelector('[data-yes]').onclick = () => {
           const v = Number(inp.value);
           if (!(v > 0)) { el.querySelector('#fare-err').textContent = 'Enter the fare'; return; }
+          const no = el.querySelector('#taxi-no').value.trim();
+          S._taxiNo = no ? `Taxi ${no}` : '';
           close(); resolve(v);
         };
       },
@@ -604,7 +613,7 @@ async function stopTrip() {
   } else if (kind === 'driver') {
     fare = await askCost({ title: 'End trip — cost', ok: 'SAVE & END TRIP', initial: t.costEntered ? t.cost : estCost(t), km: tripKmOf(t) });
     if (fare == null) return;
-  } else if (!await confirmBox('End ride', `End this ride with ${t.driverName || 'the driver'}?`, { ok: 'End ride', danger: true })) return;
+  } else if (!await confirmBox('End ride', `End this ride with ${t.driverName || 'the driver'}?\n\n${tripKmOf(t).toFixed(1)} km${t.ratePerKm ? ` × ${fmtMoney(t.ratePerKm)}/km = ${fmtMoney(Math.round(tripKmOf(t) * t.ratePerKm * 100) / 100)}` : ''}`, { ok: 'End ride', danger: true })) return;
   busy('Saving…');
   try {
     let dist = S.tw && S.tw.id === t.id ? S.tw.dist : t.distanceM;
@@ -628,8 +637,10 @@ async function stopTrip() {
       endLat: p?.lat ?? null, endLng: p?.lng ?? null, endSiteId: site?.id || '', endSiteName: site?.name || '',
       siteId: site?.id || t.startSiteId, siteName: site?.name || t.startSiteName,
       distanceM: Math.round(dist), pointsCount: points, durationMin: Math.round((now - t.startAt) / 60000),
-      ratePerKm: rate,
-      cost: kind === 'withDriver' ? 0 : Math.round(fare * 100) / 100,
+      ratePerKm: kind === 'withDriver' ? (t.ratePerKm ?? null) : rate,
+      // Ride with a company driver: km × that driver's rate (saved when the ride started).
+      cost: kind === 'withDriver' ? Math.round((dist / 1000) * (t.ratePerKm || 0) * 100) / 100 : Math.round(fare * 100) / 100,
+      ...(kind === 'taxi' && S._taxiNo ? { vehicle: S._taxiNo } : {}),
       ...(kind === 'driver' ? { costEntered: true } : {}),
     });
     await b.commit();

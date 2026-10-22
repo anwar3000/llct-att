@@ -32,6 +32,11 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 ---
 
 ## What's new
+- **Ride costs and details (v1.6.2):**
+  - **Company-driver rides** are now costed at km × that driver's rate. They show an amount everywhere and count in that driver's account (earned − paid), next to the driver's own trips.
+  - **Taxi rides:** when a taxi ride ends, the employee can enter the taxi number or company with the fare.
+  - **Trip lists and details** show *Company driver: name* or the taxi number.
+  - **Map pins:** when pick-up and drop-off are at the same spot, they show as one *Pick-up & drop-off* pin.
 - **Profile completeness (v1.6.1):** when the app opens, staff and drivers with a missing mobile number, email, passport or Emirates ID see a *Please complete your profile* popup. **Update now** opens the mobile & email form, then their ID documents. The Android app asks each time it opens; the iPhone app asks once a day. Employees can edit their own mobile number and email: tap their profile picture on Android, or open the *Me* tab on iPhone. Admin can set both for anyone in the employee form (app and web). The Firestore rules now let staff change only these two fields on their own profile.
 - **GPS "no activity" rules (v1.6.0):**
   - **Violations:** while an employee is checked in, every full hour with no GPS location counts as one *no activity* violation. This covers GPS off, the app closed, or the phone off. The app shows a popup and a red banner.

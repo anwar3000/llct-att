@@ -54,6 +54,7 @@ class TripService {
     required List<Site> sites,
     String kind = 'driver',
     AppUser? driver,
+    double? ratePerKm,
   }) async {
     final p = await LocationService.current();
     final site = siteAt(p.latitude, p.longitude, sites);
@@ -66,6 +67,7 @@ class TripService {
       site: site,
       kind: kind,
       driver: driver,
+      ratePerKm: ratePerKm,
     );
     _trip = Trip(
       id: id,
@@ -81,6 +83,7 @@ class TripService {
       kind: kind,
       driverId: driver?.id ?? '',
       driverName: driver?.name ?? '',
+      ratePerKm: ratePerKm,
     );
     _points = 1;
     _last = p;
@@ -196,7 +199,7 @@ class TripService {
   /// Ends the trip, works out the drop-off site and the cost.
   /// Driver trip: the cost the driver entered ([fare]), else km × rate. Taxi ride: the [fare] the employee entered. With a company driver: no cost
   /// here (the driver's own trip is what gets paid), so it isn't counted twice.
-  Future<Trip> stop({required AppUser user, required Trip trip, required List<Site> sites, String note = '', double? fare}) async {
+  Future<Trip> stop({required AppUser user, required Trip trip, required List<Site> sites, String note = '', double? fare, String? vehicle}) async {
     if (_trip?.id != trip.id) {
       _trip = trip;
       distance.value = trip.distanceM;
@@ -209,13 +212,15 @@ class TripService {
       if (d != null && d > 0) distance.value += d;
     } catch (_) {}
     final site = p == null ? null : siteAt(p.latitude, p.longitude, sites);
-    final rate = trip.isRide ? null : await Db.tripRate(user);
+    // Ride with a company driver: km × that driver's rate (saved when the ride started).
+    final rate = trip.isTaxi ? null : (trip.isWithDriver ? (trip.ratePerKm ?? 0) : await Db.tripRate(user));
     await Db.endTrip(
       trip: trip,
       distanceM: distance.value,
       points: _points,
       ratePerKm: rate,
-      cost: trip.isWithDriver ? 0 : (fare ?? (trip.isTaxi ? 0 : null)),
+      cost: fare ?? (trip.isTaxi ? 0 : null),
+      vehicle: vehicle,
       costEntered: !trip.isRide && fare != null,
       lat: p?.latitude,
       lng: p?.longitude,

@@ -859,6 +859,13 @@ class Db {
       .snapshots()
       .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
 
+  /// Finished staff rides taken with this driver (they count in the driver's account).
+  static Stream<List<Trip>> ridesWithDriver(String uid) => trips
+      .where('driverId', isEqualTo: uid)
+      .where('status', isEqualTo: 'done')
+      .snapshots()
+      .map((q) => q.docs.map(Trip.fromDoc).toList()..sort((a, b) => b.startAt.compareTo(a.startAt)));
+
   static Stream<List<DriverPayment>> myDriverPayments(String uid) => _fs
       .collection('driverPayments')
       .where('employeeId', isEqualTo: uid)
@@ -908,7 +915,7 @@ class Db {
   }) {
     return trips.doc(trip.id).update({
       'distanceM': (km * 1000).round(),
-      'cost': trip.isWithDriver ? 0 : (cost * 100).round() / 100,
+      'cost': (cost * 100).round() / 100,
       'siteId': site?.id ?? '',
       'siteName': site?.name ?? '',
       'purpose': purpose,
@@ -930,7 +937,7 @@ class Db {
       'siteId': t.siteId.isNotEmpty ? t.siteId : t.startSiteId,
       'siteName': t.siteName.isNotEmpty ? t.siteName : t.startSiteName,
       'durationMin': end.difference(t.startAt).inMinutes,
-      'cost': t.isWithDriver ? 0 : (t.cost ?? (t.isTaxi ? 0 : (t.km * rate * 100).round() / 100)),
+      'cost': t.cost ?? (t.isTaxi ? 0 : (t.km * (t.ratePerKm ?? rate) * 100).round() / 100),
       'note': 'Ended by ${by.name}',
     });
   }
@@ -1020,6 +1027,7 @@ class Db {
     Site? site,
     String kind = 'driver',
     AppUser? driver,
+    double? ratePerKm,
   }) async {
     final now = DateTime.now();
     final ref = trips.doc();
@@ -1048,6 +1056,7 @@ class Db {
       'kind': kind,
       'driverId': driver?.id ?? '',
       'driverName': driver?.name ?? '',
+      if (ratePerKm != null) 'ratePerKm': ratePerKm,
     });
     batch.set(ref.collection('points').doc(), {'lat': lat, 'lng': lng, 'at': FieldValue.serverTimestamp()});
     await batch.commit();
@@ -1076,6 +1085,7 @@ class Db {
     double? ratePerKm,
     double? cost,
     bool costEntered = false,
+    String? vehicle,
     double? lat,
     double? lng,
     Site? site,
@@ -1108,6 +1118,7 @@ class Db {
       'ratePerKm': ratePerKm,
       'cost': cost ?? ((km * (ratePerKm ?? 0) * 100).round() / 100),
       if (costEntered) 'costEntered': true,
+      if (vehicle != null && vehicle.isNotEmpty) 'vehicle': vehicle,
       if (note.isNotEmpty) 'note': note,
     });
     await batch.commit();

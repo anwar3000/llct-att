@@ -32,6 +32,7 @@ class _DriverShellState extends State<DriverShell> {
   double? _rate;
   StreamSubscription? _monthSub;
   List<Trip> _allDone = [];
+  List<Trip> _rides = [];
   List<DriverPayment> _payments = [];
 
   @override
@@ -47,6 +48,9 @@ class _DriverShellState extends State<DriverShell> {
     _watchMonth();
     _subs.add(Db.myDoneTrips(widget.me.id).listen((l) {
       if (mounted) setState(() => _allDone = l);
+    }, onError: (_) {}));
+    _subs.add(Db.ridesWithDriver(widget.me.id).listen((l) {
+      if (mounted) setState(() => _rides = l);
     }, onError: (_) {}));
     _subs.add(Db.myDriverPayments(widget.me.id).listen((l) {
       if (mounted) setState(() => _payments = l);
@@ -176,7 +180,7 @@ class _DriverShellState extends State<DriverShell> {
     );
 
     // Tally: everything earned on finished trips minus everything paid by the office.
-    final totalEarned = _allDone.fold<double>(0, (a, t) => a + (t.cost ?? 0));
+    final totalEarned = _allDone.fold<double>(0, (a, t) => a + (t.cost ?? 0)) + _rides.fold<double>(0, (a, t) => a + (t.cost ?? 0));
     final totalPaid = _payments.fold<double>(0, (a, p) => a + p.amount);
     final balance = ((totalEarned - totalPaid) * 100).round() / 100;
     final tally = Card(
@@ -186,7 +190,8 @@ class _DriverShellState extends State<DriverShell> {
           const Text('My account', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
           const SizedBox(height: 10),
           Row(children: [
-            _tallyBox('Earned', fmtMoney((totalEarned * 100).round() / 100), '${_allDone.length} trips', AppColors.primary),
+            _tallyBox('Earned', fmtMoney((totalEarned * 100).round() / 100),
+                '${_allDone.length} trips${_rides.isEmpty ? '' : ' + ${_rides.length} rides'}', AppColors.primary),
             const SizedBox(width: 8),
             _tallyBox('Paid', fmtMoney((totalPaid * 100).round() / 100), '${_payments.length} payments', AppColors.success),
             const SizedBox(width: 8),
@@ -265,6 +270,27 @@ class _DriverShellState extends State<DriverShell> {
           ]),
         ),
     ];
+
+    if (_rides.isNotEmpty) {
+      right.addAll([
+        const SectionTitle('Staff rides with me'),
+        Card(
+          child: Column(children: [
+            for (final r in _rides.take(15))
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.directions_car, color: Color(0xFF7B4FC9)),
+                title: Text(r.employeeName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('${fmtDateShort(r.startLocal)} · ${fmtTime(r.startLocal)} · '
+                    '${r.startSiteName.isEmpty ? 'GPS' : r.startSiteName} → ${r.endSiteName.isEmpty ? 'GPS' : r.endSiteName}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                trailing: Text('${r.km.toStringAsFixed(1)} km${r.cost == null ? '' : '\n${fmtMoney(r.cost!)}'}',
+                    textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+              ),
+          ]),
+        ),
+      ]);
+    }
 
     return Scaffold(
       appBar: AppBar(
