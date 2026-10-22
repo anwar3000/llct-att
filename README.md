@@ -32,6 +32,14 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 ---
 
 ## What's new
+- **GPS "no activity" rules (v1.6.0):**
+  - **Violations:** while an employee is checked in, every full hour with no GPS location counts as one *no activity* violation. This covers GPS off, the app closed, or the phone off. The app shows a popup and a red banner.
+  - **Phone standing still:** the Android app asks the phone for a fresh location every 15 minutes, so staying in one place isn't counted as a violation.
+  - **Check-out:** the confirmation shows today's violation count.
+  - **Limits:** more than 5 violations in a working day means the next check-in is allowed but carries a *violation mark*. If it happens again on the next working day, check-in is blocked and admin gets a flag under *Needs attention*. Admin taps **Allow check-in** there or on the employee's page.
+  - **Admin view:** staff rows show ⚑ with today's count. The report is now **Reports → Site & GPS violations**, with a daily summary sheet.
+  - **iPhone:** the iPhone web app only sends a location while it's open. iPhone staff must open it at least once an hour while on duty.
+- **Rides and trips GPS:** if the phone's GPS feed goes quiet during a ride, the app now asks for a location every 30 seconds. It saves the position every minute even when standing still. The trip map always marks pick-up, drop-off and the current position.
 - **Driver costs and payments (v1.5.2):** drivers can enter or change a trip's cost at any time: during the trip, when they stop (it starts at km × rate), or later by tapping the trip in their list. Admin sees these trips marked *entered*. On the web, admin records payments to drivers under **Trips & rides → Driver accounts & payments**. Each driver's account shows earned (trip costs) − paid = balance due, with a statement you can download (Excel/PDF). Drivers see the same tally and the payments they received in their app.
 - **Rides and driver profile (v1.5.1):**
   - **Every employee** has a **Start ride** button under the check-in card. They choose **Taxi** or **Company driver** (picked from the list of drivers). When a taxi ride ends, they enter the fare. Employees don't see ride history.

@@ -88,6 +88,8 @@ class AppUser {
   final DateTime? createdAt;
   /// Set by management to sign this person out of every device.
   final DateTime? forceLogoutAt;
+  /// Admin "allow check-in": GPS violations before this time no longer count.
+  final DateTime? violationsClearedAt;
   /// Drivers get the Trips feature; their own rate per km overrides the company rate.
   final bool isDriver;
   final double? tripRatePerKm;
@@ -107,6 +109,7 @@ class AppUser {
     this.monthlyOffQuota = kDefaultMonthlyOffQuota,
     this.createdAt,
     this.forceLogoutAt,
+    this.violationsClearedAt,
     this.isDriver = false,
     this.tripRatePerKm,
     this.vehicle = '',
@@ -141,6 +144,7 @@ class AppUser {
       monthlyOffQuota: _int(m['monthlyOffQuota'], kDefaultMonthlyOffQuota),
       createdAt: _ts(m['createdAt']),
       forceLogoutAt: _ts(m['forceLogoutAt']),
+      violationsClearedAt: _ts(m['violationsClearedAt']),
       isDriver: m['isDriver'] == true,
       tripRatePerKm: _dbl(m['tripRatePerKm']),
       vehicle: _str(m['vehicle']),
@@ -310,6 +314,9 @@ class AttendanceSession {
   final double? outDistance;
   final bool outOutside;
   final bool mocked;
+  /// Checked in although the previous working day had too many GPS violations.
+  final bool violationMark;
+  final String violationNote;
   final String note;
   final int? tz;
   final int? outTz;
@@ -333,6 +340,8 @@ class AttendanceSession {
     this.outDistance,
     this.outOutside = false,
     this.mocked = false,
+    this.violationMark = false,
+    this.violationNote = '',
     this.note = '',
     this.tz,
     this.outTz,
@@ -343,7 +352,7 @@ class AttendanceSession {
   /// Check-in / check-out as local time at the site.
   DateTime get inLocal => atZone(checkIn, tz);
   DateTime? get outLocal => checkOut == null ? null : atZone(checkOut!, outTz ?? tz);
-  bool get flagged => inOutside || outOutside || mocked;
+  bool get flagged => inOutside || outOutside || mocked || violationMark;
 
   Duration worked([DateTime? now]) =>
       (checkOut ?? now ?? DateTime.now()).difference(checkIn);
@@ -369,6 +378,8 @@ class AttendanceSession {
       outDistance: _dbl(m['outDistance']),
       outOutside: m['outOutside'] == true,
       mocked: m['mocked'] == true,
+      violationMark: m['violationMark'] == true,
+      violationNote: _str(m['violationNote']),
       note: _str(m['note']),
       tz: _tz(m['tz']),
       outTz: _tz(m['outTz']),
@@ -585,7 +596,9 @@ class GeoAlert {
   final String siteId;
   final String siteName;
   final String sessionId;
-  final String type; // left_site | gps_off
+  final String type; // left_site | gps_off | no_activity | checkin_blocked
+  final int minutes; // no_activity: minutes without a GPS update
+  final DateTime? fromAt;
   final double? lat;
   final double? lng;
   final double? distance;
@@ -609,7 +622,12 @@ class GeoAlert {
     this.tz,
     this.resolved = false,
     this.resolvedBy = '',
+    this.minutes = 0,
+    this.fromAt,
   });
+
+  /// GPS violations count towards the daily limit (no location for an hour or more).
+  bool get isGpsViolation => type == 'no_activity' || type == 'gps_off';
 
   factory GeoAlert.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -628,10 +646,16 @@ class GeoAlert {
       tz: _tz(m['tz']),
       resolved: m['resolved'] == true,
       resolvedBy: _str(m['resolvedBy']),
+      minutes: _int(m['minutes']),
+      fromAt: _ts(m['fromAt']),
     );
   }
 
-  String get label => type == 'gps_off'
+  String get label => type == 'no_activity'
+      ? 'No activity — no GPS location for ${minutes >= 60 ? '${(minutes / 60).floor()} h' : '$minutes min'}'
+      : type == 'checkin_blocked'
+      ? 'Check-in blocked — repeated GPS violations'
+      : type == 'gps_off'
       ? 'Location unavailable while checked in'
       : 'Left ${siteName.isEmpty ? 'site' : siteName} without checking out'
           '${distance == null ? '' : ' (${distance!.round()} m away)'}';

@@ -53,6 +53,11 @@ class _OverviewTabState extends State<OverviewTab> {
   /// then who has finished for the day, then staff not working today.
   List<Widget> _teamBySite(List<StaffStatus> st, AdminLive live) {
     final onDuty = st.where((s) => s.state == StaffState.onDuty && s.open != null).toList();
+    final today = dateKey(DateTime.now());
+    final vio = <String, int>{};
+    for (final a in live.alerts) {
+      if (a.isGpsViolation && a.at != null && dateKey(a.at!) == today) vio[a.employeeId] = (vio[a.employeeId] ?? 0) + 1;
+    }
     final extOn = live.externalOnSite;
     final groups = <String, ({String name, List<StaffStatus> staff, List<WorkerEntry> ext})>{};
     ({String name, List<StaffStatus> staff, List<WorkerEntry> ext}) g(String id, String name) =>
@@ -108,7 +113,7 @@ class _OverviewTabState extends State<OverviewTab> {
                     Pill('${site.ext.length} ext', color: kExtColor),
                   ])),
               for (final s in site.staff) ...[
-                _StaffRow(s, onTap: () => _openEmployee(s.user)),
+                _StaffRow(s, onTap: () => _openEmployee(s.user), violations: vio[s.user.id] ?? 0),
                 for (final e in site.ext.where((e) => e.sessionId == s.open!.id)) extTile(e),
               ],
               // External workers whose employee isn't on duty here (e.g. kept on site after check-out).
@@ -122,7 +127,7 @@ class _OverviewTabState extends State<OverviewTab> {
           clipBehavior: Clip.antiAlias,
           child: Column(children: [
             head('Finished today · ${done.length + extDone.length}', AppColors.primary),
-            for (final s in done) _StaffRow(s, onTap: () => _openEmployee(s.user)),
+            for (final s in done) _StaffRow(s, onTap: () => _openEmployee(s.user), violations: vio[s.user.id] ?? 0),
             for (final x in extDone) extTile(x.e, nested: false, time: x.time, onSite: false),
           ]),
         ),
@@ -131,7 +136,7 @@ class _OverviewTabState extends State<OverviewTab> {
           clipBehavior: Clip.antiAlias,
           child: Column(children: [
             head('Not working today · ${notWorking.length}', AppColors.muted),
-            for (final s in notWorking) _StaffRow(s, onTap: () => _openEmployee(s.user)),
+            for (final s in notWorking) _StaffRow(s, onTap: () => _openEmployee(s.user), violations: vio[s.user.id] ?? 0),
           ]),
         ),
     ];
@@ -266,7 +271,8 @@ class _OverviewTabState extends State<OverviewTab> {
                       child: Card(
                         color: const Color(0xFFFFF4E2),
                         child: ListTile(
-                          leading: const Icon(Icons.wrong_location, color: AppColors.accentDark),
+                          leading: Icon(a.type == 'left_site' ? Icons.wrong_location : Icons.flag,
+                              color: a.type == 'left_site' ? AppColors.accentDark : AppColors.danger),
                           title: Text('${a.employeeName}: ${a.label}'),
                           subtitle: Text(fmtDateTime(a.at == null ? null : atZone(a.at!, a.tz)) +
                               (a.lat == null ? '' : ' · GPS ${a.lat!.toStringAsFixed(5)}, ${a.lng!.toStringAsFixed(5)}')),
@@ -274,10 +280,23 @@ class _OverviewTabState extends State<OverviewTab> {
                             final u = live.userById(a.employeeId);
                             if (u != null) _openEmployee(u);
                           },
-                          trailing: TextButton(
-                            onPressed: () => Db.resolveAlert(a.id, widget.me.name),
-                            child: const Text('Resolve'),
-                          ),
+                          trailing: a.type == 'checkin_blocked' && widget.me.isAdmin
+                              ? TextButton(
+                                  onPressed: () async {
+                                    if (!await confirm(context, 'Allow check-in',
+                                        'Clear ${a.employeeName}\'s GPS violations so they can check in again?', ok: 'Allow')) {
+                                      return;
+                                    }
+                                    await Db.clearViolations(a.employeeId, widget.me.name);
+                                    await Db.resolveAlert(a.id, widget.me.name);
+                                    if (mounted) showSnack(context, '${a.employeeName} can check in again');
+                                  },
+                                  child: const Text('Allow check-in'),
+                                )
+                              : TextButton(
+                                  onPressed: () => Db.resolveAlert(a.id, widget.me.name),
+                                  child: const Text('Resolve'),
+                                ),
                         ),
                       ),
                     )),
@@ -598,7 +617,9 @@ class _TripsCard extends StatelessWidget {
 class _StaffRow extends StatelessWidget {
   final StaffStatus s;
   final VoidCallback onTap;
-  const _StaffRow(this.s, {required this.onTap});
+  /// GPS violations today (no location for an hour or more) — shown as a red flag.
+  final int violations;
+  const _StaffRow(this.s, {required this.onTap, this.violations = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -624,7 +645,17 @@ class _StaffRow extends StatelessWidget {
     return ListTile(
       onTap: onTap,
       leading: Avatar(s.user.name, ring: s.color),
-      title: Text(s.user.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+      title: Row(children: [
+        Flexible(child: Text(s.user.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))),
+        if (violations > 0) ...[
+          const SizedBox(width: 6),
+          Pill('⚑ $violations', color: violations > 5 ? AppColors.danger : AppColors.warning),
+        ],
+        if (s.open?.violationMark == true) ...[
+          const SizedBox(width: 6),
+          const Pill('Marked', color: AppColors.danger, icon: Icons.flag),
+        ],
+      ]),
       subtitle: Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,

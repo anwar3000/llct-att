@@ -1,5 +1,5 @@
 import {
-  store, isAdmin, staffStatuses, createStaff, updateUser, sessionsInRange, offDaysInRange, trackForDay,
+  store, isAdmin, staffStatuses, clearViolations, createStaff, updateUser, sessionsInRange, offDaysInRange, trackForDay,
   sessionMinutes, sessionFlagged, closeSession, deleteSession, ROLE_LABEL, deleteEmployee, isShortDay, minDayMins, entryMinutes,
 } from '../fb.js';
 import {
@@ -231,8 +231,13 @@ function detail(root, id, { setHeader }) {
        <button class="btn ghost" id="ed-xlsx">${icon('download', 16)} Month report</button>
        <button class="btn ghost" id="ed-ids">${icon('download', 16)} IDs</button>
        ${store.open.some((x) => x.employeeId === u.id) || isAdmin() ? `<button class="btn ghost" id="ed-lo" style="color:#D64545">${icon('logout', 16)} Log out</button>` : ''}
+       ${isAdmin() ? `<button class="btn ghost" id="ed-allow" title="Clear GPS violations so a blocked employee can check in again">⚑ Allow check-in</button>` : ''}
        ${isAdmin() ? `<button class="btn" id="ed-edit">${icon('edit', 16)} Edit</button>` : ''}`);
     document.getElementById('ed-edit')?.addEventListener('click', () => editPerson(u));
+    document.getElementById('ed-allow')?.addEventListener('click', async () => {
+      if (!await confirmBox('Allow check-in', `Clear ${u.name}'s earlier GPS violations? If check-in was blocked, they can check in again. The violation records stay in reports.`, { ok: 'Allow check-in' })) return;
+      try { await clearViolations(u.id); toast('Check-in allowed'); } catch (e) { toast(friendlyError(e), true); }
+    });
     document.getElementById('ed-lo')?.addEventListener('click', () => logoutDialog(u.id, load));
     document.getElementById('ed-ids').onclick = () => exportMenu([ownerFromUser(u)], `${u.name} IDs`);
     buildDocs();

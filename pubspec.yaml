@@ -1,7 +1,7 @@
 name: attendance_pro
 description: Field staff attendance with GPS check-in/out, site scheduling, site updates, petty cash and a live management dashboard.
 publish_to: 'none'
-version: 1.5.6+20
+version: 1.6.0+21
 
 environment:
   sdk: '>=3.6.0 <4.0.0'

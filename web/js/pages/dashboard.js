@@ -1,4 +1,4 @@
-import { store, isAdmin, alertLabel, resolveAlert, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
+import { store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
 import {
   esc, fromTz, STAFF_COLOR, EXT_COLOR, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
@@ -29,9 +29,10 @@ export function mount(el, _params, { setHeader }) {
 
   // Team today: working now grouped by site (staff with their external workers), then finished, then not working.
   function teamBySite(st) {
+    const vio = violationsToday();
     const row = (s) => `<a class="list-item" href="#/employees/${s.user.id}" style="color:inherit">
         ${avatar(s.user.name, 34, RING[s.state])}
-        <div class="grow"><div class="nm"><b>${esc(s.user.name)}</b></div><div class="small muted">${esc(statusLine(s))}</div></div>
+        <div class="grow"><div class="nm"><b>${esc(s.user.name)}</b>${vio[s.user.id] ? ` <span class="pill ${vio[s.user.id] > 5 ? 'red' : 'amber'}" title="GPS violations today (no location ≥ 1 h)">⚑ ${vio[s.user.id]}</span>` : ''}${s.open?.violationMark ? ' <span class="pill red" title="Checked in with a violation mark">⚑ Marked</span>' : ''}</div><div class="small muted">${esc(statusLine(s))}</div></div>
         <div class="right">${pill(s.forgot ? 'Open since earlier' : STATE[s.state][0], s.forgot ? 'red' : STATE[s.state][1], s.state === 'onDuty')}
           ${s.minutes ? `<div class="small" style="font-weight:700;margin-top:3px">${fmtMins(s.minutes)}</div>` : ''}</div></a>`;
     const extRow = (wid, nested) => {
@@ -104,11 +105,11 @@ export function mount(el, _params, { setHeader }) {
     ${forgot.length || flagged.length || store.alerts.length ? `
     <div class="card mt">
       <div class="card-head">${icon('warn', 18, '#D64545')}<h2>Needs attention</h2></div>
-      ${store.alerts.map((a) => `<div class="list-item">${avatar(a.employeeName, 32, '#E08E2B')}
+      ${store.alerts.map((a) => `<div class="list-item" style="${a.type === 'left_site' ? '' : 'background:#fff5f5'}">${avatar(a.employeeName, 32, a.type === 'left_site' ? '#E08E2B' : '#D64545')}
         <div class="grow"><b>${esc(a.employeeName)}</b> — ${esc(alertLabel(a))}
         <div class="small muted">${fmtDateTime(a.atLocal)}${a.lat != null ? ` · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lng}#map=17/${a.lat}/${a.lng}">GPS ${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}</a>` : ''}</div></div>
-        ${pill(a.type === 'gps_off' ? 'GPS off' : 'Left site', 'amber')}
-        <button class="btn sm ghost" data-resolve="${a.id}">Resolve</button></div>`).join('')}
+        ${pill({ gps_off: 'GPS off', no_activity: '⚑ No activity', checkin_blocked: '⚑ Check-in blocked' }[a.type] || 'Left site', a.type === 'left_site' ? 'amber' : 'red')}
+        ${a.type === 'checkin_blocked' && isAdmin() ? `<button class="btn sm" data-allow="${a.employeeId}" data-aid="${a.id}">Allow check-in</button>` : `<button class="btn sm ghost" data-resolve="${a.id}">Resolve</button>`}</div>`).join('')}
       ${forgot.map((s) => `<div class="list-item">${avatar(s.employeeName, 32, '#D64545')}
         <div class="grow"><b>${esc(s.employeeName)}</b> never checked out
         <div class="small muted">${esc(s.siteName)} · in ${fmtDateTime(s.inLocal)}</div></div>
@@ -224,6 +225,11 @@ export function mount(el, _params, { setHeader }) {
       };
     });
     body.querySelectorAll('[data-photo]').forEach((img) => { img.onclick = () => photoViewer(img.src); });
+    body.querySelectorAll('[data-allow]').forEach((b) => {
+      b.onclick = async () => {
+        try { await clearViolations(b.dataset.allow); await resolveAlert(b.dataset.aid, store.me.name); toast('Check-in allowed — earlier GPS violations cleared'); } catch (e) { toast(friendlyError(e), true); }
+      };
+    });
     body.querySelectorAll('[data-resolve]').forEach((b) => { b.onclick = () => resolveAlert(b.dataset.resolve, store.me.name).then(() => toast('Resolved')); });
     body.querySelectorAll('[data-site-yes]').forEach((b) => { b.onclick = () => approveSite(b.dataset.siteYes, true).then(() => toast('Site approved')); });
     body.querySelectorAll('[data-site-no]').forEach((b) => { b.onclick = () => approveSite(b.dataset.siteNo, false).then(() => toast('Site rejected')); });

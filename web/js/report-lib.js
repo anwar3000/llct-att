@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, MAX_DAILY_VIOLATIONS, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   fmtMoney, tzLabel, atTz, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -158,18 +158,33 @@ export async function updatesReport(from, to, siteId = null) {
 
 export async function alertsReport(from, to, empId = null) {
   const list = (await alertsInRange(from, to)).filter((a) => !empId || a.employeeId === empId);
+  // Daily GPS violations per employee: more than the limit = next check-in marked; twice in a row = blocked.
+  const days = new Map();
+  for (const a of list) {
+    if (a.type !== 'no_activity' && a.type !== 'gps_off') continue;
+    const k = `${a.employeeId}|${a.date}`;
+    const c = days.get(k) || { name: a.employeeName, date: a.date, n: 0, sites: new Set() };
+    c.n++; if (a.siteName) c.sites.add(a.siteName);
+    days.set(k, c);
+  }
+  const summary = [...days.values()].sort((a, b) => (a.date + a.name).localeCompare(b.date + b.name))
+    .map((c) => [c.date, c.name, [...c.sites].join(', '), c.n, c.n > MAX_DAILY_VIOLATIONS ? `OVER LIMIT (>${MAX_DAILY_VIOLATIONS}) — next check-in marked` : 'OK']);
+  const type = (a) => ({ no_activity: 'No activity (no GPS ≥ 1 h)', gps_off: 'GPS off', checkin_blocked: 'Check-in blocked', left_site: 'Left site' }[a.type] || a.type);
   return {
-    title: 'Geofence alerts — left site without checking out',
-    subtitle: `${from} to ${to} · ${list.length} alerts`,
-    filename: `geofence-alerts-${from}-to-${to}`,
+    title: 'Site & GPS violations',
+    subtitle: `${from} to ${to} · ${list.length} records · ${list.filter((a) => a.type === 'no_activity' || a.type === 'gps_off').length} GPS violations · limit ${MAX_DAILY_VIOLATIONS} per day`,
+    filename: `violations-${from}-to-${to}`,
     orientation: 'landscape',
-    sheets: [{
-      name: 'Alerts',
-      columns: ['Date', 'Time', 'Employee', 'Site', 'Alert', 'Distance (m)', 'GPS location', 'Status', 'Resolved by'],
-      widths: [11, 7, 20, 20, 40, 12, 24, 10, 16],
-      rows: list.map((a) => [a.date || d2(a.atLocal), t2(a.atLocal), a.employeeName, a.siteName, alertLabel(a), round(a.distance),
-        a.lat != null ? `${a.lat.toFixed(6)}, ${a.lng.toFixed(6)}` : '', a.resolved ? 'Resolved' : 'Open', a.resolvedBy]),
-    }],
+    sheets: [
+      { name: 'Daily GPS violations', columns: ['Date', 'Employee', 'Site(s)', 'Violations', 'Result'], widths: [11, 22, 30, 11, 36], rows: summary },
+      {
+        name: 'All records',
+        columns: ['Date', 'Time', 'Employee', 'Site', 'Type', 'Details', 'Distance (m)', 'GPS location', 'Status', 'Resolved by'],
+        widths: [11, 7, 20, 20, 20, 40, 12, 24, 10, 16],
+        rows: list.map((a) => [a.date || d2(a.atLocal), t2(a.atLocal), a.employeeName, a.siteName, type(a), alertLabel(a), round(a.distance),
+          a.lat != null ? `${a.lat.toFixed(6)}, ${a.lng.toFixed(6)}` : '', a.resolved ? 'Resolved' : 'Open', a.resolvedBy]),
+      },
+    ],
   };
 }
 

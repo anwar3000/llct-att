@@ -170,6 +170,19 @@ class Db {
         'resolved': false,
       });
 
+  /// One employee's alerts on a day (for the "no activity" popup and the check-out count).
+  static Stream<List<GeoAlert>> alertsForEmployeeDay(String uid, String date) => alerts
+      .where('employeeId', isEqualTo: uid)
+      .where('date', isEqualTo: date)
+      .snapshots()
+      .map((q) => q.docs.map(GeoAlert.fromDoc).toList());
+
+  /// Admin "Allow check-in": earlier GPS violations stop counting towards the block.
+  static Future<void> clearViolations(String uid, String by) => users.doc(uid).update({
+        'violationsClearedAt': FieldValue.serverTimestamp(),
+        'violationsClearedBy': by,
+      });
+
   static Stream<List<GeoAlert>> openAlerts() => alerts
       .where('resolved', isEqualTo: false)
       .snapshots()
@@ -272,9 +285,13 @@ class Db {
     required bool mocked,
     String note = '',
     DateTime? at,
+    bool violationMark = false,
+    String violationNote = '',
   }) async {
     final now = at ?? DateTime.now();
     final ref = await attendance.add({
+      if (violationMark) 'violationMark': true,
+      if (violationMark) 'violationNote': violationNote,
       'employeeId': user.id,
       'employeeName': user.name,
       'siteId': site.id,

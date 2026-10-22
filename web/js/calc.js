@@ -74,4 +74,5 @@ export const flagText = (s) => [
   s.inOutside ? `In ${Math.round(s.inDistance || 0)}m away` : '',
   s.outOutside ? `Out ${Math.round(s.outDistance || 0)}m away` : '',
   s.mocked ? 'Fake GPS' : '',
+  s.violationMark ? `Violation mark${s.violationNote ? ` (${s.violationNote})` : ''}` : '',
 ].filter(Boolean).join('; ');

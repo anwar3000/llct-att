@@ -50,6 +50,7 @@ export function mapUser(d) {
     monthlyOffQuota: num(m.monthlyOffQuota, 4),
     createdAt: toDate(m.createdAt),
     forceLogoutAt: toDate(m.forceLogoutAt),
+    violationsClearedAt: toDate(m.violationsClearedAt),
     isDriver: m.isDriver === true,
     vehicle: m.vehicle || '',
     tripRatePerKm: typeof m.tripRatePerKm === 'number' ? m.tripRatePerKm : null,
@@ -85,7 +86,7 @@ export function mapSession(d) {
     checkIn: toDate(m.checkIn) || new Date(), checkOut: toDate(m.checkOut),
     inLat: m.inLat ?? null, inLng: m.inLng ?? null, inAccuracy: m.inAccuracy ?? null, inDistance: m.inDistance ?? null,
     inOutside: m.inOutside === true, outLat: m.outLat ?? null, outLng: m.outLng ?? null, outDistance: m.outDistance ?? null,
-    outOutside: m.outOutside === true, mocked: m.mocked === true, note: m.note || '', status: m.status || '',
+    outOutside: m.outOutside === true, mocked: m.mocked === true, violationMark: m.violationMark === true, violationNote: m.violationNote || '', note: m.note || '', status: m.status || '',
     tz: tzOf(m.tz), outTz: tzOf(m.outTz) ?? tzOf(m.tz), editedAt: toDate(m.editedAt), editedBy: m.editedBy || '',
   });
 }
@@ -127,9 +128,16 @@ export function mapAlert(d) {
     lat: m.lat ?? null, lng: m.lng ?? null, distance: m.distance ?? null, at: toDate(m.at), date: m.date || '',
     resolved: m.resolved === true, resolvedBy: m.resolvedBy || '',
     tz: tzOf(m.tz), atLocal: atTz(toDate(m.at), tzOf(m.tz)),
+    minutes: num(m.minutes), fromAt: toDate(m.fromAt), note: m.note || '',
   };
 }
-export const alertLabel = (a) => (a.type === 'gps_off'
+/** GPS violations (no location for an hour or more) count towards the daily limit. */
+export const MAX_DAILY_VIOLATIONS = 5;
+export const isGpsViolation = (a) => a.type === 'no_activity' || a.type === 'gps_off';
+export const alertLabel = (a) => (a.type === 'no_activity'
+  ? `No activity — no GPS location for ${a.minutes >= 60 ? `${Math.floor(a.minutes / 60)} h` : `${a.minutes} min`}`
+  : a.type === 'checkin_blocked' ? `Check-in blocked — repeated GPS violations${a.note ? ` (${a.note})` : ''}`
+  : a.type === 'gps_off'
   ? 'Location unavailable while checked in'
   : `Left ${a.siteName || 'site'} without checking out${a.distance != null ? ` (${Math.round(a.distance)} m away)` : ''}`);
 
@@ -310,7 +318,7 @@ export const saveWorkerRate = (workerId, dailyRate) =>
 
 export const sessionMinutes = (s, now = new Date()) =>
   Math.max(0, Math.round(((s.checkOut || now) - s.checkIn) / 60000));
-export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked;
+export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked || s.violationMark;
 
 // ------------------------------------------------------------------ roles
 // admin   = full access incl. accounts (petty cash, budgets) and staff logins
@@ -505,6 +513,14 @@ export const saveSite = async (id, data) => {
 export const deleteSite = (id) => deleteDoc(doc(db, 'sites', id));
 export const approveSite = (id, ok) => updateDoc(doc(db, 'sites', id),
   ok ? { approved: true } : { approved: false, active: false, status: 'rejected' });
+/** Admin "Allow check-in": earlier GPS violations stop counting towards the block. */
+export const clearViolations = (uid) => updateDoc(doc(db, 'users', uid), { violationsClearedAt: serverTimestamp(), violationsClearedBy: store.me?.name || '' });
+/** Today's GPS violations per employee (from open alerts). */
+export function violationsToday() {
+  const k = dateKey(new Date()), out = {};
+  for (const a of store.alerts) if (isGpsViolation(a) && a.date === k) out[a.employeeId] = (out[a.employeeId] || 0) + 1;
+  return out;
+}
 export const resolveAlert = (id, by) => updateDoc(doc(db, 'alerts', id), { resolved: true, resolvedBy: by, resolvedAt: serverTimestamp() });
 export async function alertsInRange(from, to) {
   const snap = await getDocs(query(C('alerts'), where('date', '>=', from), where('date', '<=', to)));

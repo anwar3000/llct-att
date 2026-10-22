@@ -105,6 +105,8 @@ class SessionTile extends StatelessWidget {
                         color: AppColors.warning, icon: Icons.wrong_location_outlined),
                   if (s.mocked)
                     const Pill('Fake GPS', color: AppColors.danger, icon: Icons.gps_off),
+                  if (s.violationMark)
+                    const Pill('Violation mark', color: AppColors.danger, icon: Icons.flag),
                 ]),
               ],
             ]),

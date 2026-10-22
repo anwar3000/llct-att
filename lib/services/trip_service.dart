@@ -26,6 +26,9 @@ class TripService {
   DateTime? _lastSavedAt;
   double _savedDist = 0;
   bool _saving = false;
+  DateTime? _lastFixAt;
+  Timer? _fallback;
+  bool _probing = false;
 
   String? get activeId => _trip?.id;
   bool get isRunning => _trip != null;
@@ -84,7 +87,9 @@ class TripService {
     _savedDist = 0;
     _lastSavedAt = DateTime.now();
     distance.value = 0;
+    _lastFixAt = DateTime.now();
     await PositionHub.instance.add('trip', _onPosition, fine: true);
+    _startFallback();
     return id;
   }
 
@@ -116,6 +121,7 @@ class TripService {
       await LocationService.ensureReady();
     } catch (_) {}
     await PositionHub.instance.add('trip', _onPosition, fine: true);
+    _startFallback();
   }
 
   /// Distance this fix adds to the trip, or null if it should be ignored.
@@ -134,17 +140,44 @@ class TripService {
   void _onPosition(Position p) {
     final trip = _trip;
     if (trip == null) return;
+    _lastFixAt = DateTime.now();
     final d = _step(p);
-    if (d == null) return;
-    _last = p;
-    if (d == 0) return;
-    _points++;
-    distance.value += d;
+    if (d != null) {
+      _last = p;
+      if (d > 0) {
+        _points++;
+        distance.value += d;
+      }
+    }
+    // Save the route / current position: every 30 s while moving (or each 250 m),
+    // every minute while standing — so the office always sees where the ride is.
     final now = DateTime.now();
-    final due = _lastSavedAt == null ||
-        now.difference(_lastSavedAt!) >= const Duration(seconds: 30) ||
-        distance.value - _savedDist >= 250;
-    if (due && !_saving) _save(trip.id, p);
+    final moved = distance.value - _savedDist;
+    final every = Duration(seconds: moved > 0 ? 30 : 60);
+    final due = _lastSavedAt == null || now.difference(_lastSavedAt!) >= every || moved >= 250;
+    if (due && !_saving && !p.isMocked && p.accuracy <= 100) _save(trip.id, p);
+  }
+
+  /// If the GPS stream goes quiet (some phones pause it), ask for a fix directly.
+  Future<void> _fallbackTick() async {
+    if (_trip == null || _probing) return;
+    final last = _lastFixAt;
+    if (last != null && DateTime.now().difference(last) < const Duration(seconds: 45)) return;
+    _probing = true;
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: AndroidSettings(accuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 20)),
+      );
+      _onPosition(p);
+    } catch (_) {
+    } finally {
+      _probing = false;
+    }
+  }
+
+  void _startFallback() {
+    _fallback?.cancel();
+    _fallback = Timer.periodic(const Duration(seconds: 30), (_) => _fallbackTick());
   }
 
   Future<void> _save(String id, Position p) async {
@@ -190,6 +223,8 @@ class TripService {
       note: note,
     );
     await PositionHub.instance.remove('trip');
+    _fallback?.cancel();
+    _fallback = null;
     _trip = null;
     _last = null;
     return trip;
@@ -197,6 +232,8 @@ class TripService {
 
   /// Stops listening without closing the trip (sign-out).
   Future<void> detach() async {
+    _fallback?.cancel();
+    _fallback = null;
     await PositionHub.instance.remove('trip');
     _trip = null;
     _last = null;

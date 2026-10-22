@@ -6,7 +6,7 @@ import {
   mapWorkerEntry, mapOff, mapIdInfo, mapIdFile, saveIdInfo, uploadIdFile, deleteIdFile, Timestamp, serverTimestamp, mapTrip,
 } from './fb.js';
 import {
-  collection, doc, query, where, onSnapshot, addDoc, updateDoc, getDocs, getDoc, deleteDoc, runTransaction, writeBatch,
+  collection, doc, query, where, onSnapshot, addDoc, setDoc, updateDoc, getDocs, getDoc, deleteDoc, runTransaction, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   esc, icon, avatar, pill, toast, modal, confirmBox, friendlyError, fmtTime, fmtDate, fmtDay, fmtMins, fmtMoney, fmtMonth,
@@ -26,6 +26,7 @@ const S = {
   me: null, tab: 'today', sites: [], open: null, todaySessions: [], workers: [], locks: {}, sessionWorkers: [], myWorkers: [],
   month: new Date(), monthSessions: [], monthOff: [], petty: [], myUpdates: [], idInfo: {}, idFiles: [],
   busy: '', subs: [], sessSubs: [], monthSubs: [], lastAlertAt: 0, lastPush: 0,
+  alertsToday: [], shownViol: -1, lastLocAt: null, gate: null,
   trip: null, tripsToday: [], tripsMonth: [], tripsDone: [], payments: [], tw: null, rate: null,
 };
 
@@ -157,11 +158,22 @@ function start() {
   on(query(C('idFiles'), where('ownerId', '==', uid)), (s) => { S.idFiles = s.docs.map(mapIdFile); if (S.tab === 'me') draw(); });
   // Signed out remotely by management?
   S.subs.push(onSnapshot(doc(db, 'users', uid), (d) => {
+    S.lastLocAt = d.data()?.lastLocation?.at?.toDate?.() || S.lastLocAt;
+    S._userLoaded = true;
+    S.me.violationsClearedAt = d.data()?.violationsClearedAt?.toDate?.() || null;
     const f = d.data()?.forceLogoutAt?.toDate?.();
     const signedIn = auth.currentUser?.metadata?.lastSignInTime ? new Date(auth.currentUser.metadata.lastSignInTime) : null;
     if (f && signedIn && f > signedIn) { loginError = 'You were signed out by management. Sign in again to continue.'; logout(); }
     if (d.exists() && d.data().active === false) { loginError = 'Your account is disabled. Contact management.'; logout(); }
   }, () => {}));
+  // GPS violations today → popup when a new one is marked, count at check-out.
+  on(query(C('alerts'), where('employeeId', '==', uid), where('date', '==', dateKey(new Date()))), (s) => {
+    S.alertsToday = s.docs.map((d) => d.data());
+    const n = violCount();
+    if (S.shownViol >= 0 && n > S.shownViol) noActivityPopup(n);
+    S.shownViol = n;
+    draw();
+  });
   // Ride / trip in progress (everyone). Drivers also get their trip history and rate.
   on(query(C('trips'), where('employeeId', '==', uid), where('status', '==', 'active')), (s) => {
     const l = s.docs.map(mapTrip);
@@ -214,6 +226,7 @@ async function pushLocation(p, checkedIn, siteName, track = true) {
 }
 
 async function tick() {
+  if (S.open && !document.hidden) checkGap();
   if (!S.open || document.hidden || Date.now() - S.lastPush < 5 * 60000) return;
   S.lastPush = Date.now();
   try {
@@ -276,6 +289,7 @@ function drawToday(main) {
       <div class="lbl">Total work time today</div>
       <div class="timer" id="st-timer">${fmtMins(closed + (o ? minsOf(o) : 0))}</div>
     </div>
+    ${violCount() ? `<div class="st-note" style="background:#fbe6e6;color:#8f2a2a;margin-top:12px"><b>⚑ No activity marked · ${violCount()} today</b><br><span class="small">No GPS location for an hour or more. ${isIOS ? 'Open this app at least once an hour while on duty.' : 'Keep Location ON while on duty.'} Over ${MAX_VIOL} in a day marks your next check-in.</span></div>` : ''}
     <button class="st-big ${o ? 'out' : 'in'}" id="st-act">${o ? 'CHECK OUT' : 'CHECK IN'}</button>
     ${rideCardHtml()}
     ${o || S.myWorkers.length ? `<div class="st-card pad">
@@ -623,8 +637,77 @@ async function stopTrip() {
   busy('');
 }
 
+// ================================================================== GPS violations
+// Checked in with no GPS location for an hour or more = "no activity" (one per full hour).
+// More than MAX_VIOL in a working day → next check-in marked; two days in a row → blocked.
+const NO_GPS_MIN = 60, MAX_VIOL = 5;
+const violCount = () => S.alertsToday.filter((a) => a.type === 'no_activity' || a.type === 'gps_off').length;
+function noActivityPopup(n) {
+  alertBox('No activity marked', `Your location was not received for an hour or more while you were checked in (GPS off, app closed or phone off).\n\nGPS violations today: ${n}\nMore than ${MAX_VIOL} in a day: your next check-in is marked. If it happens again, check-in is blocked until management allows it.\n\n${isIOS ? 'On iPhone, open this app at least once an hour while on duty.' : 'Keep Location ON while on duty.'}`);
+}
+async function checkGap() {
+  const o = S.open;
+  if (!o || S._gapBusy || !S._userLoaded) return;
+  const last = S.lastLocAt && S.lastLocAt > o.checkIn ? S.lastLocAt : o.checkIn;
+  const hours = Math.floor((Date.now() - last) / (NO_GPS_MIN * 60000));
+  if (hours < 1) return;
+  S._gapBusy = true;
+  const bucket = Math.floor(last.getTime() / 600000);
+  for (let n = 1; n <= Math.min(hours, 24); n++) {
+    const at = new Date(last.getTime() + n * NO_GPS_MIN * 60000);
+    try {
+      await setDoc(doc(db, 'alerts', `${o.id}_na_${bucket}_${n}`), {
+        employeeId: S.me.id, employeeName: S.me.name, siteId: o.siteId, siteName: o.siteName, sessionId: o.id, type: 'no_activity',
+        fromAt: Timestamp.fromDate(last), minutes: n * NO_GPS_MIN, date: dateKey(at), month: monthKey(at), at: Timestamp.fromDate(at), tz: tzNow(), resolved: false,
+      });
+    } catch { /* already recorded */ }
+  }
+  S._gapBusy = false;
+}
+async function checkInGate() {
+  const today = dateKey(new Date());
+  const now = new Date();
+  const months = [monthKey(now), monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))];
+  const dates = new Set();
+  for (const m of months) {
+    const snap = await getDocs(query(C('attendance'), where('employeeId', '==', S.me.id), where('month', '==', m)));
+    snap.docs.forEach((d) => { const k = d.data().date; if (k && k < today) dates.add(k); });
+  }
+  const last = [...dates].sort().reverse().slice(0, 2);
+  if (!last.length) return { blocked: false, mark: false };
+  const snap = await getDocs(query(C('alerts'), where('employeeId', '==', S.me.id), where('date', 'in', last)));
+  const cnt = {};
+  const cleared = S.me.violationsClearedAt;
+  snap.docs.forEach((d) => {
+    const a = d.data();
+    if (a.type !== 'no_activity' && a.type !== 'gps_off') return;
+    const at = a.at?.toDate?.();
+    if (cleared && at && at <= cleared) return;
+    cnt[a.date] = (cnt[a.date] || 0) + 1;
+  });
+  const over = (k) => (cnt[k] || 0) > MAX_VIOL;
+  return { blocked: over(last[0]) && last.length > 1 && over(last[1]), mark: over(last[0]), lastCount: cnt[last[0]] || 0, lastDate: last[0] };
+}
+
 async function checkIn(preselected = null) {
   if (S.open) return;
+  let gate = null;
+  busy('Checking…');
+  try { gate = await checkInGate(); } catch { gate = null; }
+  busy('');
+  if (gate?.blocked) {
+    try {
+      await setDoc(doc(db, 'alerts', `${S.me.id}_blocked_${dateKey(new Date())}`), {
+        employeeId: S.me.id, employeeName: S.me.name, siteId: '', siteName: '', sessionId: '', type: 'checkin_blocked', minutes: 0,
+        note: `${gate.lastCount} GPS violations on ${gate.lastDate} (and the working day before)`, date: dateKey(new Date()), month: monthKey(new Date()),
+        at: serverTimestamp(), tz: tzNow(), resolved: false,
+      });
+    } catch { /* already flagged today */ }
+    await alertBox('Check-in blocked', `Your last working days had more than ${MAX_VIOL} GPS violations each (no location for an hour or more).\n\nManagement has been notified. Ask them to allow your check-in.`);
+    return;
+  }
+  if (gate?.mark && !await confirmBox('Check-in with violation mark', `Your last working day (${gate.lastDate}) had ${gate.lastCount} GPS violations.\n\nToday's check-in will be marked and management will see it. If it happens again, check-in will be blocked.`, { ok: 'Check in' })) return;
+  S.gate = gate;
   let p;
   busy('Getting your GPS location…');
   try { p = await locate(); } catch (e) { busy(''); await alertBox('Location needed', e.message); return; } finally { busy(''); }
@@ -650,6 +733,7 @@ async function checkIn(preselected = null) {
       employeeId: S.me.id, employeeName: S.me.name, siteId: site.id, siteName: site.name, date: dateKey(now), month: monthKey(now),
       checkIn: Timestamp.fromDate(now), checkInServer: serverTimestamp(), tz: tzNow(), tzName: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
       inLat: p.lat, inLng: p.lng, inAccuracy: p.accuracy, inDistance: d, inOutside: d > site.radius, mocked: false, status: 'open', note: '', platform: 'web',
+      ...(S.gate?.mark ? { violationMark: true, violationNote: `${S.gate.lastCount} GPS violations on ${S.gate.lastDate}` } : {}),
     });
     await pushLocation(p, true, site.name).catch(() => {});
     S.lastPush = Date.now();
@@ -744,17 +828,21 @@ async function createSiteSafely(name, address, p) {
   });
 }
 
+const violText = () => {
+  const n = violCount();
+  return n ? `\n\n⚑ GPS violations today: ${n} (no location for an hour or more)${n > MAX_VIOL ? `\nMore than ${MAX_VIOL}: your next check-in will be marked.` : ''}` : '\n\nGPS violations today: 0 ✓';
+};
 async function checkOut() {
   const o = S.open;
   if (!o) return;
   const onSite = S.sessionWorkers.filter((e) => e.open).length;
   let closeAll = true;
   if (!onSite) {
-    if (!await confirmBox('Check out?', `Check out from ${o.siteName}.\nTime on this site: ${fmtMins(minsOf(o))}`, { ok: 'Check out' })) return;
+    if (!await confirmBox('Check out?', `Check out from ${o.siteName}.\nTime on this site: ${fmtMins(minsOf(o))}${violText()}`, { ok: 'Check out' })) return;
   } else {
     const r = await new Promise((res) => modal({
       title: 'Check out?',
-      body: `<p style="margin:0;white-space:pre-wrap">Check out from ${esc(o.siteName)} (${fmtMins(minsOf(o))}).\n\n${onSite} external worker${onSite === 1 ? ' is' : 's are'} still on site with you. Punch them out now too, or keep them on site and punch them out later?</p>`,
+      body: `<p style="margin:0;white-space:pre-wrap">Check out from ${esc(o.siteName)} (${fmtMins(minsOf(o))}).${esc(violText())}\n\n${onSite} external worker${onSite === 1 ? ' is' : 's are'} still on site with you. Punch them out now too, or keep them on site and punch them out later?</p>`,
       foot: '<div style="display:flex;flex-direction:column;gap:8px;width:100%"><button class="st-btn primary" data-a>Punch out workers too</button><button class="st-btn" data-k>Keep workers on site</button><button class="st-btn" data-c>Cancel</button></div>',
       onMount: (m, close) => {
         m.querySelector('[data-a]').onclick = () => { close(); res('all'); };

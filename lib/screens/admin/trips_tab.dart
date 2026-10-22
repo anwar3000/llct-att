@@ -504,8 +504,13 @@ class _RouteMapState extends State<_RouteMap> {
   Widget build(BuildContext context) {
     final t = widget.t;
     final pts = [...?_pts];
-    if (pts.isEmpty && t.startLat != null) pts.add(LatLng(t.startLat!, t.startLng!));
-    if (t.endLat != null && t.endLng != null) pts.add(LatLng(t.endLat!, t.endLng!));
+    // Always show pick-up, and drop-off (or where the ride is now), even with few GPS points.
+    final start = t.startLat != null ? LatLng(t.startLat!, t.startLng!) : null;
+    if (start != null && (pts.isEmpty || Distance()(pts.first, start) > 5)) pts.insert(0, start);
+    final end = t.endLat != null && t.endLng != null
+        ? LatLng(t.endLat!, t.endLng!)
+        : (t.isActive && t.lastLat != null && t.lastLng != null ? LatLng(t.lastLat!, t.lastLng!) : null);
+    if (end != null && (pts.isEmpty || Distance()(pts.last, end) > 5)) pts.add(end);
     if (_pts == null) return const Center(child: CircularProgressIndicator());
     if (pts.isEmpty) return const Center(child: Text('No GPS points'));
     return FlutterMap(
@@ -520,16 +525,29 @@ class _RouteMapState extends State<_RouteMap> {
         osmTiles(),
         if (pts.length > 1) PolylineLayer(polylines: [Polyline(points: pts, strokeWidth: 5, color: _purple)]),
         MarkerLayer(markers: [
-          Marker(point: pts.first, width: 22, height: 22, child: _dot(AppColors.success)),
-          if (pts.length > 1) Marker(point: pts.last, width: 22, height: 22, child: _dot(t.isActive ? _purple : AppColors.danger)),
+          Marker(point: pts.first, width: 90, height: 46, alignment: Alignment.topCenter, child: _pin('Pick-up', AppColors.success)),
+          if (pts.length > 1)
+            Marker(point: pts.last, width: 90, height: 46, alignment: Alignment.topCenter,
+                child: _pin(t.isActive ? 'Now' : 'Drop-off', t.isActive ? _purple : AppColors.danger)),
         ]),
         osmAttribution(),
       ],
     );
   }
 
-  Widget _dot(Color c) => Container(
-      decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)));
+  Widget _pin(String label, Color c) => Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(6)),
+          child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
+        ),
+        Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)]),
+        ),
+      ]);
 }
 
 /// Admin: per driver — earned (finished trip costs) − paid = balance; record payments.

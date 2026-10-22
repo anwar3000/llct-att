@@ -9,6 +9,7 @@ import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../services/location_service.dart';
 import '../../services/tracking_service.dart';
+import '../../services/violation_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
 import '../../widgets/ride_card.dart';
@@ -41,6 +42,8 @@ class _HomeTabState extends State<HomeTab> {
   StreamSubscription? _sessionWorkersSub;
   String? _sessionWorkersFor;
   String _busyText = '';
+  List<GeoAlert> _alertsToday = [];
+  int _shownViolations = -1; // -1 = not loaded yet (no popup for what was already there)
 
   @override
   void initState() {
@@ -78,6 +81,14 @@ class _HomeTabState extends State<HomeTab> {
     }));
     _subs.add(Db.myOpenWorkers(uid).listen((l) {
       if (mounted) setState(() => _myWorkers = l);
+    }, onError: (_) {}));
+    _subs.add(Db.alertsForEmployeeDay(uid, _today).listen((l) {
+      if (!mounted) return;
+      final n = l.where((a) => a.isGpsViolation).length;
+      final first = _shownViolations < 0;
+      setState(() => _alertsToday = l);
+      if (!first && n > _shownViolations) _noActivityPopup(n);
+      _shownViolations = n;
     }, onError: (_) {}));
     _subs.add(Db.activeWorkersStream().listen((l) {
       if (mounted) setState(() => _workerCount = l.length);
@@ -148,10 +159,64 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
+  int get _violationsToday => _alertsToday.where((a) => a.isGpsViolation).length;
+
+  /// Popup when the app marks "no activity" (no GPS location for an hour or more).
+  Future<void> _noActivityPopup(int n) => showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          icon: const Icon(Icons.location_disabled, color: AppColors.danger, size: 40),
+          title: const Text('No activity marked'),
+          content: Text(
+            'Your location was not received for an hour or more while you were checked in '
+            '(GPS off, app closed or phone off).\n\n'
+            'GPS violations today: $n\n'
+            'More than ${ViolationService.kMaxDailyViolations} in a day: your next check-in is marked. '
+            'If it happens again, check-in is blocked until management allows it.\n\n'
+            'Keep Location ON and the app running while on duty.',
+          ),
+          actions: [
+            FilledButton(style: FilledButton.styleFrom(minimumSize: const Size(96, 44)), onPressed: () => Navigator.pop(c), child: const Text('OK')),
+          ],
+        ),
+      );
+
   Future<void> _startCheckIn([Site? preselected]) async {
     if (widget.open != null) {
       showSnack(context, 'Check out from ${widget.open!.siteName} first.');
       return;
+    }
+    // GPS violation rules: previous working day(s) with too many "no activity" marks.
+    setState(() {
+      _busy = true;
+      _busyText = 'Checking…';
+    });
+    ({bool blocked, bool mark, int lastCount, String lastDate})? gate;
+    try {
+      gate = await ViolationService.gate(widget.me);
+    } catch (_) {
+      gate = null; // offline / rules not published — don't stop the check-in
+    }
+    if (mounted) setState(() => _busy = false);
+    if (!mounted) return;
+    if (gate != null && gate.blocked) {
+      await ViolationService.recordBlocked(widget.me, gate.lastCount, gate.lastDate);
+      if (!mounted) return;
+      await _blocked('Check-in blocked',
+          'Your last working days had more than ${ViolationService.kMaxDailyViolations} GPS violations each '
+          '(no location for an hour or more).\n\nManagement has been notified. Ask them to allow your check-in.');
+      return;
+    }
+    if (gate != null && gate.mark) {
+      final ok = await confirm(
+        context,
+        'Check-in with violation mark',
+        'Your last working day (${gate.lastDate}) had ${gate.lastCount} GPS violations.\n\n'
+            'Today\'s check-in will be marked and management will see it. '
+            'If it happens again, check-in will be blocked.',
+        ok: 'Check in',
+      );
+      if (!ok || !mounted) return;
     }
     final pos = await _locate('Getting your GPS location…');
     if (pos == null || !mounted) return;
@@ -206,6 +271,8 @@ class _HomeTabState extends State<HomeTab> {
         distance: dist,
         mocked: pos.isMocked,
         at: start,
+        violationMark: gate?.mark == true,
+        violationNote: gate?.mark == true ? '${gate!.lastCount} GPS violations on ${gate.lastDate}' : '',
       );
       await TrackingService.instance
           .pushOnce(widget.me.id, pos, checkedIn: true, siteName: site.name);
@@ -304,7 +371,8 @@ class _HomeTabState extends State<HomeTab> {
       final ok = await confirm(
         context,
         'Check out?',
-        'Check out from ${open.siteName}.\nTime on this site: ${fmtDuration(open.worked())}',
+        'Check out from ${open.siteName}.\nTime on this site: ${fmtDuration(open.worked())}'
+            '${_violationText()}',
         ok: 'Check out',
       );
       if (!ok || !mounted) return;
@@ -313,7 +381,7 @@ class _HomeTabState extends State<HomeTab> {
         context: context,
         builder: (c) => AlertDialog(
           title: const Text('Check out?'),
-          content: Text('Check out from ${open.siteName} (${fmtDuration(open.worked())}).\n\n'
+          content: Text('Check out from ${open.siteName} (${fmtDuration(open.worked())}).${_violationText()}\n\n'
               '$_onSiteWorkers external worker${_onSiteWorkers == 1 ? ' is' : 's are'} still on site with you. '
               'Punch them out now too, or keep them on site and punch them out later?'),
           actionsOverflowDirection: VerticalDirection.down,
@@ -362,6 +430,13 @@ class _HomeTabState extends State<HomeTab> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  String _violationText() {
+    final n = _violationsToday;
+    if (n == 0) return '\n\nGPS violations today: 0 ✓';
+    return '\n\n⚑ GPS violations today: $n (no location for an hour or more)'
+        '${n > ViolationService.kMaxDailyViolations ? '\nMore than ${ViolationService.kMaxDailyViolations}: your next check-in will be marked.' : ''}';
   }
 
   static final _newSiteMarker = Site(id: '__new__', name: '', lat: 0, lng: 0);
@@ -570,6 +645,21 @@ class _HomeTabState extends State<HomeTab> {
         final wide = c.maxWidth >= 700;
         final left = <Widget>[
             _statusCard(open),
+            if (_violationsToday > 0) ...[
+              const SizedBox(height: 10),
+              Card(
+                color: const Color(0xFFFBE6E6),
+                child: ListTile(
+                  leading: const Icon(Icons.flag, color: AppColors.danger),
+                  title: Text('No activity marked · $_violationsToday today',
+                      style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF8F2A2A))),
+                  subtitle: Text(
+                      'No GPS location for an hour or more. Keep Location ON while on duty. '
+                      'Over ${ViolationService.kMaxDailyViolations} in a day marks your next check-in.',
+                      style: const TextStyle(fontSize: 12.5)),
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             _actionButton(open),
             const SizedBox(height: 12),

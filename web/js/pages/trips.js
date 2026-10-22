@@ -270,16 +270,23 @@ export async function routeDialog(t) {
   store.sites.filter((s) => s.active && [t.startSiteId, t.endSiteId, t.siteId].includes(s.id)).forEach((s) => siteLayer(s).addTo(map));
   let pts = [];
   try { pts = await tripPoints(t.id); } catch (e) { el.querySelector('#rt-info').textContent = friendlyError(e); }
+  // Always mark pick-up and drop-off (or where the ride is now), even when few GPS points arrived.
   const line = pts.map((p) => [p.lat, p.lng]);
-  if (!line.length && t.startLat != null) line.push([t.startLat, t.startLng]);
-  if (t.endLat != null) line.push([t.endLat, t.endLng]);
+  const far = (a, b) => !a || !b || Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) > 0.00005;
+  const start = t.startLat != null ? [t.startLat, t.startLng] : null;
+  const end = t.endLat != null ? [t.endLat, t.endLng] : (t.status === 'active' && t.lastLat != null ? [t.lastLat, t.lastLng] : null);
+  if (start && far(line[0], start)) line.unshift(start);
+  if (end && far(line[line.length - 1], end)) line.push(end);
+  setTimeout(() => map.invalidateSize(), 50); // the map sits in a popup — make sure it has its size
   if (line.length > 1) L.polyline(line, { color: TRIP_COLOR, weight: 5, opacity: 0.85 }).addTo(map);
+  const pin = (ll, text, color) => L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [80, 40], iconAnchor: [40, 38],
+    html: `<div style="display:flex;flex-direction:column;align-items:center"><span style="background:${color};color:#fff;font:800 11px Inter,sans-serif;padding:2px 6px;border-radius:6px;white-space:nowrap">${text}</span><span style="width:16px;height:16px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span></div>` }) }).addTo(map);
   if (line.length) {
-    L.circleMarker(line[0], { radius: 8, color: '#fff', weight: 3, fillColor: '#2E9E6A', fillOpacity: 1 }).bindTooltip('Start').addTo(map);
-    if (line.length > 1) L.circleMarker(line[line.length - 1], { radius: 8, color: '#fff', weight: 3, fillColor: t.status === 'active' ? TRIP_COLOR : '#D64545', fillOpacity: 1 }).bindTooltip(t.status === 'active' ? 'Now' : 'End').addTo(map);
-    fitTo(map, line);
+    pin(line[0], 'Pick-up', '#2E9E6A');
+    if (line.length > 1) pin(line[line.length - 1], t.status === 'active' ? 'Now' : 'Drop-off', t.status === 'active' ? TRIP_COLOR : '#D64545');
+    setTimeout(() => fitTo(map, line), 80);
   }
-  el.querySelector('#rt-info').textContent = `${pts.length} GPS points recorded${pts.length && pts[0].at ? ` · ${fmtTime(pts[0].at)} – ${fmtTime(pts[pts.length - 1].at)} (your time)` : ''}`;
+  el.querySelector('#rt-info').textContent = `${pts.length <= 2 ? 'Few GPS points during the ride (phone GPS off, or app closed on iPhone) — showing pick-up and drop-off. ' : ''}${pts.length} GPS points recorded${pts.length && pts[0].at ? ` · ${fmtTime(pts[0].at)} – ${fmtTime(pts[pts.length - 1].at)} (your time)` : ''}`;
 }
 
 function editDialog(t, onDone) {

@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/models.dart';
 import 'db.dart';
 import 'position_hub.dart';
+import 'violation_service.dart';
 
 /// Runs while an employee is checked in:
 ///  * streams their position to Firestore (live map + GPS trail)
@@ -21,6 +23,9 @@ class TrackingService {
 
   bool _running = false;
   DateTime? _lastPushAt;
+  /// Last time this phone got any GPS fix (or the start of the current no-GPS gap).
+  DateTime? _lastFixAt;
+  Timer? _watchdog;
   Timer? _hourly;
   String? _uid;
   String _name = '';
@@ -62,8 +67,20 @@ class TrackingService {
     _lastAlertAt = null;
 
     _running = true;
+    _lastFixAt = session.checkIn;
+    // App reopened after being closed / phone off: count the hours with no GPS since the last location.
+    try {
+      final u = await Db.users.doc(uid).get();
+      final ll = u.data()?['lastLocation'];
+      final at = ll is Map && ll['at'] is Timestamp ? (ll['at'] as Timestamp).toDate() : null;
+      if (at != null && at.isAfter(session.checkIn)) _lastFixAt = at;
+      await ViolationService.recordGap(uid: uid, name: name, session: session, gapStart: _lastFixAt!);
+    } catch (e) {
+      debugPrint('gap check failed: $e');
+    }
     await PositionHub.instance.add('duty', _onPosition);
     _hourly = Timer.periodic(_hourlyCheck, (_) => _hourlyTick());
+    _watchdog = Timer.periodic(const Duration(minutes: 5), (_) => _watch());
   }
 
   Future<void> _onPosition(Position p) async {
@@ -71,6 +88,7 @@ class TrackingService {
     if (uid == null) return;
     _lastPos = p;
     final now = DateTime.now();
+    _lastFixAt = now;
     // During a driver trip the shared GPS runs every few seconds — keep duty updates to ~1 per 30 s.
     if (_lastPushAt != null && now.difference(_lastPushAt!) < const Duration(seconds: 30)) return;
     _lastPushAt = now;
@@ -100,6 +118,26 @@ class TrackingService {
     await _checkGeofence(p);
   }
 
+  /// Every 5 min: if no GPS for 15 min, ask for a fresh fix (a phone standing still sends none);
+  /// if there has been no GPS for an hour or more, record "no activity" violations.
+  Future<void> _watch() async {
+    final uid = _uid, session = _session, since = _lastFixAt;
+    if (uid == null || session == null || since == null) return;
+    final gap = DateTime.now().difference(since);
+    if (gap < const Duration(minutes: 15)) return;
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: AndroidSettings(accuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 30)),
+      );
+      _lastPushAt = null; // make sure this fix is saved
+      await _onPosition(p);
+      return;
+    } catch (_) {}
+    if (gap.inMinutes >= ViolationService.kNoGpsMinutes) {
+      await ViolationService.recordGap(uid: uid, name: _name, session: session, gapStart: since);
+    }
+  }
+
   /// Hourly: take a fresh fix, store it, and re-check the geofence.
   Future<void> _hourlyTick() async {
     final uid = _uid;
@@ -116,12 +154,7 @@ class TrackingService {
     } catch (_) {
       p = _lastPos;
     }
-    if (p == null) {
-      try {
-        await Db.addAlert(uid: uid, name: _name, session: session, type: 'gps_off');
-      } catch (_) {}
-      return;
-    }
+    if (p == null) return; // counted by the no-GPS watchdog
     try {
       await Db.pushLocation(
         uid: uid,
@@ -192,6 +225,9 @@ class TrackingService {
     _running = false;
     _hourly?.cancel();
     _hourly = null;
+    _watchdog?.cancel();
+    _watchdog = null;
+    _lastFixAt = null;
     final uid = _uid;
     if (markStopped && uid != null) {
       try {
