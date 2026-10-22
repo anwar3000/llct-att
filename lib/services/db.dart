@@ -767,6 +767,10 @@ class Db {
   static CollectionReference<Map<String, dynamic>> get idInfo => _fs.collection('idInfo');
   static CollectionReference<Map<String, dynamic>> get idFiles => _fs.collection('idFiles');
 
+  /// Employee updates their own mobile number / email (rules allow only these fields).
+  static Future<void> updateMyContact(String uid, {required String phone, required String email}) =>
+      users.doc(uid).update({'phone': phone, 'contactEmail': email, 'contactUpdatedAt': FieldValue.serverTimestamp()});
+
   static Stream<Map<String, dynamic>> myIdInfo(String uid) =>
       idInfo.doc(uid).snapshots().map((d) => d.data() ?? {});
 

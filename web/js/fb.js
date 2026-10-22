@@ -43,6 +43,7 @@ export function mapUser(d) {
     loginId: m.loginId || '',
     email: m.email || '',
     phone: m.phone || '',
+    contactEmail: m.contactEmail || '',
     designation: m.designation || '',
     role: m.role || 'employee',
     active: m.active !== false,

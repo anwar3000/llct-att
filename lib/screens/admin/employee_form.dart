@@ -21,6 +21,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
   late final _login = TextEditingController(text: widget.existing?.loginId);
   final _pass = TextEditingController();
   late final _phone = TextEditingController(text: widget.existing?.phone);
+  late final _email = TextEditingController(text: widget.existing?.contactEmail);
   late final _designation = TextEditingController(text: widget.existing?.designation);
   late String _role = widget.existing?.role ?? 'employee';
   late Set<int> _weeklyOff = {...(widget.existing?.weeklyOffDays ?? const [7])};
@@ -36,7 +37,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
 
   @override
   void dispose() {
-    for (final c in [_name, _login, _pass, _phone, _designation, _vehicle, _rate]) {
+    for (final c in [_name, _login, _pass, _phone, _email, _designation, _vehicle, _rate]) {
       c.dispose();
     }
     super.dispose();
@@ -51,6 +52,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
         await Db.updateUser(widget.existing!.id, {
           'name': _name.text.trim(),
           'phone': _phone.text.trim(),
+          'contactEmail': _email.text.trim(),
           'designation': _designation.text.trim(),
           'role': _role,
           'weeklyOffDays': weekly,
@@ -71,6 +73,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           weeklyOffDays: weekly,
           monthlyOffQuota: _quota,
         );
+        if (_email.text.trim().isNotEmpty) await Db.updateUser(uid, {'contactEmail': _email.text.trim()});
         if (_role == 'employee' && _driver) {
           await Db.updateUser(uid, {
             'isDriver': true,
@@ -116,7 +119,16 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
               controller: _phone,
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(
-                  labelText: 'Phone', prefixIcon: Icon(Icons.phone_outlined)),
+                  labelText: 'Mobile number', prefixIcon: Icon(Icons.phone_outlined)),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline)),
+              validator: (v) => (v ?? '').trim().isEmpty || RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v!.trim())
+                  ? null
+                  : 'Enter a valid email',
             ),
             const SizedBox(height: 12),
             TextFormField(

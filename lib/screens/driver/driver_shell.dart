@@ -9,6 +9,7 @@ import '../../services/auth_service.dart';
 import '../../services/db.dart';
 import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
+import '../../widgets/profile_prompt.dart';
 import '../../widgets/trip_card.dart';
 import '../employee/my_documents_screen.dart';
 
@@ -36,6 +37,10 @@ class _DriverShellState extends State<DriverShell> {
   @override
   void initState() {
     super.initState();
+    // Missing mobile / email / passport / Emirates ID? Ask once when the app opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ProfilePrompt.maybeAsk(context, widget.me);
+    });
     _subs.add(Db.sitesStream(activeOnly: true).listen((l) {
       if (mounted) setState(() => _sites = l);
     }, onError: (_) {}));
@@ -101,6 +106,16 @@ class _DriverShellState extends State<DriverShell> {
             if (me.vehicle.isNotEmpty) InfoRow(Icons.directions_car_outlined, 'Vehicle', me.vehicle),
             InfoRow(Icons.speed, 'Rate', _rate == null ? '…' : '${fmtMoney(_rate!)} per km'),
             const SizedBox(height: 14),
+            if (me.contactEmail.isNotEmpty) InfoRow(Icons.mail_outline, 'Email', me.contactEmail),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(c);
+                ProfilePrompt.editContact(context, widget.me);
+              },
+              icon: const Icon(Icons.edit_outlined),
+              label: Text(me.phone.isEmpty || me.contactEmail.isEmpty ? 'Add mobile number & email' : 'Edit mobile number & email'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.primaryDark),
               onPressed: () {

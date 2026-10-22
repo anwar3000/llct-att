@@ -154,12 +154,14 @@ function start() {
   on(C('workerLocks'), (s) => { S.locks = Object.fromEntries(s.docs.map((d) => [d.id, d.data()])); });
   on(query(C('petty'), where('employeeId', '==', uid)), (s) => { S.petty = s.docs.map(mapPetty).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); draw(); });
   on(query(C('siteUpdates'), where('employeeId', '==', uid)), (s) => { S.myUpdates = s.docs.map(mapUpdate).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); draw(); });
-  S.subs.push(onSnapshot(doc(db, 'idInfo', uid), (d) => { S.idInfo = d.exists() ? mapIdInfo(d) : {}; if (S.tab === 'me') draw(); }, () => {}));
-  on(query(C('idFiles'), where('ownerId', '==', uid)), (s) => { S.idFiles = s.docs.map(mapIdFile); if (S.tab === 'me') draw(); });
+  S.subs.push(onSnapshot(doc(db, 'idInfo', uid), (d) => { S.idInfo = d.exists() ? mapIdInfo(d) : {}; S._infoLoaded = true; maybeAskProfile(); if (S.tab === 'me') draw(); }, () => {}));
+  on(query(C('idFiles'), where('ownerId', '==', uid)), (s) => { S.idFiles = s.docs.map(mapIdFile); S._filesLoaded = true; maybeAskProfile(); if (S.tab === 'me') draw(); });
   // Signed out remotely by management?
   S.subs.push(onSnapshot(doc(db, 'users', uid), (d) => {
     S.lastLocAt = d.data()?.lastLocation?.at?.toDate?.() || S.lastLocAt;
     S._userLoaded = true;
+    if (d.exists()) { S.me.phone = d.data().phone || ''; S.me.contactEmail = d.data().contactEmail || ''; }
+    maybeAskProfile();
     S.me.violationsClearedAt = d.data()?.violationsClearedAt?.toDate?.() || null;
     const f = d.data()?.forceLogoutAt?.toDate?.();
     const signedIn = auth.currentUser?.metadata?.lastSignInTime ? new Date(auth.currentUser.metadata.lastSignInTime) : null;
@@ -1203,11 +1205,73 @@ function expenseDialog() {
 }
 
 // ================================================================== ME (profile + own ID documents)
+// ================================================================== profile completeness
+function missingProfile() {
+  const out = [];
+  if (!(S.me.phone || '').trim()) out.push('Mobile number');
+  if (!(S.me.contactEmail || '').trim()) out.push('Email');
+  const i = S.idInfo || {};
+  const has = (kind, num) => (i[num] || '').trim() || S.idFiles.some((f) => f.kind === kind);
+  if (!has('passport', 'passportNo')) out.push('Passport');
+  if (!has('eid', 'eidNo')) out.push('Emirates ID');
+  return out;
+}
+// Once a day when the app opens: ask to fill in a missing mobile number, email, passport or Emirates ID.
+function maybeAskProfile() {
+  if (S._profileAsked || !S._infoLoaded || !S._filesLoaded || !S._userLoaded) return;
+  S._profileAsked = true;
+  const key = `llct-profile-ask-${S.me.id}-${dateKey(new Date())}`;
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* private mode */ }
+  const miss = missingProfile();
+  if (!miss.length) return;
+  modal({
+    title: 'Please complete your profile',
+    body: `<p style="margin:0 0 8px">These details are missing:</p>${miss.map((m) => `<div style="padding:4px 0;font-weight:700;color:#b23535">• ${esc(m)}</div>`).join('')}
+      <p class="small muted" style="margin:10px 0 0">The office needs them for site passes, visas and emergencies.</p>`,
+    foot: '<button class="st-btn" data-no>Later</button><button class="st-btn primary" data-yes style="flex:1">UPDATE NOW</button>',
+    onMount: (el, close) => {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = () => {
+        close();
+        S.tab = 'me'; draw(); window.scrollTo(0, 0);
+        if (miss.includes('Mobile number') || miss.includes('Email')) editContact();
+      };
+    },
+  });
+}
+function editContact() {
+  modal({
+    title: 'Mobile number & email',
+    body: `<label class="f"><span>Mobile number</span><input id="ct-p" type="tel" value="${esc(S.me.phone || '')}" placeholder="+971 50 123 4567"></label>
+      <label class="f"><span>Email</span><input id="ct-e" type="email" value="${esc(S.me.contactEmail || '')}" placeholder="name@example.com"></label><div class="error" id="ct-err"></div>`,
+    foot: '<button class="st-btn" data-no>Cancel</button><button class="st-btn primary" data-yes style="flex:1">SAVE</button>',
+    onMount: (el, close) => {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = async () => {
+        const phone = el.querySelector('#ct-p').value.trim(), email = el.querySelector('#ct-e').value.trim();
+        if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { el.querySelector('#ct-err').textContent = 'Enter a valid email.'; return; }
+        try {
+          await updateDoc(doc(db, 'users', S.me.id), { phone, contactEmail: email, contactUpdatedAt: serverTimestamp() });
+          S.me.phone = phone; S.me.contactEmail = email; close(); toast('Saved'); draw();
+        } catch (e) { el.querySelector('#ct-err').textContent = friendlyError(e); }
+      };
+    },
+  });
+}
+
 function drawMe(main) {
   const i = S.idInfo || {};
+  const miss = missingProfile();
   main.innerHTML = `
     <div class="st-card pad" style="display:flex;gap:12px;align-items:center">${avatar(S.me.name, 52)}
-      <div class="grow"><b style="font-size:17px">${esc(S.me.name)}</b><div class="small muted">${esc(S.me.designation || 'Staff')} · ID ${esc(S.me.loginId)}${S.me.phone ? ` · ${esc(S.me.phone)}` : ''}</div></div></div>
+      <div class="grow"><b style="font-size:17px">${esc(S.me.name)}</b><div class="small muted">${esc(S.me.designation || 'Staff')} · ID ${esc(S.me.loginId)}</div></div></div>
+    ${miss.length ? `<div class="st-note" style="background:#fbe6e6;color:#8f2a2a"><b>Please add:</b> ${esc(miss.join(', '))}</div>` : ''}
+    <div class="st-card pad" style="margin-top:10px">
+      <div class="row" style="flex-wrap:nowrap;gap:10px"><div class="grow">
+        <div class="small muted">Mobile number</div><b>${S.me.phone ? esc(S.me.phone) : '<span style="color:#b23535">Not added</span>'}</b>
+        <div class="small muted" style="margin-top:8px">Email</div><b>${S.me.contactEmail ? esc(S.me.contactEmail) : '<span style="color:#b23535">Not added</span>'}</b></div>
+        <button class="st-btn sm" id="me-ct">${S.me.phone && S.me.contactEmail ? 'Edit' : 'Add'}</button></div>
+    </div>
     <h3 class="st-h">My ID documents <span class="small muted" style="font-weight:500">· photo or PDF, max 2 MB</span></h3>
     ${DOC_KINDS.map((k) => {
       const files = S.idFiles.filter((f) => f.kind === k.k);
@@ -1225,6 +1289,7 @@ function drawMe(main) {
       ${isIOS && !standalone ? `<div class="small" style="margin-bottom:10px">${icon('download', 14)} Install on iPhone: Safari → <b>Share</b> → <b>Add to Home Screen</b>.</div>` : ''}
       <button class="st-btn block" id="me-out">${icon('logout', 16)} Sign out</button>
       <div class="small muted" style="text-align:center;margin-top:8px">LLCT Attendance · web app</div></div>`;
+  main.querySelector('#me-ct').onclick = editContact;
   main.querySelector('#me-save').onclick = async (ev) => {
     const data = {};
     main.querySelectorAll('[data-f]').forEach((x) => { data[x.dataset.f] = x.value.trim(); });

@@ -30,7 +30,9 @@ service cloud.firestore {
       allow read: if isSelf(uid) || isManagement() || isDocs() || (isActive() && resource.data.get('isDriver', false) == true);
       allow create, delete: if isAdmin();
       // Admins edit profiles; staff may only update their own live location.
-      allow update: if isAdmin() || (isSelf(uid) && isActive() && onlyChanges(['lastLocation']));
+      // Staff may update their own live location, and their own mobile number / email.
+      allow update: if isAdmin() || (isSelf(uid) && isActive()
+                      && onlyChanges(['lastLocation', 'phone', 'contactEmail', 'contactUpdatedAt']));
 
       // GPS trail while on duty
       match /track/{pointId} {

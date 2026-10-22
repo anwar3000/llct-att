@@ -100,7 +100,8 @@ export function editPerson(u) {
       <label class="f"><span>Login ID *</span><input name="loginId" ${editing ? 'disabled' : ''} value="${esc(u?.loginId)}" placeholder="EMP001"></label>
       ${editing ? '<label class="f"><span>&nbsp;</span><div class="small muted" style="padding-top:8px">Login ID can’t be changed.</div></label>'
         : '<label class="f"><span>Password * (min 6)</span><input name="password" type="text" minlength="6"></label>'}
-      <label class="f"><span>Phone</span><input name="phone" value="${esc(u?.phone)}"></label>
+      <label class="f"><span>Mobile number</span><input name="phone" type="tel" value="${esc(u?.phone)}" placeholder="+971 50 123 4567"></label>
+      <label class="f"><span>Email</span><input name="cemail" type="email" value="${esc(u?.contactEmail)}" placeholder="name@example.com"></label>
       <label class="f"><span>Designation</span><input name="designation" value="${esc(u?.designation)}"></label>
       <label class="f full"><span>Role</span><select name="role">
         <option value="employee" ${(!u || u.role === 'employee') ? 'selected' : ''}>Employee — uses the mobile app to check in</option>
@@ -142,8 +143,9 @@ export function editPerson(u) {
         const err = m.querySelector('#ef-err');
         const btn = m.querySelector('[data-save]');
         if (!f.name.value.trim()) { err.textContent = 'Name is required.'; return; }
+        if (f.cemail.value.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.cemail.value.trim())) { err.textContent = 'Enter a valid email.'; return; }
         const data = {
-          name: f.name.value.trim(), phone: f.phone.value.trim(), designation: f.designation.value.trim(), role: f.role.value,
+          name: f.name.value.trim(), phone: f.phone.value.trim(), contactEmail: f.cemail.value.trim(), designation: f.designation.value.trim(), role: f.role.value,
           weeklyOffDays: [...off].sort(), monthlyOffQuota: Number(f.quota.value) || 0,
           isDriver: f.role.value === 'employee' && f.profile.value === 'driver', vehicle: f.vehicle.value.trim(),
           tripRatePerKm: f.tripRate.value === '' ? null : Number(f.tripRate.value),
@@ -226,7 +228,7 @@ function detail(root, id, { setHeader }) {
   function draw() {
     const u = store.user(id);
     if (!u) { el.innerHTML = store.loaded ? '<div class="card empty"><b>Employee not found</b></div>' : ''; return; }
-    setHeader(u.name, `${esc(ROLE_LABEL[u.role])} · ID <span class="mono">${esc(u.loginId)}</span>${u.phone ? ` · ${esc(u.phone)}` : ''}${u.designation ? ` · ${esc(u.designation)}` : ''}`,
+    setHeader(u.name, `${esc(ROLE_LABEL[u.role])} · ID <span class="mono">${esc(u.loginId)}</span>${u.phone ? ` · ${esc(u.phone)}` : ' · <span style="color:#b23535">no mobile</span>'}${u.contactEmail ? ` · <a href="mailto:${esc(u.contactEmail)}">${esc(u.contactEmail)}</a>` : ''}${u.designation ? ` · ${esc(u.designation)}` : ''}`,
       `<a class="btn ghost" href="#/employees">← All employees</a>
        <button class="btn ghost" id="ed-xlsx">${icon('download', 16)} Month report</button>
        <button class="btn ghost" id="ed-ids">${icon('download', 16)} IDs</button>

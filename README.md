@@ -32,6 +32,7 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 ---
 
 ## What's new
+- **Profile completeness (v1.6.1):** when the app opens, staff and drivers with a missing mobile number, email, passport or Emirates ID see a *Please complete your profile* popup. **Update now** opens the mobile & email form, then their ID documents. The Android app asks each time it opens; the iPhone app asks once a day. Employees can edit their own mobile number and email: tap their profile picture on Android, or open the *Me* tab on iPhone. Admin can set both for anyone in the employee form (app and web). The Firestore rules now let staff change only these two fields on their own profile.
 - **GPS "no activity" rules (v1.6.0):**
   - **Violations:** while an employee is checked in, every full hour with no GPS location counts as one *no activity* violation. This covers GPS off, the app closed, or the phone off. The app shows a popup and a red banner.
   - **Phone standing still:** the Android app asks the phone for a fresh location every 15 minutes, so staying in one place isn't counted as a violation.

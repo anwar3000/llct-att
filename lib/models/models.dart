@@ -78,6 +78,8 @@ class AppUser {
   final String loginId;
   final String email;
   final String phone;
+  /// Contact email (the login email is internal, e.g. EMP001@staff…).
+  final String contactEmail;
   final String designation;
   final String role; // 'employee' | 'manager' | 'admin'
   final bool active;
@@ -102,6 +104,7 @@ class AppUser {
     required this.loginId,
     required this.email,
     this.phone = '',
+    this.contactEmail = '',
     this.designation = '',
     this.role = 'employee',
     this.active = true,
@@ -135,6 +138,7 @@ class AppUser {
       loginId: _str(m['loginId']),
       email: _str(m['email']),
       phone: _str(m['phone']),
+      contactEmail: _str(m['contactEmail']),
       designation: _str(m['designation']),
       role: _str(m['role'], 'employee'),
       active: m['active'] != false,

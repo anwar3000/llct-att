@@ -10,6 +10,7 @@ import '../../services/db.dart';
 import '../../services/tracking_service.dart';
 import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
+import '../../widgets/profile_prompt.dart';
 import 'history_tab.dart';
 import 'home_tab.dart';
 import 'my_documents_screen.dart';
@@ -34,6 +35,10 @@ class _EmployeeShellState extends State<EmployeeShell> {
   @override
   void initState() {
     super.initState();
+    // Missing mobile / email / passport / Emirates ID? Ask once when the app opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ProfilePrompt.maybeAsk(context, widget.me);
+    });
     // Single source of truth for live tracking: run it whenever a session is open.
     _openSub = Db.openSession(widget.me.id).listen((s) {
       if (!mounted) return;
@@ -84,6 +89,16 @@ class _EmployeeShellState extends State<EmployeeShell> {
             InfoRow(Icons.calendar_month_outlined, 'Monthly quota', '${me.monthlyOffQuota} days'),
             const SizedBox(height: 16),
             const SizedBox(height: 12),
+            if (me.contactEmail.isNotEmpty) InfoRow(Icons.mail_outline, 'Email', me.contactEmail),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(c);
+                ProfilePrompt.editContact(context, widget.me);
+              },
+              icon: const Icon(Icons.edit_outlined),
+              label: Text(me.phone.isEmpty || me.contactEmail.isEmpty ? 'Add mobile number & email' : 'Edit mobile number & email'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(
                   backgroundColor: AppColors.accent, foregroundColor: AppColors.primaryDark),
