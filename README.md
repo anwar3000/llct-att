@@ -31,6 +31,9 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 
 ---
 
+## Firestore rules: one file for both apps
+LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
+
 ## What's new
 - **Ride costs and details (v1.6.2):**
   - **Company-driver rides** are now costed at km × that driver's rate. They show an amount everywhere and count in that driver's account (earned − paid), next to the driver's own trips.

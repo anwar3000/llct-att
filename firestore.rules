@@ -1,7 +1,11 @@
 rules_version = '2';
 
-// Security rules for LLCT Attendance (mobile app + web dashboard).
-// Paste into Firebase Console → Firestore Database → Rules → Publish.
+// COMBINED RULES for the shared Firebase project: LLCT Attendance + LLCT Invoicing.
+// Both apps use ONE Firebase project, so they share this ONE rules file.
+// Paste the WHOLE file into Firebase Console → Firestore Database → Rules → Publish.
+// (Publishing only part of it would switch off the other app.)
+
+// ======================================================== LLCT Attendance
 //
 // Roles (users/{uid}.role):
 //   admin    – everything, including accounts (petty cash, budgets) and staff logins
@@ -252,6 +256,76 @@ service cloud.firestore {
     // Daily rate per external worker (accounts → admin only).
     match /workerRates/{workerId} {
       allow read, write: if isAdmin();
+    }
+
+    // ======================================================== LLCT Invoicing
+    // Attendance admins have full access. Everyone else gets permissions set by an admin
+    // in the invoicing app (inv_access/{uid}: { enabled, perms: { quotation, invoice, delivery,
+    // deliver, payments, clients, reports, viewAll, delete } }).
+    function invAcc() { return /databases/$(database)/documents/inv_access/$(request.auth.uid); }
+    function invOn() { return isAdmin() || (isActive() && exists(invAcc()) && get(invAcc()).data.get('enabled', true) != false); }
+    function invHas(p) { return isAdmin() || (invOn() && get(invAcc()).data.get('perms', {}).get(p, false) == true); }
+
+    match /inv_config/{id} {
+      allow read: if invOn();
+      allow write: if isAdmin();
+    }
+    match /inv_access/{uid} {
+      allow read: if isAdmin() || isSelf(uid);
+      allow write: if isAdmin();
+    }
+    match /inv_clients/{id} {
+      allow read: if invOn();
+      allow create: if invHas('clients');
+      // Anyone using invoicing may record a new place for a client (GPS from a delivery / service report).
+      allow update: if invHas('clients') || (invOn() && onlyChanges(['places', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+    // Anyone using invoicing can add a new product (items typed on documents are saved
+    // automatically); only "clients & products" permission can change or delete them.
+    match /inv_products/{id} {
+      allow read: if invOn();
+      allow create: if invOn() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if invHas('clients');
+    }
+    // Running document numbers (QTN…, INV…, DLN…). A counter can only move up, never back.
+    match /inv_counters/{type} {
+      allow read: if invOn();
+      allow create: if invHas(type) && request.resource.data.last is int && request.resource.data.last >= 1;
+      allow update: if invHas(type) && request.resource.data.last is int && request.resource.data.last > resource.data.last;
+    }
+    // Each user's own contact details, printed on documents they create.
+    match /inv_profiles/{uid} {
+      allow read: if invOn();
+      allow write: if isAdmin() || (isSelf(uid) && invOn());
+    }
+    // Document numbers already used (QTN…/INV…/DLN… + date + 3 random digits). Claimed once, never changed.
+    match /inv_numbers/{number} {
+      allow read: if invOn();
+      allow create: if invOn() && request.resource.data.by == request.auth.uid;
+    }
+    // Product photos (compressed, under 1 MB each)
+    match /inv_images/{id} {
+      allow read: if invOn();
+      allow create: if invOn() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+    match /inv_payments/{id} {
+      allow read: if invHas('payments') || invHas('reports') || invHas('invoice');
+      allow create, update: if invHas('payments');
+      allow delete: if isAdmin() || (invHas('payments') && invHas('delete'));
+    }
+    match /inv_docs/{id} {
+      allow read: if invHas('viewAll')
+                  || (invOn() && resource.data.createdBy == request.auth.uid)
+                  || (invHas('deliver') && resource.data.type == 'delivery');
+      allow create: if invHas(request.resource.data.type) && request.resource.data.createdBy == request.auth.uid;
+      // Editors of that document type; delivery staff may only add serials, status, proof photos and the signature.
+      allow update: if (invHas(resource.data.type) && request.resource.data.type == resource.data.type
+                        && (invHas('viewAll') || resource.data.createdBy == request.auth.uid))
+                    || (invHas('deliver') && resource.data.type == 'delivery'
+                        && onlyChanges(['items', 'delivery', 'attachments', 'updatedAt']));
+      allow delete: if invHas('delete');
     }
   }
 }
