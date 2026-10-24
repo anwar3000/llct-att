@@ -8,7 +8,7 @@ import '../../widgets/common.dart';
 import 'admin_live.dart';
 import 'live_map_tab.dart';
 import 'overview_tab.dart';
-import 'petty_admin_tab.dart';
+import 'accounts_tab.dart';
 import 'sites_tab.dart';
 import 'team_tab.dart';
 import 'trips_tab.dart';
@@ -44,10 +44,10 @@ class _AdminShellState extends State<AdminShell> {
     (icon: Icons.groups_outlined, active: Icons.groups, label: 'Team'),
     (icon: Icons.location_city_outlined, active: Icons.location_city, label: 'Sites'),
     (icon: Icons.local_taxi_outlined, active: Icons.local_taxi, label: 'Trips'),
-    (icon: Icons.account_balance_wallet_outlined, active: Icons.account_balance_wallet, label: 'Petty'),
+    (icon: Icons.account_balance_outlined, active: Icons.account_balance, label: 'Accounts'),
   ];
 
-  /// Managers don't see accounts (Petty tab).
+  /// Managers don't see accounts (Accounts & petty cash tab).
   List<({IconData icon, IconData active, String label})> get _items =>
       widget.me.isAdmin ? _allItems : _allItems.sublist(0, 5);
 
@@ -71,7 +71,7 @@ class _AdminShellState extends State<AdminShell> {
       TeamTab(me: widget.me, live: _live),
       SitesTab(me: widget.me, live: _live),
       TripsTab(me: widget.me, live: _live),
-      if (widget.me.isAdmin) PettyAdminTab(me: widget.me, live: _live),
+      if (widget.me.isAdmin) AccountsTab(me: widget.me, live: _live),
     ];
     final body = IndexedStack(index: _index, children: pages);
 

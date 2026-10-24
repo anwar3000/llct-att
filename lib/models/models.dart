@@ -1076,3 +1076,66 @@ class DriverPayment {
     );
   }
 }
+
+
+// ---------------------------------------------------------------------------
+// Accounts (admin only) — same data as the web dashboard's Accounts page.
+// ---------------------------------------------------------------------------
+
+const kAcctIncome = ['Cheque deposit', 'Cash deposit', 'Bank transfer received', 'Client payment', 'Owner capital', 'Loan received', 'Refund received', 'Other income'];
+const kAcctExpense = ['Purchase', 'Supplier payment', 'Salaries & wages', 'Labour supply', 'Rent', 'Utilities', 'Fuel', 'Vehicle & maintenance', 'Transport', 'Tools & equipment', 'Materials', 'Visa & PRO', 'Office expenses', 'Bank charges', 'Other expense'];
+const kAcctMethods = ['Cash', 'Cheque', 'Bank transfer', 'Card', 'Online / app'];
+
+/// Income or expense line. [source]: manual entry, or automatic from petty cash given / driver payments.
+class AcctEntry {
+  final String id;
+  final String source; // manual | petty | driver
+  final String type; // income | expense
+  final String date;
+  final double amount;
+  final String category, method, reference, bank, chequeDate, party, note, siteId, siteName;
+  final bool hasFile;
+  final DateTime? createdAt;
+  AcctEntry({
+    required this.id,
+    this.source = 'manual',
+    required this.type,
+    required this.date,
+    required this.amount,
+    this.category = '',
+    this.method = 'Cash',
+    this.reference = '',
+    this.bank = '',
+    this.chequeDate = '',
+    this.party = '',
+    this.note = '',
+    this.siteId = '',
+    this.siteName = '',
+    this.hasFile = false,
+    this.createdAt,
+  });
+  bool get isIncome => type == 'income';
+  bool get isBank => method != 'Cash';
+  double get signed => isIncome ? amount : -amount;
+
+  factory AcctEntry.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return AcctEntry(
+      id: d.id,
+      type: m['type'] == 'income' ? 'income' : 'expense',
+      date: _str(m['date']),
+      amount: _dbl(m['amount']) ?? 0,
+      category: _str(m['category']),
+      method: _str(m['method'], 'Cash'),
+      reference: _str(m['reference']),
+      bank: _str(m['bank']),
+      chequeDate: _str(m['chequeDate']),
+      party: _str(m['party']),
+      note: _str(m['note']),
+      siteId: _str(m['siteId']),
+      siteName: _str(m['siteName']),
+      hasFile: m['hasFile'] == true,
+      createdAt: _ts(m['createdAt']),
+    );
+  }
+}

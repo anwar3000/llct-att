@@ -1123,4 +1123,128 @@ class Db {
     });
     await batch.commit();
   }
+
+  // ---------------------------------------------------------------- accounts (admin only)
+  static CollectionReference<Map<String, dynamic>> get acct => _fs.collection('acctEntries');
+
+  static Stream<List<AcctEntry>> acctInRange(String from, String to) => acct
+      .where('date', isGreaterThanOrEqualTo: from)
+      .where('date', isLessThanOrEqualTo: to)
+      .snapshots()
+      .map((q) => q.docs.map(AcctEntry.fromDoc).toList());
+
+  /// Automatic expense lines: petty cash given to staff (not staff spending — that cash
+  /// was already counted when given) and payments to drivers.
+  static Future<List<AcctEntry>> acctAuto(String from, String to) async {
+    final res = await Future.wait([
+      _fs.collection('petty').where('date', isGreaterThanOrEqualTo: from).where('date', isLessThanOrEqualTo: to).get(),
+      _fs.collection('driverPayments').where('date', isGreaterThanOrEqualTo: from).where('date', isLessThanOrEqualTo: to).get(),
+    ]);
+    final out = <AcctEntry>[];
+    for (final d in res[0].docs) {
+      final m = d.data();
+      if (m['type'] != 'credit' || m['status'] == 'rejected') continue;
+      out.add(AcctEntry(
+        id: 'petty_${d.id}',
+        source: 'petty',
+        type: 'expense',
+        date: (m['date'] as String?) ?? '',
+        amount: (m['amount'] as num?)?.toDouble() ?? 0,
+        category: 'Petty cash given',
+        party: (m['employeeName'] as String?) ?? '',
+        note: [(m['note'] as String?) ?? '', if ((m['createdByName'] ?? '') != '') 'given by ${m['createdByName']}']
+            .where((x) => x.isNotEmpty)
+            .join(' · '),
+        siteName: (m['siteName'] as String?) ?? '',
+      ));
+    }
+    for (final d in res[1].docs) {
+      final p = DriverPayment.fromDoc(d);
+      out.add(AcctEntry(
+        id: 'drv_${d.id}',
+        source: 'driver',
+        type: 'expense',
+        date: p.date,
+        amount: p.amount,
+        category: 'Driver payment',
+        method: p.method.isEmpty ? 'Cash' : p.method,
+        party: (d.data()['employeeName'] as String?) ?? '',
+        note: p.note,
+      ));
+    }
+    return out;
+  }
+
+  static Future<({String date, double cash, double bank})> acctOpening() async {
+    final d = await _fs.collection('acctSettings').doc('opening').get();
+    final m = d.data() ?? {};
+    return (date: (m['date'] as String?) ?? '', cash: (m['cash'] as num?)?.toDouble() ?? 0, bank: (m['bank'] as num?)?.toDouble() ?? 0);
+  }
+
+  static Future<void> saveAcctOpening(String date, double cash, double bank, String by) =>
+      _fs.collection('acctSettings').doc('opening').set({
+        'date': date,
+        'cash': (cash * 100).round() / 100,
+        'bank': (bank * 100).round() / 100,
+        'updatedBy': by,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+  /// Balance brought forward to [from]: opening balance + everything from the opening date to the day before.
+  static Future<({double cash, double bank})> acctBroughtForward(String from) async {
+    final o = await acctOpening();
+    var cash = 0.0, bank = 0.0;
+    if (o.date.isNotEmpty && o.date.compareTo(from) <= 0) {
+      cash = o.cash;
+      bank = o.bank;
+    }
+    final start = o.date.isEmpty ? '2000-01-01' : o.date;
+    if (start.compareTo(from) >= 0) return (cash: cash, bank: bank);
+    final end = dateKey(parseDateKey(from).subtract(const Duration(days: 1)));
+    final manual = await acct.where('date', isGreaterThanOrEqualTo: start).where('date', isLessThanOrEqualTo: end).get();
+    final auto = await acctAuto(start, end);
+    for (final e in [...manual.docs.map(AcctEntry.fromDoc), ...auto]) {
+      if (e.isBank) {
+        bank += e.signed;
+      } else {
+        cash += e.signed;
+      }
+    }
+    return (cash: (cash * 100).round() / 100, bank: (bank * 100).round() / 100);
+  }
+
+  static Future<void> saveAcct({String? id, required Map<String, dynamic> data, required AppUser by, String? photoBase64}) async {
+    final ref = id == null ? acct.doc() : acct.doc(id);
+    final b = _fs.batch();
+    b.set(ref, {
+      ...data,
+      'month': (data['date'] as String).substring(0, 7),
+      if (photoBase64 != null) 'hasFile': true,
+      if (photoBase64 != null) 'fileName': 'receipt.jpg',
+      if (photoBase64 != null) 'fileMime': 'image/jpeg',
+      if (id == null) 'createdBy': by.name,
+      if (id == null) 'createdById': by.id,
+      if (id == null) 'createdAt': FieldValue.serverTimestamp(),
+      if (id != null) 'editedBy': by.name,
+      if (id != null) 'editedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    if (photoBase64 != null) {
+      b.set(_fs.collection('acctFiles').doc(ref.id), {'base64': photoBase64, 'mime': 'image/jpeg', 'name': 'receipt.jpg'});
+    }
+    await b.commit();
+  }
+
+  static Future<void> deleteAcct(AcctEntry e) async {
+    final b = _fs.batch();
+    b.delete(acct.doc(e.id));
+    if (e.hasFile) b.delete(_fs.collection('acctFiles').doc(e.id));
+    await b.commit();
+  }
+
+  static Future<({String base64, String mime})?> acctFile(String id) async {
+    final d = await _fs.collection('acctFiles').doc(id).get();
+    final m = d.data();
+    if (m == null) return null;
+    return (base64: (m['base64'] as String?) ?? '', mime: (m['mime'] as String?) ?? 'image/jpeg');
+  }
 }

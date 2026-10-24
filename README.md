@@ -35,6 +35,14 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Accounts in the admin app (v1.7.1):** the last tab is now **Accounts**, with two parts: **Accounts** and **Petty cash**. It uses the same data as the web page. You can:
+  - choose a period: this month, last month, this year or all time;
+  - see the balance brought forward + income − expenses = closing balance, split into cash and bank;
+  - add income or an expense with a receipt photo;
+  - tap an entry to edit it, or long-press to delete it;
+  - set the opening balance.
+
+  Excel/PDF reports are on the web page.
 - **Accounts (admin only, web dashboard):**
   - **Entries:** record income (cheque or cash deposit, bank transfer, client payment, capital, loans…) and expenses (purchases, supplier payments, salaries, rent, fuel, visas…). Each entry has a method, cheque number with bank and date, a party, a site, a note, and an optional receipt or cheque copy.
   - **Automatic expenses:** petty cash given to staff and payments to drivers are added as expenses. Staff spending from petty cash isn't counted again.
