@@ -15,6 +15,7 @@ import * as documents from './pages/documents.js';
 import * as requests from './pages/requests.js';
 import * as working from './pages/working.js';
 import * as trips from './pages/trips.js';
+import * as accounts from './pages/accounts.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -36,6 +37,7 @@ const NAV = [
   { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
   { path: 'requests', label: 'Change requests', icon: 'pending', page: requests, badge: () => store.requests.length },
   { path: 'petty', label: 'Petty cash', icon: 'wallet', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
+  { path: 'accounts', label: 'Accounts', icon: 'bank', page: accounts, adminOnly: true },
   { sep: 'Output' },
   { path: 'reports', label: 'Reports', icon: 'report', page: reports },
 ];

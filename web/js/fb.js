@@ -10,7 +10,7 @@ import {
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
-import { dateKey, monthKey, atTz, fromTz } from './util.js';
+import { dateKey, monthKey, atTz, fromTz, parseKey } from './util.js';
 
 export const LOGIN_DOMAIN = 'staff.attendance.app';
 export const loginToEmail = (l) => {
@@ -301,6 +301,110 @@ export async function finishedTripsFor(ids) {
     out.push(...rides.docs.map(mapTrip).filter((t) => t.status === 'done' && t.kind === 'withDriver'));
   }
   return out.sort((a, b) => (a.startAt || 0) - (b.startAt || 0));
+}
+
+// ------------------------------------------------------------------ accounts (admin only)
+// Manual income / expense entries. Petty cash given to staff and driver payments are
+// added to the accounts automatically (read from their own collections).
+export const ACCT_INCOME = ['Cheque deposit', 'Cash deposit', 'Bank transfer received', 'Client payment', 'Owner capital', 'Loan received', 'Refund received', 'Other income'];
+export const ACCT_EXPENSE = ['Purchase', 'Supplier payment', 'Salaries & wages', 'Labour supply', 'Rent', 'Utilities', 'Fuel', 'Vehicle & maintenance', 'Transport', 'Tools & equipment', 'Materials', 'Visa & PRO', 'Office expenses', 'Bank charges', 'Other expense'];
+export const ACCT_METHODS = ['Cash', 'Cheque', 'Bank transfer', 'Card', 'Online / app'];
+export const isBankMethod = (m) => m && m !== 'Cash';
+export function mapAcct(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, source: 'manual', type: m.type === 'income' ? 'income' : 'expense', date: m.date || '', amount: num(m.amount),
+    category: m.category || '', method: m.method || 'Cash', reference: m.reference || '', bank: m.bank || '', chequeDate: m.chequeDate || '',
+    party: m.party || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '',
+    hasFile: m.hasFile === true, fileName: m.fileName || '', fileMime: m.fileMime || '',
+    createdBy: m.createdBy || '', createdAt: toDate(m.createdAt), editedBy: m.editedBy || '', editedAt: toDate(m.editedAt),
+  };
+}
+export const watchAcct = (from, to, cb) => onSnapshot(query(C('acctEntries'), where('date', '>=', from), where('date', '<=', to)),
+  (snap) => cb(snap.docs.map(mapAcct)), (e) => { console.error(e); cb(null, e); });
+export async function saveAcct(id, data, file = null) {
+  const ref = id ? doc(db, 'acctEntries', id) : doc(C('acctEntries'));
+  const site = data.siteId ? store.site(data.siteId) : null;
+  const body = {
+    ...data, amount: Math.round(Number(data.amount) * 100) / 100, month: (data.date || '').slice(0, 7), siteName: site?.name || '',
+    ...(file ? { hasFile: true, fileName: file.name, fileMime: file.mime } : {}),
+    ...(id ? { editedBy: store.me?.name || '', editedAt: serverTimestamp() } : { createdBy: store.me?.name || '', createdById: store.me?.id || '', createdAt: serverTimestamp() }),
+  };
+  const b = writeBatch(db);
+  b.set(ref, body, { merge: true });
+  if (file) b.set(doc(db, 'acctFiles', ref.id), { base64: file.base64, mime: file.mime, name: file.name });
+  await b.commit();
+  return ref.id;
+}
+export async function deleteAcct(e) {
+  const b = writeBatch(db);
+  b.delete(doc(db, 'acctEntries', e.id));
+  if (e.hasFile) b.delete(doc(db, 'acctFiles', e.id));
+  await b.commit();
+}
+export async function removeAcctFile(e) {
+  const b = writeBatch(db);
+  b.update(doc(db, 'acctEntries', e.id), { hasFile: false, fileName: '', fileMime: '' });
+  b.delete(doc(db, 'acctFiles', e.id));
+  await b.commit();
+}
+export async function readAcctFile(id) {
+  const d = await getDoc(doc(db, 'acctFiles', id));
+  return d.exists() ? d.data() : null;
+}
+/** Opening balance (cash & bank as at a start date) — admin only. */
+export async function getAcctOpening() {
+  const d = await getDoc(doc(db, 'acctSettings', 'opening'));
+  const m = d.exists() ? d.data() : {};
+  return { date: m.date || '', cash: num(m.cash), bank: num(m.bank), note: m.note || '' };
+}
+export const saveAcctOpening = (o) => setDoc(doc(db, 'acctSettings', 'opening'), {
+  date: o.date, cash: Math.round(Number(o.cash || 0) * 100) / 100, bank: Math.round(Number(o.bank || 0) * 100) / 100, note: o.note || '',
+  updatedBy: store.me?.name || '', updatedAt: serverTimestamp(),
+});
+/**
+ * Balance brought forward to the start of a period (`from`): opening balance + all income − all expenses
+ * (manual entries, petty cash given, driver payments) from the opening date up to the day before `from`.
+ */
+export async function acctBroughtForward(from, opening) {
+  const start = opening.date || '2000-01-01';
+  const out = { cash: 0, bank: 0 };
+  if (opening.date && opening.date <= from) { out.cash = opening.cash; out.bank = opening.bank; }
+  if (start >= from) return out;
+  const prev = new Date(parseKey(from).getTime() - 86400000);
+  const end = dateKey(prev);
+  const [snap, auto] = await Promise.all([
+    getDocs(query(C('acctEntries'), where('date', '>=', start), where('date', '<=', end))),
+    autoAcctLines(start, end),
+  ]);
+  for (const e of [...snap.docs.map(mapAcct), ...auto]) {
+    const k = isBankMethod(e.method) ? 'bank' : 'cash';
+    out[k] += e.type === 'income' ? e.amount : -e.amount;
+  }
+  out.cash = Math.round(out.cash * 100) / 100; out.bank = Math.round(out.bank * 100) / 100;
+  return out;
+}
+
+/** Automatic expense lines: petty cash given to staff, and payments to drivers. */
+export async function autoAcctLines(from, to) {
+  const [petty, pays] = await Promise.all([
+    getDocs(query(C('petty'), where('date', '>=', from), where('date', '<=', to))),
+    getDocs(query(C('driverPayments'), where('date', '>=', from), where('date', '<=', to))),
+  ]);
+  const out = [];
+  for (const d of petty.docs) {
+    const t = mapPetty(d);
+    if (t.type !== 'credit' || t.status === 'rejected') continue;
+    out.push({ id: `petty_${t.id}`, source: 'petty', type: 'expense', date: t.date || dateKey(t.createdLocal || new Date()), amount: t.amount,
+      category: 'Petty cash given', method: 'Cash', reference: '', party: t.employeeName, note: [t.note, t.createdByName ? `given by ${t.createdByName}` : ''].filter(Boolean).join(' · '),
+      siteId: t.siteId, siteName: t.siteName, hasFile: false });
+  }
+  for (const d of pays.docs) {
+    const p = mapPayment(d);
+    out.push({ id: `drv_${p.id}`, source: 'driver', type: 'expense', date: p.date, amount: p.amount, category: 'Driver payment',
+      method: p.method || 'Cash', reference: '', party: p.employeeName, note: [p.note, p.createdBy ? `by ${p.createdBy}` : ''].filter(Boolean).join(' · '), siteId: '', siteName: '', hasFile: false });
+  }
+  return out;
 }
 
 export async function deleteTrip(id) {

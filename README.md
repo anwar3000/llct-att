@@ -35,6 +35,11 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Accounts (admin only, web dashboard):**
+  - **Entries:** record income (cheque or cash deposit, bank transfer, client payment, capital, loans…) and expenses (purchases, supplier payments, salaries, rent, fuel, visas…). Each entry has a method, cheque number with bank and date, a party, a site, a note, and an optional receipt or cheque copy.
+  - **Automatic expenses:** petty cash given to staff and payments to drivers are added as expenses. Staff spending from petty cash isn't counted again.
+  - **Balance:** set an **Opening balance** (cash and bank as at a date). Each period then shows **Balance brought forward + Net = Closing balance**, split into cash and bank.
+  - **Breakdowns and export:** see totals by category, export Excel/PDF (summary, ledger with running balance, by category, by month, by party).
 - **Ride costs and details (v1.6.2):**
   - **Company-driver rides** are now costed at km × that driver's rate. They show an amount everywhere and count in that driver's account (earned − paid), next to the driver's own trips.
   - **Taxi rides:** when a taxi ride ends, the employee can enter the taxi number or company with the fare.

@@ -105,6 +105,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Company accounts: income & expense entries and their receipt copies (admin only).
+    match /acctEntries/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /acctFiles/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /acctSettings/{id} {
+      allow read, write: if isAdmin();
+    }
+
     // Claims on a place / site name so the same new site can't be added twice (first one wins).
     match /siteKeys/{key} {
       allow read: if isActive();
