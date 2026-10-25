@@ -351,6 +351,202 @@ export async function downloadIdPack(owners, title = 'ID documents', progress) {
   doc.save(`${safe(title)}-${dateKey(new Date())}.pdf`);
 }
 
+// ------------------------------------------------------------------ ID sheets (3 pages per person)
+// Page 1: Emirates ID front & back · Page 2: visa page + document table, photo, SIRA card · Page 3: passport front & back.
+let pdfjsPromise = null;
+function pdfjs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        res(window.pdfjsLib);
+      };
+      s.onerror = () => { pdfjsPromise = null; rej(new Error('PDF reader did not load — check your internet connection.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfjsPromise;
+}
+/** A PDF copy → its first pages as JPEG images (page 1 = front, page 2 = back). */
+async function pdfToImages(b64, max = 2) {
+  const lib = await pdfjs();
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const pdf = await lib.getDocument({ data: bytes }).promise;
+  const out = [];
+  for (let i = 1; i <= Math.min(max, pdf.numPages); i++) {
+    const page = await pdf.getPage(i);
+    const vp = page.getViewport({ scale: 2 });
+    const c = document.createElement('canvas');
+    c.width = vp.width; c.height = vp.height;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    out.push(c.toDataURL('image/jpeg', 0.85));
+  }
+  return out;
+}
+/** Images of one kind of document, front first: files named "back" go last, then upload order. */
+async function kindImages(files, kind) {
+  const list = files.filter((x) => x.f.kind === kind)
+    .map((x, i) => ({ ...x, o: /back|rear|reverse/i.test(x.f.name) ? 2 : /front/i.test(x.f.name) ? 0 : 1, i }))
+    .sort((a, b) => a.o - b.o || a.i - b.i);
+  const out = [];
+  for (const { f, b64 } of list) {
+    if (isImg(f)) out.push(dataUrl(f, b64));
+    else {
+      try { out.push(...(await pdfToImages(b64, 2))); } catch (e) { console.warn('pdf render', e); }
+    }
+  }
+  return out;
+}
+/** Crops an image to a box ratio (for the passport photo). */
+async function coverCrop(src, ratio) {
+  const img = await loadImage(src);
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  let w = iw, h = iw / ratio;
+  if (h > ih) { h = ih; w = ih * ratio; }
+  const c = document.createElement('canvas');
+  c.width = Math.round(Math.min(w, 600)); c.height = Math.round(c.width / ratio);
+  c.getContext('2d').drawImage(img, (iw - w) / 2, (ih - h) / 4, w, h, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.9);
+}
+
+export async function downloadIdSheets(owners, title = 'ID documents', progress) {
+  const jsPDF = window.jspdf && window.jspdf.jsPDF;
+  if (!jsPDF) throw new Error('PDF library did not load — check your internet connection.');
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const M = 30, CW = W - M * 2;
+  const clean = (v) => (v == null ? '' : String(v).replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ]/g, ''));
+  const logo = await loadLogo();
+  const fmtD = (v) => { if (!v) return '-'; const d = parseKey(v); return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); };
+  let first = true;
+
+  const header = (o, section) => {
+    if (!first) doc.addPage();
+    first = false;
+    doc.setFillColor(43, 43, 44); doc.rect(0, 0, W, 58, 'F');
+    doc.setFillColor(252, 176, 64); doc.rect(0, 58, W, 3, 'F');
+    let tx = M;
+    if (logo) { doc.addImage(logo, 'PNG', M, 11, 74, 35); tx = M + 88; }
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(clean(o.name), tx, 28);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(252, 176, 64);
+    doc.text(clean([o.type === 'worker' ? 'External worker' : 'Staff', o.org, o.trade, o.code ? `ID ${o.code}` : ''].filter(Boolean).join('  ·  ')), tx, 43);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
+    doc.text(clean(section.toUpperCase()), W - M, 34, { align: 'right' });
+    doc.setTextColor(40, 40, 40);
+  };
+  // A framed slot with a label; the image is fitted inside (or "not uploaded").
+  const slot = async (src, x, y, w, h, label, missing) => {
+    doc.setDrawColor(225, 222, 216); doc.setLineWidth(0.8);
+    doc.setFillColor(250, 249, 247); doc.roundedRect(x, y, w, h, 8, 8, src ? 'S' : 'FD');
+    if (src) {
+      try {
+        const img = await loadImage(src);
+        const pad = 10, lw = w - pad * 2, lh = h - pad * 2 - 14;
+        const s = Math.min(lw / img.naturalWidth, lh / img.naturalHeight);
+        const iw = img.naturalWidth * s, ih = img.naturalHeight * s;
+        doc.addImage(src, src.startsWith('data:image/png') ? 'PNG' : 'JPEG', x + (w - iw) / 2, y + 18 + (lh - ih) / 2 + pad / 2, iw, ih, undefined, 'MEDIUM');
+      } catch { src = null; }
+    }
+    if (!src) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(165, 165, 165);
+      doc.text(clean(missing), x + w / 2, y + h / 2, { align: 'center' });
+    }
+    doc.setFillColor(64, 64, 65); doc.roundedRect(x + 8, y + 7, doc.getTextWidth(clean(label)) * 1.05 + 14, 15, 4, 4, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(255, 255, 255);
+    doc.text(clean(label), x + 15, y + 17.5);
+    doc.setTextColor(40, 40, 40);
+  };
+  // Two sides on one page; a single image (both sides on one scan) uses the whole page.
+  const twoSides = async (imgs, name) => {
+    const top = 74, gap = 14, h = (H - 40 - top - gap) / 2;
+    if (imgs.length === 1) { await slot(imgs[0], M, top, CW, h * 2 + gap, `${name}`, ''); return; }
+    await slot(imgs[0], M, top, CW, h, `${name} - FRONT`, `${name} front - not uploaded`);
+    await slot(imgs[1], M, top + h + gap, CW, h, `${name} - BACK`, `${name} back - not uploaded`);
+  };
+
+  for (let n = 0; n < owners.length; n++) {
+    const o = owners[n];
+    progress?.(`${o.name} (${n + 1}/${owners.length})`);
+    const files = await ownerFiles(o, progress);
+    const i = store.info(o.id) || {};
+    const eid = await kindImages(files, 'eid');
+    const visa = await kindImages(files, 'visa');
+    const pass = await kindImages(files, 'passport');
+    const sira = await kindImages(files, 'sira');
+    const photo = (await kindImages(files, 'photo'))[0];
+
+    // Page 1 — Emirates ID
+    header(o, 'Emirates ID');
+    await twoSides(eid, 'Emirates ID');
+
+    // Page 2 — Visa (top) · details, photo, SIRA (bottom)
+    header(o, 'Visa & details');
+    const top = 74, half = (H - 40 - top - 14) / 2;
+    await slot(visa[0], M, top, CW, half, 'VISA', 'Visa page - not uploaded');
+    const y2 = top + half + 14;
+    const rightW = 150, leftW = CW - rightW - 14, rx = M + leftW + 14;
+    const today = parseKey(dateKey(new Date()));
+    const rows = DOC_KINDS.filter((k) => k.num).map((k) => {
+      const exp = i[k.exp];
+      let status = '-';
+      if (exp) {
+        const days = Math.floor((parseKey(exp) - today) / 86400000);
+        status = Number.isNaN(days) ? '-' : days < 0 ? 'Expired' : days <= 30 ? `Expires in ${days} d` : 'Valid';
+      }
+      return [k.label.replace(' / work permit', ''), i[k.num] || '-', fmtD(exp), status];
+    });
+    doc.autoTable({
+      startY: y2, margin: { left: M, right: W - M - leftW }, tableWidth: leftW,
+      head: [['Document', 'Number', 'Expiry', 'Status']], body: rows.map((r) => r.map(clean)), theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 5, lineColor: [225, 222, 216], textColor: [40, 40, 40] },
+      headStyles: { fillColor: [64, 64, 65], textColor: [255, 255, 255], fontStyle: 'bold' },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 92 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 74 }, 3: { cellWidth: 72 } },
+      didParseCell: (d) => {
+        if (d.section !== 'body' || d.column.index !== 3) return;
+        const t = String(d.cell.raw);
+        d.cell.styles.fontStyle = 'bold';
+        d.cell.styles.textColor = t === 'Expired' ? [214, 69, 69] : t.startsWith('Expires') ? [224, 142, 43] : t === 'Valid' ? [46, 158, 106] : [160, 160, 160];
+      },
+    });
+    let ly = doc.lastAutoTable.finalY + 10;
+    const nat = i.nationality ? `Nationality: ${i.nationality}` : '';
+    if (sira.length) {
+      const sh = Math.min(H - 40 - ly, 170);
+      if (sh > 80) await slot(sira[0], M, ly, leftW, sh, 'SIRA CARD', '');
+    }
+    // Right column: passport-size photo + contact
+    const pw = 110, ph = pw * 45 / 35, px = rx + (rightW - pw) / 2;
+    doc.setDrawColor(225, 222, 216); doc.setFillColor(250, 249, 247); doc.roundedRect(px - 4, y2 - 4, pw + 8, ph + 8, 6, 6, photo ? 'S' : 'FD');
+    if (photo) { try { doc.addImage(await coverCrop(photo, 35 / 45), 'JPEG', px, y2, pw, ph); } catch { /* skip */ } }
+    else { doc.setFontSize(8.5); doc.setTextColor(165, 165, 165); doc.text('Photo not', px + pw / 2, y2 + ph / 2 - 4, { align: 'center' }); doc.text('uploaded', px + pw / 2, y2 + ph / 2 + 8, { align: 'center' }); }
+    let cy = y2 + ph + 22;
+    doc.setTextColor(40, 40, 40); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.splitTextToSize(clean(o.name), rightW).forEach((l) => { doc.text(l, rx + rightW / 2, cy, { align: 'center' }); cy += 12; });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(100, 100, 100);
+    [o.org, o.trade, nat, o.phone ? `Tel ${o.phone}` : ''].filter(Boolean).forEach((t) => {
+      doc.splitTextToSize(clean(t), rightW).forEach((l) => { doc.text(l, rx + rightW / 2, cy, { align: 'center' }); cy += 11; });
+    });
+
+    // Page 3 — Passport
+    header(o, 'Passport');
+    await twoSides(pass, 'Passport');
+  }
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(235, 232, 226); doc.line(M, H - 26, W - M, H - 26);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
+    doc.text(clean(`Leaders Line Trading LLC  ·  ${title}  ·  confidential`), M, H - 14);
+    doc.text(`Page ${p} of ${pages}  ·  ${new Date().toLocaleDateString('en-GB')}`, W - M, H - 14, { align: 'right' });
+  }
+  doc.save(`${safe(title)}-${dateKey(new Date())}.pdf`);
+}
+
 /** Shared "send to customer" action bar handler. */
 export function exportMenu(owners, title) {
   if (!owners.length) { toast('Select at least one person first', true); return; }
@@ -358,7 +554,8 @@ export function exportMenu(owners, title) {
     title: `Download IDs — ${owners.length} ${owners.length === 1 ? 'person' : 'people'}`,
     body: `<label class="f"><span>File name / title</span><input id="ix-t" value="${esc(title)}"></label>
       <div class="grid" style="gap:10px;margin-top:14px">
-        <button class="btn block" data-x="zip">${icon('download', 16)} ZIP — all copies in folders + Excel list</button>
+        <button class="btn block" data-x="sheets">${icon('download', 16)} ID sheets (PDF) — 3 pages per person: Emirates ID · Visa & details · Passport</button>
+        <button class="btn ghost block" data-x="zip">ZIP — all copies in folders + Excel list</button>
         <button class="btn ghost block" data-x="pack">PDF ID pack — one page per person with copies</button>
         <button class="btn ghost block" data-x="xlsx">Excel — numbers & expiry dates only</button>
       </div>
@@ -371,7 +568,8 @@ export function exportMenu(owners, title) {
           m.querySelectorAll('[data-x]').forEach((x) => { x.disabled = true; });
           const progress = (s) => { p.textContent = `Preparing… ${s}`; };
           try {
-            if (b.dataset.x === 'zip') { const n = await downloadIdZip(owners, t, progress); toast(`ZIP ready — ${n} copies`); }
+            if (b.dataset.x === 'sheets') { await downloadIdSheets(owners, t, progress); toast('ID sheets ready'); }
+            else if (b.dataset.x === 'zip') { const n = await downloadIdZip(owners, t, progress); toast(`ZIP ready — ${n} copies`); }
             else if (b.dataset.x === 'pack') { await downloadIdPack(owners, t, progress); toast('PDF ready'); }
             else await downloadIdList(owners, t);
             p.textContent = 'Done.';

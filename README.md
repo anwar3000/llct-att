@@ -35,6 +35,12 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **ID sheets (PDF):** a 3-page sheet per person, built from the uploaded copies:
+  1. Emirates ID front and back.
+  2. Visa page (top half); a table of every document with its number, expiry and status (Valid / Expires in N days / Expired), the passport-size photo, contact details and the SIRA card (bottom half).
+  3. Passport front and back.
+
+  Download it from **Download IDs** on an employee or worker page, or for many people at once from the ID documents / External workers lists or the Documents Portal. Upload the front first, then the back (or put "back" in the file name). PDF copies are converted to images automatically.
 - **Backup & storage (admin, web dashboard):**
   - **Database size:** the estimated size against the free 1 GB, with a warning at 70% and 90%. It is broken down by photos and records (site photos, receipts, ID copies, invoicing images, GPS trails, routes, attendance, invoicing documents…).
   - **Downloads:**
