@@ -16,6 +16,7 @@ import * as requests from './pages/requests.js';
 import * as working from './pages/working.js';
 import * as trips from './pages/trips.js';
 import * as accounts from './pages/accounts.js';
+import * as backup from './pages/backup.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -40,6 +41,7 @@ const NAV = [
   { path: 'accounts', label: 'Accounts', icon: 'bank', page: accounts, adminOnly: true },
   { sep: 'Output' },
   { path: 'reports', label: 'Reports', icon: 'report', page: reports },
+  { path: 'backup', label: 'Backup & storage', icon: 'download', page: backup, adminOnly: true },
 ];
 
 let cleanup = null;

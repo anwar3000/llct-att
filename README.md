@@ -35,6 +35,13 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Backup & storage (admin, web dashboard):**
+  - **Database size:** the estimated size against the free 1 GB, with a warning at 70% and 90%. It is broken down by photos and records (site photos, receipts, ID copies, invoicing images, GPS trails, routes, attendance, invoicing documents…).
+  - **Downloads:**
+    - an **Excel** backup of all transactions (accounts with running balance, petty cash, driver payments, trips & rides, attendance, external workers, staff, sites);
+    - a **photos ZIP** for any period (site updates, petty and accounts receipts, ID copies, invoicing images, with an `index.csv`);
+    - a **full data ZIP**: every collection of both apps as JSON, GPS optional.
+  - **Free up space:** after the backup, removes old photos and GPS trails/routes from the database. Records stay and are marked as being in the backup. ID documents and invoicing files are never removed.
 - **Accounts in the admin app (v1.7.1):** the last tab is now **Accounts**, with two parts: **Accounts** and **Petty cash**. It uses the same data as the web page. You can:
   - choose a period: this month, last month, this year or all time;
   - see the balance brought forward + income − expenses = closing balance, split into cash and bank;
