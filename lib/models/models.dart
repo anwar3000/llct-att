@@ -1159,4 +1159,7 @@ class IdOwner {
   final String id, type, name, org, phone, code;
   const IdOwner({required this.id, required this.type, required this.name, this.org = '', this.phone = '', this.code = ''});
   bool get isWorker => type == 'worker';
+
+  factory IdOwner.fromUser(AppUser u) =>
+      IdOwner(id: u.id, type: 'staff', name: u.name, org: u.designation, phone: u.phone, code: u.loginId);
 }

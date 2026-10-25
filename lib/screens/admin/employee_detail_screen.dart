@@ -60,8 +60,7 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
                   tooltip: 'ID documents',
                   icon: const Icon(Icons.badge_outlined),
                   onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => IdPersonScreen(
-                          owner: IdOwner(id: u.id, type: 'user', name: u.name, org: u.designation, phone: u.phone, code: u.loginId)))),
+                      builder: (_) => IdPersonScreen(me: widget.me, owner: IdOwner.fromUser(u)))),
                 ),
                 if (accounts)
                   IconButton(

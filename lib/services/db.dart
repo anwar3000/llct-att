@@ -789,10 +789,14 @@ class Db {
       idInfo.doc(uid).snapshots().map((d) => d.data() ?? {});
 
   static Future<void> saveMyIdInfo(AppUser me, Map<String, String> fields) =>
-      idInfo.doc(me.id).set({
+      saveIdInfo(IdOwner.fromUser(me), fields);
+
+  /// Numbers / expiry for anyone (management can save for staff and external workers).
+  static Future<void> saveIdInfo(IdOwner o, Map<String, String> fields) =>
+      idInfo.doc(o.id).set({
         ...fields,
-        'ownerType': 'staff',
-        'name': me.name,
+        'ownerType': o.type,
+        'name': o.name,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -810,7 +814,9 @@ class Db {
     required String mime,
     required Uint8List bytes,
     String side = '',
+    IdOwner? owner, // management uploading for someone else
   }) async {
+    final o = owner ?? IdOwner.fromUser(me);
     if (bytes.length > kMaxDocBytes) throw Exception('File is larger than 2 MB.');
     final b64 = base64Encode(bytes);
     final ref = idFiles.doc();
@@ -822,9 +828,9 @@ class Db {
           {'d': b64.substring(i * _chunk, end > b64.length ? b64.length : end)});
     }
     batch.set(ref, {
-      'ownerId': me.id,
-      'ownerType': 'staff',
-      'ownerName': me.name,
+      'ownerId': o.id,
+      'ownerType': o.type,
+      'ownerName': o.name,
       'kind': kind,
       'name': name,
       'mime': mime,

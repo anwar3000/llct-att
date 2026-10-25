@@ -40,12 +40,15 @@ const _tips = {
 /// Guided scanning of the employee's own documents, one at a time, with a blur / light check.
 class ScanDocumentsScreen extends StatefulWidget {
   final AppUser me;
-  const ScanDocumentsScreen({super.key, required this.me});
+  /// Whose documents (null = my own). Management uses this to upload for staff / external workers.
+  final IdOwner? owner;
+  const ScanDocumentsScreen({super.key, required this.me, this.owner});
   @override
   State<ScanDocumentsScreen> createState() => _ScanDocumentsScreenState();
 }
 
 class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
+  IdOwner get _owner => widget.owner ?? IdOwner.fromUser(widget.me);
   int _i = 0;
   List<IdFileMeta> _files = [];
   Map<String, dynamic> _info = {};
@@ -60,10 +63,10 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
   @override
   void initState() {
     super.initState();
-    _subs.add(Db.myIdFiles(widget.me.id).listen((l) {
+    _subs.add(Db.myIdFiles(_owner.id).listen((l) {
       if (mounted) setState(() => _files = l);
     }, onError: (_) {}));
-    _subs.add(Db.myIdInfo(widget.me.id).listen((m) {
+    _subs.add(Db.myIdInfo(_owner.id).listen((m) {
       if (!mounted) return;
       final first = _info.isEmpty;
       setState(() => _info = m);
@@ -180,7 +183,7 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
     if (st.numField == null) return;
     final num = _num.text.trim();
     if (num == '${_info[st.numField] ?? ''}' && _exp == '${_info[st.expField] ?? ''}') return;
-    await Db.saveMyIdInfo(widget.me, {st.numField!: num, st.expField!: _exp});
+    await Db.saveIdInfo(_owner, {st.numField!: num, st.expField!: _exp});
   }
 
   void _next() {
@@ -201,7 +204,7 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
       await _saveNumbers();
       final old = _done(st);
       await Db.uploadMyIdFile(
-        me: widget.me,
+        me: widget.me, owner: _owner,
         kind: st.kind,
         side: st.side,
         name: '${st.kind}-${st.side}.${_mime == 'application/pdf' ? 'pdf' : 'jpg'}',
@@ -238,7 +241,7 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
     final ratio = _ratio[st.shape]!;
     final btn = FilledButton.styleFrom(minimumSize: const Size(0, 46));
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan my documents')),
+      appBar: AppBar(title: Text(widget.owner == null ? 'Scan my documents' : 'Scan documents · ${_owner.name}')),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 32), children: [
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (var k = 0; k < kScanSteps.length; k++)

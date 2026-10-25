@@ -8,6 +8,8 @@ import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../services/id_sheet.dart';
 import '../../widgets/common.dart';
+import '../employee/my_documents_screen.dart';
+import '../employee/scan_documents_screen.dart';
 
 const _kTagKinds = [('passport', 'PP'), ('eid', 'EID'), ('visa', 'VISA'), ('sira', 'SIRA'), ('mcc', 'MCC')];
 const _kMust = ['passport', 'eid', 'visa'];
@@ -56,7 +58,7 @@ class _IdDocumentsScreenState extends State<IdDocumentsScreen> {
     }
     final out = <IdPerson>[
       for (final u in _users!.where((u) => u.active))
-        IdPerson(IdOwner(id: u.id, type: 'user', name: u.name, org: u.designation, phone: u.phone, code: u.loginId),
+        IdPerson(IdOwner.fromUser(u),
             _info![u.id] ?? const {}, byOwner[u.id] ?? const []),
       for (final w in _workers!.where((w) => w.active))
         IdPerson(IdOwner(id: w.id, type: 'worker', name: w.name, org: w.subtitle, phone: w.phone),
@@ -184,7 +186,7 @@ class _IdDocumentsScreenState extends State<IdDocumentsScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => IdPersonScreen(owner: p.owner))),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => IdPersonScreen(me: widget.me, owner: p.owner))),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(children: [
@@ -255,8 +257,9 @@ Future<void> runWithProgress(BuildContext context, Future<void> Function(void Fu
 
 /// One person's ID documents: numbers, expiry dates, copies; share copies or the ID sheet PDF.
 class IdPersonScreen extends StatelessWidget {
+  final AppUser me;
   final IdOwner owner;
-  const IdPersonScreen({super.key, required this.owner});
+  const IdPersonScreen({super.key, required this.me, required this.owner});
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +272,7 @@ class IdPersonScreen extends StatelessWidget {
         builder: (context, all) {
           final files = all.where((f) => !f.pending).toList();
           final p = IdPerson(owner, info, files);
-          return _PersonView(person: p);
+          return _PersonView(me: me, person: p);
         },
       ),
     );
@@ -277,8 +280,11 @@ class IdPersonScreen extends StatelessWidget {
 }
 
 class _PersonView extends StatelessWidget {
+  final AppUser me;
   final IdPerson person;
-  const _PersonView({required this.person});
+  const _PersonView({required this.me, required this.person});
+
+  void _open(BuildContext context, Widget w) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
 
   Future<void> _shareAll(BuildContext context) async {
     final files = person.files;
@@ -352,6 +358,28 @@ class _PersonView extends StatelessWidget {
                   ]),
                 ),
               ),
+              if (me.isManagement) ...[
+                const SizedBox(height: 4),
+                Row(children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+                      onPressed: () => _open(context, ScanDocumentsScreen(me: me, owner: person.owner)),
+                      icon: const Icon(Icons.document_scanner_outlined, size: 20),
+                      label: const Text('Scan documents'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                      onPressed: () => _open(context, MyDocumentsScreen(me: me, owner: person.owner)),
+                      icon: const Icon(Icons.upload_file, size: 20),
+                      label: const Text('Upload / edit'),
+                    ),
+                  ),
+                ]),
+              ],
               const SizedBox(height: 6),
               const SectionTitle('Numbers & expiry'),
               Card(

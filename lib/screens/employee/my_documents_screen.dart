@@ -16,13 +16,16 @@ import 'scan_documents_screen.dart';
 /// Management sees the same data on the web dashboard.
 class MyDocumentsScreen extends StatefulWidget {
   final AppUser me;
-  const MyDocumentsScreen({super.key, required this.me});
+  /// Whose documents (null = my own). Management uses this to upload for staff / external workers.
+  final IdOwner? owner;
+  const MyDocumentsScreen({super.key, required this.me, this.owner});
 
   @override
   State<MyDocumentsScreen> createState() => _MyDocumentsScreenState();
 }
 
 class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
+  IdOwner get _owner => widget.owner ?? IdOwner.fromUser(widget.me);
   final _subs = <StreamSubscription>[];
   final _ctrl = <String, TextEditingController>{};
   final _dates = <String, String>{};
@@ -36,7 +39,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
   @override
   void initState() {
     super.initState();
-    _subs.add(Db.myIdInfo(widget.me.id).listen((m) {
+    _subs.add(Db.myIdInfo(_owner.id).listen((m) {
       if (!mounted || _dirty) return;
       setState(() {
         for (final k in idKinds) {
@@ -49,7 +52,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     }, onError: (e) {
       if (mounted) setState(() { _loaded = true; _error = '$e'; });
     }));
-    _subs.add(Db.myIdFiles(widget.me.id).listen((l) {
+    _subs.add(Db.myIdFiles(_owner.id).listen((l) {
       if (mounted) setState(() => _files = l);
     }, onError: (_) {}));
   }
@@ -108,7 +111,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
         if (k.numField != null) fields[k.numField!] = _c(k.numField!).text.trim();
         if (k.expField != null) fields[k.expField!] = _dates[k.expField!] ?? '';
       }
-      await Db.saveMyIdInfo(widget.me, fields);
+      await Db.saveIdInfo(_owner, fields);
       _dirty = false;
       if (mounted) showSnack(context, 'Document details saved');
     } catch (e) {
@@ -181,7 +184,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
       }
       setState(() => _uploadingKind = k.key);
       await Db.uploadMyIdFile(
-          me: widget.me, kind: k.key, name: name, mime: mime, bytes: Uint8List.fromList(bytes));
+          me: widget.me, owner: _owner, kind: k.key, name: name, mime: mime, bytes: Uint8List.fromList(bytes));
       if (mounted) showSnack(context, '${k.label} copy uploaded');
     } catch (e) {
       if (mounted) showSnack(context, '$e'.replaceFirst('Exception: ', ''), error: true);
@@ -234,7 +237,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('My ID documents')),
+        appBar: AppBar(title: Text(widget.owner == null ? 'My ID documents' : 'ID documents · ${_owner.name}')),
         body: !_loaded
             ? const Center(child: CircularProgressIndicator())
             : _error != null
@@ -252,7 +255,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(backgroundColor: AppColors.accentDark),
                           onPressed: () => Navigator.of(context)
-                              .push(MaterialPageRoute(builder: (_) => ScanDocumentsScreen(me: widget.me))),
+                              .push(MaterialPageRoute(builder: (_) => ScanDocumentsScreen(me: widget.me, owner: widget.owner))),
                           icon: const Icon(Icons.document_scanner_outlined),
                           label: const Text('SCAN MY DOCUMENTS', style: TextStyle(fontWeight: FontWeight.w800)),
                         ),
