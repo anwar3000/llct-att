@@ -795,6 +795,7 @@ class Db {
     required String name,
     required String mime,
     required Uint8List bytes,
+    String side = '',
   }) async {
     if (bytes.length > kMaxDocBytes) throw Exception('File is larger than 2 MB.');
     final b64 = base64Encode(bytes);
@@ -817,6 +818,7 @@ class Db {
       'chunks': n,
       'uploadedAt': FieldValue.serverTimestamp(),
       'uploadedBy': me.name,
+      if (side.isNotEmpty) 'side': side,
     });
     await batch.commit();
   }

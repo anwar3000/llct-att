@@ -217,7 +217,7 @@ service cloud.firestore {
                       && request.resource.data.ownerType == 'staff'
                       && request.resource.data.keys().hasOnly(['ownerType', 'name', 'updatedAt', 'nationality',
                            'passportNo', 'passportExpiry', 'eidNo', 'eidExpiry', 'siraNo', 'siraExpiry',
-                           'visaNo', 'visaExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes']));
+                           'visaNo', 'visaExpiry', 'mccNo', 'mccExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes']));
     }
     // Scanned copies (max 2 MB each), stored in chunks inside Firestore.
     function ownsFile(fileId) {

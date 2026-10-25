@@ -186,11 +186,12 @@ export function mapIdFile(d) {
     id: d.id, ownerId: m.ownerId || '', ownerType: m.ownerType || '', kind: m.kind || 'other', name: m.name || 'file',
     mime: m.mime || 'application/octet-stream', size: num(m.size), chunks: num(m.chunks, 1), uploadedAt: toDate(m.uploadedAt),
     uploadedBy: m.uploadedBy || '', pending: m.pending === true, requestId: m.requestId || '', ownerName: m.ownerName || '',
+    side: m.side || '', // front | back (from the scan wizard)
   };
 }
 /** Text fields kept in idInfo/{ownerId}. */
 export const ID_FIELDS = ['nationality', 'passportNo', 'passportExpiry', 'eidNo', 'eidExpiry', 'siraNo', 'siraExpiry',
-  'visaNo', 'visaExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes'];
+  'visaNo', 'visaExpiry', 'mccNo', 'mccExpiry', 'labourCardNo', 'labourCardExpiry', 'idNotes'];
 
 /** Minimum working minutes per day (admin setting, default 8 h). */
 // ------------------------------------------------------------------ driver trips
@@ -874,7 +875,7 @@ export const saveIdInfo = (ownerId, ownerType, data) =>
   setDoc(doc(db, 'idInfo', ownerId), { ...data, ownerType, updatedAt: serverTimestamp() }, { merge: true });
 
 const CHUNK = 700000; // characters of base64 per Firestore doc (limit is 1 MiB)
-export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64, pending = false, requestId = '' }) {
+export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64, pending = false, requestId = '', side = '' }) {
   const ref = doc(C('idFiles'));
   const n = Math.max(1, Math.ceil(base64.length / CHUNK));
   const b = writeBatch(db);
@@ -883,6 +884,7 @@ export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, 
     ownerId, ownerType, ownerName, kind, name, mime, size: Math.round(base64.length * 0.75), chunks: n,
     uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '', uploadedById: store.me?.id || '',
     ...(pending ? { pending: true, requestId } : {}),
+    ...(side ? { side } : {}),
   });
   await b.commit();
   return ref.id;

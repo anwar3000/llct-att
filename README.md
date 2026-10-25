@@ -35,6 +35,19 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Guided document scanning (v1.8.0):** *Scan my documents* in the staff app (Android: profile picture → My ID documents; iPhone: Me tab) and *Scan documents step by step* for admin (employee or worker page on the web).
+  - **Order:** one document at a time:
+    1. Emirates ID front
+    2. Emirates ID back
+    3. Passport front (photo page)
+    4. Passport back (last page)
+    5. Visa
+    6. SIRA card (optional)
+    7. Abu Dhabi MCC certificate (optional)
+    8. Passport-size photo
+  - **Each step:** gives tips for a clear photo, shows a preview, warns if the photo is blurry, too dark or has glare, and asks for the document number and expiry date.
+  - **Retaking** a photo replaces the old one.
+  - **ID sheets:** scans are saved with their side (front/back), so the ID sheets place them correctly. A 4th page with the MCC certificate is added when it has been uploaded.
 - **ID sheets (PDF):** a 3-page sheet per person, built from the uploaded copies:
   1. Emirates ID front and back.
   2. Visa page (top half); a table of every document with its number, expiry and status (Valid / Expires in N days / Expired), the passport-size photo, contact details and the SIRA card (bottom half).

@@ -11,6 +11,7 @@ export const DOC_KINDS = [
   { k: 'eid', label: 'Emirates ID', num: 'eidNo', exp: 'eidExpiry' },
   { k: 'sira', label: 'SIRA card', num: 'siraNo', exp: 'siraExpiry' },
   { k: 'visa', label: 'Visa', num: 'visaNo', exp: 'visaExpiry' },
+  { k: 'mcc', label: 'Abu Dhabi MCC certificate', num: 'mccNo', exp: 'mccExpiry' },
   { k: 'labour', label: 'Labour card / work permit', num: 'labourCardNo', exp: 'labourCardExpiry' },
   { k: 'photo', label: 'Photo' },
   { k: 'other', label: 'Other documents' },
@@ -135,6 +136,8 @@ function b64ToBlob(b64, mime) {
 export function docsPanel(el, owner) {
   const info = store.info(owner.id) || {};
   el.innerHTML = `
+    <div class="row" style="margin-bottom:10px;gap:10px"><button class="btn" data-scan style="background:#D98A1A;border-color:#D98A1A">📷 Scan documents step by step</button>
+      <span class="small muted">EID front & back · passport front & back · visa · SIRA · MCC certificate · photo</span></div>
     <div class="idrows">
       <div class="idrow idrow-head"><span>Document</span><span>Number</span><span>Expiry</span><span>Status</span><span>Copies</span><span></span></div>
       ${DOC_KINDS.map((k) => `<div class="idrow" data-kind="${k.k}">
@@ -184,6 +187,16 @@ export function docsPanel(el, owner) {
     });
   };
 
+  el.querySelector('[data-scan]').onclick = () => scanWizard({
+    owner,
+    files: () => store.files(owner.id),
+    info: () => store.info(owner.id) || {},
+    upload: (st, p) => uploadIdFile({ ownerId: owner.id, ownerType: owner.type, ownerName: owner.name, kind: st.kind, side: st.side,
+      name: `${st.kind}-${st.side}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 }),
+    remove: async (f) => { await deleteIdFile(f); cache.delete(f.id); },
+    saveInfo: (fields) => saveIdInfo(owner.id, owner.type, fields),
+    onDone: () => docsPanel(el, owner),
+  });
   el.querySelectorAll('[data-up]').forEach((inp) => {
     inp.onchange = async () => {
       const files = [...inp.files];
@@ -390,8 +403,10 @@ async function pdfToImages(b64, max = 2) {
 }
 /** Images of one kind of document, front first: files named "back" go last, then upload order. */
 async function kindImages(files, kind) {
+  // Scanned copies know their side; for older uploads: "back" in the name goes last, then upload order.
+  const rank = (f) => (f.side === 'front' ? 0 : f.side === 'back' ? 3 : /back|rear|reverse/i.test(f.name) ? 2 : /front/i.test(f.name) ? 0.5 : 1);
   const list = files.filter((x) => x.f.kind === kind)
-    .map((x, i) => ({ ...x, o: /back|rear|reverse/i.test(x.f.name) ? 2 : /front/i.test(x.f.name) ? 0 : 1, i }))
+    .map((x, i) => ({ ...x, o: rank(x.f), i }))
     .sort((a, b) => a.o - b.o || a.i - b.i);
   const out = [];
   for (const { f, b64 } of list) {
@@ -535,6 +550,13 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
     // Page 3 — Passport
     header(o, 'Passport');
     await twoSides(pass, 'Passport');
+
+    // Page 4 — Abu Dhabi MCC certificate (only when uploaded)
+    const mcc = await kindImages(files, 'mcc');
+    if (mcc.length) {
+      header(o, 'MCC certificate');
+      await slot(mcc[0], M, 74, CW, H - 40 - 74, 'ABU DHABI MCC CERTIFICATE', '');
+    }
   }
   const pages = doc.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
@@ -547,6 +569,141 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
   doc.save(`${safe(title)}-${dateKey(new Date())}.pdf`);
 }
 
+// ------------------------------------------------------------------ guided scanning
+// One document at a time, in a fixed order, with tips for a clear photo and a blur / light check.
+export const SCAN_STEPS = [
+  { kind: 'eid', side: 'front', title: 'Emirates ID — front', shape: 'card', num: 'eidNo', exp: 'eidExpiry', numLabel: 'Emirates ID number' },
+  { kind: 'eid', side: 'back', title: 'Emirates ID — back', shape: 'card' },
+  { kind: 'passport', side: 'front', title: 'Passport — photo page', shape: 'page', num: 'passportNo', exp: 'passportExpiry', numLabel: 'Passport number' },
+  { kind: 'passport', side: 'back', title: 'Passport — last page (address)', shape: 'page' },
+  { kind: 'visa', side: 'front', title: 'Visa page', shape: 'page', num: 'visaNo', exp: 'visaExpiry', numLabel: 'Visa / file number' },
+  { kind: 'sira', side: 'front', title: 'SIRA card (if you have one)', shape: 'card', num: 'siraNo', exp: 'siraExpiry', numLabel: 'SIRA number', optional: true },
+  { kind: 'mcc', side: 'front', title: 'Abu Dhabi MCC certificate (if you have one)', shape: 'page', num: 'mccNo', exp: 'mccExpiry', numLabel: 'Certificate number', optional: true },
+  { kind: 'photo', side: 'front', title: 'Passport-size photo', shape: 'photo' },
+];
+const SHAPE = { card: [85.6, 54], page: [125, 88], photo: [35, 45] };
+const TIPS = {
+  card: 'Put the card flat on a dark table. Hold the phone straight above it so the card fills the frame. Avoid shadows and light reflections.',
+  page: 'Open the page fully, flat, in good light. All four corners and every line of text must be visible. No fingers on the page.',
+  photo: 'Plain white or light background, face straight to the camera, shoulders visible, good light. Or upload an existing passport photo.',
+};
+
+/** Prepares a scan: straightens EXIF rotation, resizes to ≤2000 px, lightly sharpens contrast, checks blur & light. */
+export async function processScan(file) {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return { ...(await prepareFile(file)), warn: [] };
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch {
+    bmp = await loadImage(URL.createObjectURL(file));
+  }
+  const iw = bmp.width || bmp.naturalWidth, ih = bmp.height || bmp.naturalHeight;
+  const sc = Math.min(1, 2000 / Math.max(iw, ih));
+  const c = document.createElement('canvas');
+  c.width = Math.round(iw * sc); c.height = Math.round(ih * sc);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.filter = 'contrast(1.1) brightness(1.03)';
+  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  ctx.filter = 'none';
+  // Quality check on a small grey copy: Laplacian variance (sharpness) and mean brightness.
+  const q = document.createElement('canvas');
+  const qs = 360 / Math.max(c.width, c.height);
+  q.width = Math.round(c.width * qs); q.height = Math.round(c.height * qs);
+  const qx = q.getContext('2d');
+  qx.drawImage(bmp, 0, 0, q.width, q.height); // the original, before contrast adjustment
+  const px = qx.getImageData(0, 0, q.width, q.height).data;
+  const g = new Float32Array(q.width * q.height);
+  let sum = 0, bright = 0;
+  for (let i = 0; i < g.length; i++) { g[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2]; sum += g[i]; if (g[i] >= 254) bright++; }
+  const mean = sum / g.length;
+  let lv = 0, ls = 0, n = 0;
+  for (let y = 1; y < q.height - 1; y++) for (let x = 1; x < q.width - 1; x++) {
+    const i = y * q.width + x;
+    const l = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - q.width] - g[i + q.width];
+    ls += l; lv += l * l; n++;
+  }
+  const sharp = n ? lv / n - (ls / n) ** 2 : 0;
+  const warn = [];
+  if (sharp < 60) warn.push('The photo looks blurry — hold the phone still and tap the screen to focus.');
+  if (mean < 70) warn.push('The photo is too dark — move to better light.');
+  if (bright / g.length > 0.2) warn.push('There is glare / reflection on the document — tilt it slightly away from the light.');
+  let out = c.toDataURL('image/jpeg', 0.88);
+  if (out.length * 0.75 > MAX_FILE) out = c.toDataURL('image/jpeg', 0.7);
+  return { name: file.name.replace(/\.[^.]+$/, '') + '.jpg', mime: 'image/jpeg', base64: out.split(',')[1], warn, sharp: Math.round(sharp), mean: Math.round(mean) };
+}
+
+/**
+ * Guided scan wizard.
+ * ctx: { owner, files: () => current files, info: () => current numbers, upload(step, prepared), remove(file), saveInfo(fields) }
+ */
+export function scanWizard(ctx, startAt = 0) {
+  let idx = startAt, prepared = null, busy = false;
+  const status = (st) => ctx.files().filter((f) => f.kind === st.kind && (f.side === st.side || (!f.side && st.side === 'front' && !['eid', 'passport'].includes(st.kind))));
+  const { el, close } = modal({ title: `Scan documents — ${ctx.owner.name}`, wide: true, body: '<div id="sw"></div>' });
+  const box = el.querySelector('#sw');
+  const draw = () => {
+    const st = SCAN_STEPS[idx];
+    const done = status(st);
+    const info = ctx.info() || {};
+    const [rw, rh] = SHAPE[st.shape];
+    box.innerHTML = `
+      <div class="sw-dots">${SCAN_STEPS.map((s2, i) => `<span class="${i === idx ? 'on' : ''} ${status(s2).length ? 'ok' : ''}" title="${esc(s2.title)}" data-go="${i}">${status(s2).length ? '✓' : i + 1}</span>`).join('')}</div>
+      <h3 style="margin:10px 0 2px">${idx + 1}. ${esc(st.title)}</h3>
+      <div class="small muted">${esc(TIPS[st.shape])}</div>
+      <div class="sw-frame" style="aspect-ratio:${rw}/${rh};max-width:${st.shape === 'photo' ? 220 : 520}px;width:min(100%, calc(36vh * ${(rw / rh).toFixed(3)}))">
+        ${prepared ? (prepared.mime === 'application/pdf' ? '<div class="sw-pdf">PDF selected</div>' : `<img src="data:${prepared.mime};base64,${prepared.base64}" alt="">`)
+          : `<div class="sw-guide"><span>${done.length ? '✓ Already scanned — take a new photo to replace it' : 'Fit the document inside this frame'}</span></div>`}
+      </div>
+      ${prepared && prepared.warn?.length ? `<div class="sw-warn">${prepared.warn.map((w) => `⚠ ${esc(w)}`).join('<br>')}<br><b>Retake</b> for a clearer copy, or use it anyway.</div>` : ''}
+      ${prepared && !prepared.warn?.length && prepared.mime !== 'application/pdf' ? '<div class="sw-ok">✓ Looks clear</div>' : ''}
+      ${st.num ? `<div class="grid cols-2" style="gap:10px;margin-top:10px">
+        <label class="f"><span>${esc(st.numLabel)}</span><input id="sw-num" value="${esc(info[st.num] || '')}"></label>
+        <label class="f"><span>Expiry date</span><input id="sw-exp" type="date" value="${esc(info[st.exp] || '')}"></label></div>` : ''}
+      <div class="sw-actions">
+        <label class="btn">${icon('plus', 16)} ${prepared || done.length ? 'Retake photo' : 'Take photo'}<input type="file" accept="image/*" capture="environment" id="sw-cam" hidden></label>
+        <label class="btn ghost">Choose file / PDF<input type="file" accept="image/*,application/pdf" id="sw-file" hidden></label>
+        <span class="spacer"></span>
+        ${idx > 0 ? '<button class="btn ghost" id="sw-back">Back</button>' : ''}
+        <button class="btn ghost" id="sw-skip">${done.length && !prepared ? 'Next' : st.optional ? "Don't have it" : 'Skip'}</button>
+        ${prepared ? `<button class="btn" id="sw-save" style="background:#2E9E6A;border-color:#2E9E6A">${idx === SCAN_STEPS.length - 1 ? 'Save & finish' : 'Save & next'}</button>` : ''}
+      </div>
+      <div class="small muted" id="sw-msg" style="margin-top:6px"></div>`;
+    const msg = (t) => { box.querySelector('#sw-msg').textContent = t; };
+    const pick = async (inp) => {
+      const f = inp.files[0];
+      inp.value = '';
+      if (!f) return;
+      msg('Checking the photo…');
+      try { prepared = await processScan(f); draw(); } catch (e) { msg(friendlyError(e)); }
+    };
+    box.querySelector('#sw-cam').onchange = (e) => pick(e.target);
+    box.querySelector('#sw-file').onchange = (e) => pick(e.target);
+    box.querySelectorAll('[data-go]').forEach((d) => { d.onclick = () => { if (!busy) { idx = Number(d.dataset.go); prepared = null; draw(); } }; });
+    box.querySelector('#sw-back')?.addEventListener('click', () => { idx--; prepared = null; draw(); });
+    const saveNumbers = async () => {
+      if (!st.num) return;
+      const num = box.querySelector('#sw-num').value.trim(), exp = box.querySelector('#sw-exp').value;
+      if (num !== (info[st.num] || '') || exp !== (info[st.exp] || '')) await ctx.saveInfo({ [st.num]: num, [st.exp]: exp });
+    };
+    const next = () => {
+      prepared = null;
+      if (idx < SCAN_STEPS.length - 1) { idx++; draw(); } else { close(); toast('Documents saved'); ctx.onDone?.(); }
+    };
+    box.querySelector('#sw-skip').onclick = async () => { try { await saveNumbers(); } catch (e) { msg(friendlyError(e)); return; } next(); };
+    box.querySelector('#sw-save')?.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true; msg('Saving…');
+      try {
+        await saveNumbers();
+        const old = status(st);
+        await ctx.upload(st, prepared);
+        for (const f of old) { try { await ctx.remove(f); } catch { /* keep the old copy if it can't be removed */ } }
+        busy = false; next();
+      } catch (e) { busy = false; msg(friendlyError(e)); }
+    });
+  };
+  draw();
+}
+
 /** Shared "send to customer" action bar handler. */
 export function exportMenu(owners, title) {
   if (!owners.length) { toast('Select at least one person first', true); return; }
@@ -554,7 +711,7 @@ export function exportMenu(owners, title) {
     title: `Download IDs — ${owners.length} ${owners.length === 1 ? 'person' : 'people'}`,
     body: `<label class="f"><span>File name / title</span><input id="ix-t" value="${esc(title)}"></label>
       <div class="grid" style="gap:10px;margin-top:14px">
-        <button class="btn block" data-x="sheets">${icon('download', 16)} ID sheets (PDF) — 3 pages per person: Emirates ID · Visa & details · Passport</button>
+        <button class="btn block" data-x="sheets">${icon('download', 16)} ID sheets (PDF) — per person: Emirates ID · Visa & details · Passport (+ MCC certificate)</button>
         <button class="btn ghost block" data-x="zip">ZIP — all copies in folders + Excel list</button>
         <button class="btn ghost block" data-x="pack">PDF ID pack — one page per person with copies</button>
         <button class="btn ghost block" data-x="xlsx">Excel — numbers & expiry dates only</button>

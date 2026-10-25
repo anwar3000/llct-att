@@ -886,8 +886,11 @@ class IdFileMeta {
   final int size;
   final int chunks;
   final DateTime? uploadedAt;
+  /// front | back — set by the guided scanner.
+  final String side;
 
   IdFileMeta({
+    this.side = '',
     required this.id,
     required this.ownerId,
     required this.kind,
@@ -908,6 +911,7 @@ class IdFileMeta {
       kind: _str(m['kind'], 'other'),
       name: _str(m['name'], 'file'),
       mime: _str(m['mime'], 'application/octet-stream'),
+      side: _str(m['side']),
       size: _int(m['size']),
       chunks: _int(m['chunks'], 1),
       uploadedAt: _ts(m['uploadedAt']),
@@ -929,6 +933,7 @@ const idKinds = [
   IdKind('eid', 'Emirates ID', 'eidNo', 'eidExpiry'),
   IdKind('sira', 'SIRA card', 'siraNo', 'siraExpiry'),
   IdKind('visa', 'Visa', 'visaNo', 'visaExpiry'),
+  IdKind('mcc', 'Abu Dhabi MCC certificate', 'mccNo', 'mccExpiry'),
   IdKind('labour', 'Labour card / work permit', 'labourCardNo', 'labourCardExpiry'),
   IdKind('photo', 'Photo'),
   IdKind('other', 'Other documents'),

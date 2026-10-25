@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
-import '../screens/employee/my_documents_screen.dart';
+import '../screens/employee/scan_documents_screen.dart';
 import '../services/db.dart';
 import 'trip_card.dart' show kDialogButton;
 
@@ -66,7 +66,7 @@ class ProfilePrompt {
       if (!context.mounted) return;
     }
     if (miss.contains('Passport') || miss.contains('Emirates ID')) {
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => MyDocumentsScreen(me: me)));
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ScanDocumentsScreen(me: me)));
     }
   }
 

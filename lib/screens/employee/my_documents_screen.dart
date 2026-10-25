@@ -10,6 +10,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../widgets/common.dart';
+import 'scan_documents_screen.dart';
 
 /// Employee's own ID documents: numbers, expiry dates and copies (max 2 MB each).
 /// Management sees the same data on the web dashboard.
@@ -246,6 +247,21 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
                     children: [
+                      SizedBox(
+                        height: 56,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(backgroundColor: AppColors.accentDark),
+                          onPressed: () => Navigator.of(context)
+                              .push(MaterialPageRoute(builder: (_) => ScanDocumentsScreen(me: widget.me))),
+                          icon: const Icon(Icons.document_scanner_outlined),
+                          label: const Text('SCAN MY DOCUMENTS', style: TextStyle(fontWeight: FontWeight.w800)),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(4, 6, 4, 12),
+                        child: Text('Step by step: Emirates ID front & back, passport front & back, visa, SIRA card, MCC certificate, photo.',
+                            style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                      ),
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(

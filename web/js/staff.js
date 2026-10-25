@@ -12,7 +12,7 @@ import {
   esc, icon, avatar, pill, toast, modal, confirmBox, friendlyError, fmtTime, fmtDate, fmtDay, fmtMins, fmtMoney, fmtMonth,
   dateKey, monthKey, parseKey, b64img, photoViewer, CURRENCY,
 } from './util.js';
-import { DOC_KINDS, prepareFile, viewFile, expiryPill } from './iddocs.js';
+import { DOC_KINDS, prepareFile, viewFile, expiryPill, scanWizard } from './iddocs.js';
 
 window.__appStarted = true;
 const app = document.getElementById('app');
@@ -1246,6 +1246,7 @@ function maybeAskProfile() {
         close();
         S.tab = 'me'; draw(); window.scrollTo(0, 0);
         if (miss.includes('Mobile number') || miss.includes('Email')) editContact();
+        else if (miss.includes('Passport') || miss.includes('Emirates ID')) openScan();
       };
     },
   });
@@ -1270,6 +1271,19 @@ function editContact() {
   });
 }
 
+// Guided scanning: EID front/back, passport front/back, visa, SIRA, MCC certificate, photo.
+function openScan() {
+  scanWizard({
+    owner: { id: S.me.id, type: 'staff', name: S.me.name },
+    files: () => S.idFiles,
+    info: () => S.idInfo || {},
+    upload: (st, p) => uploadIdFile({ ownerId: S.me.id, ownerType: 'staff', ownerName: S.me.name, kind: st.kind, side: st.side,
+      name: `${st.kind}-${st.side}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 }),
+    remove: (f) => deleteIdFile(f),
+    saveInfo: (fields) => saveIdInfo(S.me.id, 'staff', { ...fields, name: S.me.name }),
+  });
+}
+
 function drawMe(main) {
   const i = S.idInfo || {};
   const miss = missingProfile();
@@ -1284,6 +1298,7 @@ function drawMe(main) {
         <button class="st-btn sm" id="me-ct">${S.me.phone && S.me.contactEmail ? 'Edit' : 'Add'}</button></div>
     </div>
     <h3 class="st-h">My ID documents <span class="small muted" style="font-weight:500">· photo or PDF, max 2 MB</span></h3>
+    <button class="st-big" id="me-scan" style="height:58px;margin:6px 0 12px;background:#D98A1A;color:#fff;font-size:16px">📷 SCAN MY DOCUMENTS</button>
     ${DOC_KINDS.map((k) => {
       const files = S.idFiles.filter((f) => f.kind === k.k);
       return `<div class="st-card pad st-doc">
@@ -1301,6 +1316,7 @@ function drawMe(main) {
       <button class="st-btn block" id="me-out">${icon('logout', 16)} Sign out</button>
       <div class="small muted" style="text-align:center;margin-top:8px">LLCT Attendance · web app</div></div>`;
   main.querySelector('#me-ct').onclick = editContact;
+  main.querySelector('#me-scan').onclick = openScan;
   main.querySelector('#me-save').onclick = async (ev) => {
     const data = {};
     main.querySelectorAll('[data-f]').forEach((x) => { data[x.dataset.f] = x.value.trim(); });
