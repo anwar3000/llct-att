@@ -1288,6 +1288,38 @@ class Db {
     return out;
   }
 
+  /// Saved names for the accounts form — suppliers / payees (paidTo) and payers (receivedFrom).
+  /// Shared with the invoicing app (acctSettings/parties).
+  static Future<Map<String, List<String>>> acctParties() async {
+    final d = await _fs.collection('acctSettings').doc('parties').get();
+    final m = d.data() ?? {};
+    List<String> l(String k) {
+      final out = ((m[k] as List?) ?? const []).map((x) => '$x'.trim()).where((x) => x.isNotEmpty).toSet().toList();
+      out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      return out;
+    }
+    return {'paidTo': l('paidTo'), 'receivedFrom': l('receivedFrom')};
+  }
+
+  static Future<void> saveAcctParty(String key, String name, {bool remove = false}) =>
+      _fs.collection('acctSettings').doc('parties').set({
+        key: remove ? FieldValue.arrayRemove([name]) : FieldValue.arrayUnion([name]),
+      }, SetOptions(merge: true));
+
+  /// Projects for the accounts form: (id, label), active ones first.
+  static Future<List<({String id, String label})>> acctProjects() async {
+    final q = await _fs.collection('projects').get();
+    final rows = q.docs.map((d) {
+      final m = d.data();
+      final name = (m['name'] as String?) ?? '';
+      final code = (m['code'] as String?) ?? '';
+      final status = (m['status'] as String?) ?? 'active';
+      return (id: d.id, label: [code, name].where((x) => x.isNotEmpty).join(' · '), active: status == 'active');
+    }).where((p) => p.label.isNotEmpty).toList()
+      ..sort((a, b) => a.active != b.active ? (a.active ? -1 : 1) : a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+    return [for (final p in rows) (id: p.id, label: p.label)];
+  }
+
   static Future<({String date, double cash, double bank})> acctOpening() async {
     final d = await _fs.collection('acctSettings').doc('opening').get();
     final m = d.data() ?? {};

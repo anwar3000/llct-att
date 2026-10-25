@@ -7,7 +7,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
+  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch, arrayUnion, arrayRemove,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
 import { dateKey, monthKey, atTz, fromTz, parseKey } from './util.js';
@@ -318,7 +318,7 @@ export function mapAcct(d) {
   return {
     id: d.id, source: 'manual', type: m.type === 'income' ? 'income' : 'expense', date: m.date || '', amount: num(m.amount),
     category: m.category || '', method: m.method || 'Cash', reference: m.reference || '', bank: m.bank || '', chequeDate: m.chequeDate || '',
-    party: m.party || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '',
+    party: m.party || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '', projectId: m.projectId || '', projectName: m.projectName || '',
     hasFile: m.hasFile === true, fileName: m.fileName || '', fileMime: m.fileMime || '',
     createdBy: m.createdBy || '', createdAt: toDate(m.createdAt), editedBy: m.editedBy || '', editedAt: toDate(m.editedAt),
   };
@@ -355,6 +355,15 @@ export async function readAcctFile(id) {
   const d = await getDoc(doc(db, 'acctFiles', id));
   return d.exists() ? d.data() : null;
 }
+/** Saved names for the accounts form: paidTo (suppliers / payees) and receivedFrom (payers). Shared with the invoicing app. */
+export async function getAcctParties() {
+  const d = await getDoc(doc(db, 'acctSettings', 'parties'));
+  const m = d.exists() ? d.data() : {};
+  const l = (k) => [...new Set((Array.isArray(m[k]) ? m[k] : []).map((x) => String(x).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return { paidTo: l('paidTo'), receivedFrom: l('receivedFrom') };
+}
+export const saveAcctParty = (key, name, remove = false) =>
+  setDoc(doc(db, 'acctSettings', 'parties'), { [key]: remove ? arrayRemove(name) : arrayUnion(name) }, { merge: true });
 /** Opening balance (cash & bank as at a start date) — admin only. */
 export async function getAcctOpening() {
   const d = await getDoc(doc(db, 'acctSettings', 'opening'));

@@ -2,7 +2,7 @@
 // petty cash given to staff and payments to drivers.
 import {
   store, isAdmin, watchAcct, saveAcct, deleteAcct, removeAcctFile, readAcctFile, autoAcctLines,
-  getAcctOpening, saveAcctOpening, acctBroughtForward,
+  getAcctOpening, saveAcctOpening, acctBroughtForward, getAcctParties, saveAcctParty,
   ACCT_INCOME, ACCT_EXPENSE, ACCT_METHODS, isBankMethod,
 } from '../fb.js';
 import { downloadReport, saveBlob } from '../report-lib.js';
@@ -43,7 +43,7 @@ export function mount(el, _p, { setHeader }) {
     const ql = q.toLowerCase();
     return [...(manual || []), ...(showAuto ? auto : [])]
       .filter((e) => (!type || e.type === type) && (!cat || e.category === cat) && (!method || e.method === method)
-        && (!ql || [e.category, e.party, e.note, e.reference, e.bank, e.siteName, e.method].join(' ').toLowerCase().includes(ql)))
+        && (!ql || [e.category, e.party, e.note, e.reference, e.bank, e.siteName, e.projectName, e.method].join(' ').toLowerCase().includes(ql)))
       .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0));
   }
 
@@ -104,7 +104,7 @@ export function mount(el, _p, { setHeader }) {
         ${list.map((e) => `<tr class="click" data-row="${e.id}">
           <td class="nowrap">${esc(e.date)}</td>
           <td>${pill(e.type === 'income' ? 'Income' : 'Expense', e.type === 'income' ? 'green' : 'red')}<div class="small" style="margin-top:3px"><b>${esc(e.category)}</b></div>${e.source !== 'manual' ? `<div class="small muted">auto · ${SRC[e.source]}</div>` : ''}</td>
-          <td class="small"><b>${esc(e.party || '')}</b>${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}${e.siteName ? `<div class="muted">Site: ${esc(e.siteName)}</div>` : ''}</td>
+          <td class="small"><b>${esc(e.party || '')}</b>${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}${e.projectName ? `<div class="muted">Project: ${esc(e.projectName)}</div>` : ''}${e.siteName ? `<div class="muted">Site: ${esc(e.siteName)}</div>` : ''}</td>
           <td class="small">${esc(e.method)}${e.reference ? `<div class="muted">${e.method === 'Cheque' ? 'Chq ' : 'Ref '}${esc(e.reference)}${e.bank ? ` · ${esc(e.bank)}` : ''}</div>` : ''}${e.chequeDate ? `<div class="muted">Chq date ${esc(e.chequeDate)}</div>` : ''}</td>
           <td class="num"><b style="color:${e.type === 'income' ? GREEN : RED}">${e.type === 'income' ? '+' : '−'}${fmtMoney(e.amount)}</b></td>
           <td style="white-space:nowrap">${e.hasFile ? `<button class="btn sm ghost icon" data-file="${e.id}" title="Receipt / copy">${icon('idcard', 15)}</button>` : ''}${e.source === 'manual'
@@ -254,12 +254,13 @@ function entryDialog(e, kind = e?.type || 'expense') {
       <label class="f"><span>Date *</span><input id="ae-date" type="date" value="${esc(e?.date || dateKey(new Date()))}"></label>
       <label class="f"><span>Amount (AED) *</span><input id="ae-amt" type="number" min="0" step="0.01" value="${e ? e.amount : ''}" style="font-weight:800;color:${color}"></label>
       <label class="f"><span>Category *</span><input id="ae-cat" list="ae-cats" value="${esc(e?.category || cats[0])}"><datalist id="ae-cats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
-      <label class="f"><span>${income ? 'Received from (client / bank / owner)' : 'Paid to (supplier / party)'}</span><input id="ae-party" value="${esc(e?.party || '')}"></label>
+      <label class="f"><span>${income ? 'Received from (client / bank / owner)' : 'Paid to (supplier / party)'}</span><input id="ae-party" list="ae-parties" autocomplete="off" value="${esc(e?.party || '')}" placeholder="Type or pick a saved name"><datalist id="ae-parties"></datalist></label>
       <label class="f"><span>Method</span><select id="ae-m">${ACCT_METHODS.map((m) => `<option ${m === (e?.method || (income ? 'Cheque' : 'Cash')) ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       <label class="f"><span id="ae-ref-l">Reference</span><input id="ae-ref" value="${esc(e?.reference || '')}"></label>
       <label class="f ae-chq"><span>Bank</span><input id="ae-bank" value="${esc(e?.bank || '')}" placeholder="e.g. Emirates NBD"></label>
       <label class="f ae-chq"><span>Cheque date</span><input id="ae-cdate" type="date" value="${esc(e?.chequeDate || '')}"></label>
-      <label class="f"><span>Site / project (optional)</span><select id="ae-site"><option value="">—</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === e?.siteId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+      <label class="f"><span>Project (optional)</span><select id="ae-proj"><option value="">—</option>${[...store.projects].sort((a, b) => (a.status !== 'active') - (b.status !== 'active') || a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}" ${p.id === e?.projectId ? 'selected' : ''}>${esc([p.code, p.name].filter(Boolean).join(' · '))}${p.status !== 'active' ? ` (${esc(p.status)})` : ''}</option>`).join('')}</select></label>
+      <label class="f"><span>Site (optional)</span><select id="ae-site"><option value="">—</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === e?.siteId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
       <label class="f"><span>Receipt / invoice / cheque copy</span><input id="ae-file" type="file" accept="image/*,application/pdf">
         ${e?.hasFile ? `<span class="small muted">Attached: ${esc(e.fileName)} <a href="javascript:void 0" id="ae-rmfile" style="color:${RED}">remove</a></span>` : ''}</label>
     </div>
@@ -274,6 +275,13 @@ function entryDialog(e, kind = e?.type || 'expense') {
         m.querySelector('#ae-ref-l').textContent = chq ? 'Cheque no.' : v('#ae-m') === 'Cash' ? 'Receipt / voucher no.' : 'Transaction ref.';
       };
       m.querySelector('#ae-m').onchange = sync; sync();
+      const partyKey = income ? 'receivedFrom' : 'paidTo';
+      let saved = [];
+      getAcctParties().then((p) => {
+        saved = p[partyKey];
+        const used = (store.acctNames || []);
+        m.querySelector('#ae-parties').innerHTML = [...new Set([...saved, ...used])].map((n) => `<option value="${esc(n)}">`).join('');
+      }).catch(() => {});
       m.querySelector('#ae-file').onchange = async (ev) => {
         const f = ev.target.files[0];
         if (!f) { file = null; return; }
@@ -292,7 +300,10 @@ function entryDialog(e, kind = e?.type || 'expense') {
           await saveAcct(e?.id || null, {
             type: kind, date, amount, category, party: v('#ae-party').trim(), method: v('#ae-m'), reference: v('#ae-ref').trim(),
             bank: chq ? v('#ae-bank').trim() : '', chequeDate: chq ? v('#ae-cdate') : '', siteId: v('#ae-site'), note: v('#ae-note').trim(),
+            projectId: v('#ae-proj'), projectName: (() => { const p = store.projects.find((x) => x.id === v('#ae-proj')); return p ? [p.code, p.name].filter(Boolean).join(' · ') : ''; })(),
           }, file);
+          const who = v('#ae-party').trim();
+          if (who && !saved.some((n) => n.toLowerCase() === who.toLowerCase())) saveAcctParty(partyKey, who).catch(() => {});
           toast(e ? 'Saved' : `${income ? 'Income' : 'Expense'} added`); close();
         } catch (er) { m.querySelector('#ae-err').textContent = friendlyError(er); btn.disabled = false; }
       };
@@ -327,12 +338,12 @@ function report(list, from, to, bf) {
         ['Bank / cheque in', sum(inc.filter((e) => isBankMethod(e.method)))], ['Bank / cheque out', sum(exp.filter((e) => isBankMethod(e.method)))],
         ['Closing balance', r2(b0 + sum(inc) - sum(exp))],
       ] },
-      { name: 'Ledger', columns: ['Date', 'Type', 'Category', 'Party', 'Method', 'Cheque / ref.', 'Bank', 'Site', 'Note', 'Source', 'Income', 'Expense', 'Running balance'],
-        widths: [11, 9, 18, 20, 12, 14, 14, 16, 30, 12, 11, 11, 13],
-        rows: [[from, '', 'Balance brought forward', '', '', '', '', '', '', '', '', '', b0], ...sorted.map((e) => { bal = r2(bal + (e.type === 'income' ? e.amount : -e.amount));
-          return [e.date, e.type === 'income' ? 'Income' : 'Expense', e.category, e.party, e.method, e.reference, e.bank || '', e.siteName, e.note, SRC[e.source],
+      { name: 'Ledger', columns: ['Date', 'Type', 'Category', 'Party', 'Method', 'Cheque / ref.', 'Bank', 'Project', 'Site', 'Note', 'Source', 'Income', 'Expense', 'Running balance'],
+        widths: [11, 9, 18, 20, 12, 14, 14, 20, 16, 30, 12, 11, 11, 13],
+        rows: [[from, '', 'Balance brought forward', '', '', '', '', '', '', '', '', '', '', b0], ...sorted.map((e) => { bal = r2(bal + (e.type === 'income' ? e.amount : -e.amount));
+          return [e.date, e.type === 'income' ? 'Income' : 'Expense', e.category, e.party, e.method, e.reference, e.bank || '', e.projectName || '', e.siteName, e.note, SRC[e.source],
             e.type === 'income' ? e.amount : '', e.type === 'expense' ? e.amount : '', bal]; })],
-        totals: ['CLOSING', '', '', '', '', '', '', '', '', '', sum(inc), sum(exp), r2(b0 + sum(inc) - sum(exp))] },
+        totals: ['CLOSING', '', '', '', '', '', '', '', '', '', '', sum(inc), sum(exp), r2(b0 + sum(inc) - sum(exp))] },
       { name: 'Expenses by category', columns: ['Category', 'AED'], widths: [30, 14], rows: groups(exp, (e) => e.category), totals: ['TOTAL', sum(exp)] },
       { name: 'Income by category', columns: ['Category', 'AED'], widths: [30, 14], rows: groups(inc, (e) => e.category), totals: ['TOTAL', sum(inc)] },
       { name: 'By month', columns: ['Month', 'Income', 'Expenses', 'Net'], widths: [12, 14, 14, 14],

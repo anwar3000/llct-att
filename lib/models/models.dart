@@ -1239,7 +1239,7 @@ class AcctEntry {
   final String type; // income | expense
   final String date;
   final double amount;
-  final String category, method, reference, bank, chequeDate, party, note, siteId, siteName;
+  final String category, method, reference, bank, chequeDate, party, note, siteId, siteName, projectId, projectName;
   final bool hasFile;
   final DateTime? createdAt;
   AcctEntry({
@@ -1257,6 +1257,8 @@ class AcctEntry {
     this.note = '',
     this.siteId = '',
     this.siteName = '',
+    this.projectId = '',
+    this.projectName = '',
     this.hasFile = false,
     this.createdAt,
   });
@@ -1280,6 +1282,8 @@ class AcctEntry {
       note: _str(m['note']),
       siteId: _str(m['siteId']),
       siteName: _str(m['siteName']),
+      projectId: _str(m['projectId']),
+      projectName: _str(m['projectName']),
       hasFile: m['hasFile'] == true,
       createdAt: _ts(m['createdAt']),
     );

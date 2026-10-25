@@ -275,6 +275,7 @@ class _AccountsViewState extends State<_AccountsView> {
         [
           e.date,
           e.method,
+          if (e.projectName.isNotEmpty) e.projectName,
           if (e.reference.isNotEmpty) '${e.method == 'Cheque' ? 'Chq' : 'Ref'} ${e.reference}',
           if (e.bank.isNotEmpty) e.bank,
           if (e.note.isNotEmpty) e.note,
@@ -369,6 +370,7 @@ class _AccountsViewState extends State<_AccountsView> {
   Future<void> _edit(AcctEntry? e, String kind) async {
     final income = kind == 'income';
     final cats = income ? kAcctIncome : kAcctExpense;
+    final partyKey = income ? 'receivedFrom' : 'paidTo';
     var date = e == null ? DateTime.now() : parseDateKey(e.date);
     final amt = TextEditingController(text: e == null ? '' : e.amount.toString());
     var cat = e?.category ?? cats.first;
@@ -378,108 +380,197 @@ class _AccountsViewState extends State<_AccountsView> {
     final bankC = TextEditingController(text: e?.bank);
     final note = TextEditingController(text: e?.note);
     String siteId = e?.siteId ?? '';
+    String projectId = e?.projectId ?? '';
     String? photo;
     String? err;
     final sites = widget.live.sites.where((s) => s.approved).toList();
-    final ok = await showDialog<bool>(
+    // Saved suppliers / payers and projects (shared with the invoicing app).
+    var saved = <String>[];
+    var projects = <({String id, String label})>[];
+    try {
+      final r = await Future.wait([Db.acctParties(), Db.acctProjects()]);
+      saved = List<String>.from((r[0] as Map<String, List<String>>)[partyKey] ?? const <String>[]);
+      projects = r[1] as List<({String id, String label})>;
+    } catch (_) {}
+    if (!mounted) return;
+    final color = income ? _green : _red;
+    final ok = await showModalBottomSheet<bool>(
       context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, set) => AlertDialog(
-          title: Text('${e == null ? 'Add' : 'Edit'} ${income ? 'income' : 'expense'}'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.event),
-                title: Text(fmtDate(date)),
-                onTap: () async {
-                  final d = await showDatePicker(context: c, initialDate: date, firstDate: DateTime(2015), lastDate: DateTime(2100));
-                  if (d != null) set(() => date = d);
-                },
-              ),
-              TextField(
-                controller: amt,
-                autofocus: e == null,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: TextStyle(fontWeight: FontWeight.w800, color: income ? _green : _red),
-                decoration: InputDecoration(labelText: 'Amount ($kCurrency)', errorText: err),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: cats.contains(cat) ? cat : null,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Category'),
-                hint: Text(cat),
-                items: [for (final x in cats) DropdownMenuItem(value: x, child: Text(x))],
-                onChanged: (v) => set(() => cat = v ?? cat),
-              ),
-              const SizedBox(height: 10),
-              TextField(controller: party, decoration: InputDecoration(labelText: income ? 'Received from' : 'Paid to (supplier / party)')),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: kAcctMethods.contains(method) ? method : 'Cash',
-                decoration: const InputDecoration(labelText: 'Method'),
-                items: [for (final m in kAcctMethods) DropdownMenuItem(value: m, child: Text(m))],
-                onChanged: (v) => set(() => method = v ?? 'Cash'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                  controller: ref,
-                  decoration: InputDecoration(
-                      labelText: method == 'Cheque' ? 'Cheque no.' : (method == 'Cash' ? 'Receipt / voucher no.' : 'Transaction ref.'))),
-              if (method == 'Cheque') ...[
-                const SizedBox(height: 10),
-                TextField(controller: bankC, decoration: const InputDecoration(labelText: 'Bank')),
-              ],
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: sites.any((s) => s.id == siteId) ? siteId : '',
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Site (optional)'),
-                items: [
-                  const DropdownMenuItem(value: '', child: Text('—')),
-                  for (final s in sites) DropdownMenuItem(value: s.id, child: Text(s.name, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) => set(() => siteId = v ?? ''),
-              ),
-              const SizedBox(height: 10),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'Note')),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
-                onPressed: () async {
-                  try {
-                    final p = await PhotoService.pick(camera: true);
-                    if (p != null) set(() => photo = p);
-                  } catch (er) {
-                    set(() => err = '$er');
-                  }
-                },
-                icon: Icon(photo != null ? Icons.check_circle : Icons.photo_camera_outlined),
-                label: Text(photo != null ? 'Receipt photo added' : (e?.hasFile == true ? 'Replace receipt photo' : 'Add receipt photo')),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: income ? _green : _red, minimumSize: const Size(96, 44)),
-              onPressed: () {
-                final v = double.tryParse(amt.text.trim());
-                if (v == null || v <= 0) {
-                  set(() => err = 'Enter the amount');
-                  return;
-                }
-                Navigator.pop(c, true);
-              },
-              child: const Text('SAVE'),
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (c) => StatefulBuilder(builder: (c, set) {
+        final t = party.text.trim().toLowerCase();
+        final sugg = saved.where((n) => n.toLowerCase() != t && (t.isEmpty || n.toLowerCase().contains(t))).take(12).toList();
+        // The keyboard's height: the sheet sits right on top of it, with SAVE always visible.
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(c).bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Text('${e == null ? 'Add' : 'Edit'} ${income ? 'income' : 'expense'}',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             ),
-          ],
-        ),
-      ),
+            Flexible(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.event),
+                    title: Text(fmtDate(date)),
+                    onTap: () async {
+                      final d = await showDatePicker(context: c, initialDate: date, firstDate: DateTime(2015), lastDate: DateTime(2100));
+                      if (d != null) set(() => date = d);
+                    },
+                  ),
+                  TextField(
+                    controller: amt,
+                    autofocus: e == null,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    style: TextStyle(fontWeight: FontWeight.w800, color: color),
+                    decoration: InputDecoration(labelText: 'Amount ($kCurrency)', errorText: err),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: cats.contains(cat) ? cat : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    hint: Text(cat),
+                    items: [for (final x in cats) DropdownMenuItem(value: x, child: Text(x))],
+                    onChanged: (v) => set(() => cat = v ?? cat),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: party,
+                    textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.next,
+                    onChanged: (_) => set(() {}),
+                    decoration: InputDecoration(
+                      labelText: income ? 'Received from' : 'Paid to (supplier / party)',
+                      helperText: sugg.isEmpty && party.text.trim().isNotEmpty && !saved.any((n) => n.toLowerCase() == t)
+                          ? 'New name — saved for next time'
+                          : null,
+                    ),
+                  ),
+                  if (sugg.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(spacing: 6, runSpacing: 6, children: [
+                      for (final n in sugg)
+                        InputChip(
+                          label: Text(n, style: const TextStyle(fontSize: 13)),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => set(() {
+                            party.text = n;
+                            party.selection = TextSelection.collapsed(offset: n.length);
+                          }),
+                          onDeleted: () async {
+                            set(() => saved.remove(n));
+                            try {
+                              await Db.saveAcctParty(partyKey, n, remove: true);
+                            } catch (_) {}
+                          },
+                          deleteButtonTooltipMessage: 'Remove from saved list',
+                        ),
+                    ]),
+                  ],
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: kAcctMethods.contains(method) ? method : 'Cash',
+                    decoration: const InputDecoration(labelText: 'Method'),
+                    items: [for (final m in kAcctMethods) DropdownMenuItem(value: m, child: Text(m))],
+                    onChanged: (v) => set(() => method = v ?? 'Cash'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                      controller: ref,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                          labelText: method == 'Cheque' ? 'Cheque no.' : (method == 'Cash' ? 'Receipt / voucher no.' : 'Transaction ref.'))),
+                  if (method == 'Cheque') ...[
+                    const SizedBox(height: 10),
+                    TextField(controller: bankC, textInputAction: TextInputAction.next, decoration: const InputDecoration(labelText: 'Bank')),
+                  ],
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: projects.any((p) => p.id == projectId) ? projectId : '',
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Project (optional)'),
+                    items: [
+                      const DropdownMenuItem(value: '', child: Text('—')),
+                      for (final p in projects) DropdownMenuItem(value: p.id, child: Text(p.label, overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: (v) => set(() => projectId = v ?? ''),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: sites.any((s) => s.id == siteId) ? siteId : '',
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Site (optional)'),
+                    items: [
+                      const DropdownMenuItem(value: '', child: Text('—')),
+                      for (final s in sites) DropdownMenuItem(value: s.id, child: Text(s.name, overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: (v) => set(() => siteId = v ?? ''),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(controller: note, textInputAction: TextInputAction.done, decoration: const InputDecoration(labelText: 'Note')),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+                    onPressed: () async {
+                      try {
+                        final p = await PhotoService.pick(camera: true);
+                        if (p != null) set(() => photo = p);
+                      } catch (er) {
+                        set(() => err = '$er');
+                      }
+                    },
+                    icon: Icon(photo != null ? Icons.check_circle : Icons.photo_camera_outlined),
+                    label: Text(photo != null ? 'Receipt photo added' : (e?.hasFile == true ? 'Replace receipt photo' : 'Add receipt photo')),
+                  ),
+                ]),
+              ),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                    onPressed: () => Navigator.pop(c, false),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: color, minimumSize: const Size(0, 48)),
+                    onPressed: () {
+                      final v = double.tryParse(amt.text.trim());
+                      if (v == null || v <= 0) {
+                        set(() => err = 'Enter the amount');
+                        return;
+                      }
+                      Navigator.pop(c, true);
+                    },
+                    child: const Text('SAVE'),
+                  ),
+                ),
+              ]),
+            ),
+          ]),
+        );
+      }),
     );
     if (ok != true) return;
     final site = widget.live.siteById(siteId);
+    final proj = projects.where((p) => p.id == projectId).firstOrNull;
+    final who = party.text.trim();
     try {
       await Db.saveAcct(
         id: e?.id,
@@ -490,15 +581,20 @@ class _AccountsViewState extends State<_AccountsView> {
           'date': dateKey(date),
           'amount': _r2(double.parse(amt.text.trim())),
           'category': cat,
-          'party': party.text.trim(),
+          'party': who,
           'method': method,
           'reference': ref.text.trim(),
           'bank': method == 'Cheque' ? bankC.text.trim() : '',
           'siteId': siteId,
           'siteName': site?.name ?? '',
+          'projectId': proj?.id ?? '',
+          'projectName': proj?.label ?? '',
           'note': note.text.trim(),
         },
       );
+      if (who.isNotEmpty && !saved.any((n) => n.toLowerCase() == who.toLowerCase())) {
+        Db.saveAcctParty(partyKey, who).catchError((_) {});
+      }
       if (mounted) showSnack(context, e == null ? '${income ? 'Income' : 'Expense'} added' : 'Saved');
       if (e != null || dateKey(date).compareTo(_range.from) < 0) _reloadSide();
     } catch (er) {
