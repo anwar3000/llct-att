@@ -14,28 +14,38 @@ const LS_KEY = 'llct-storage-estimate';
 const C = (n) => collection(db, n);
 
 // Every collection in the shared project (attendance + invoicing) and what it holds.
+// app: att = LLCT Attendance, inv = LLCT Invoicing, shared = used by both (logins).
+// cat: photo = photos & files, gps = GPS trails & routes, rec = records (text data).
+const APPS = { att: 'LLCT Attendance', inv: 'LLCT Invoicing', shared: 'Shared — staff logins & profiles' };
+const CATS = { photo: 'Photos & files', gps: 'GPS trails & routes', rec: 'Records (data)' };
 const AREAS = [
-  { key: 'siteUpdates', label: 'Site update photos & notes', photo: true },
-  { key: 'petty', label: 'Petty cash (with receipt photos)', photo: true },
-  { key: 'acctFiles', label: 'Accounts receipt copies', photo: true },
-  { key: 'idFiles', label: 'ID document copies', photo: true, sizeField: true },
-  { key: 'inv_images', label: 'Invoicing photos & attachments', photo: true },
-  { key: '_track', label: 'GPS trails (staff on duty)', sub: true },
-  { key: '_points', label: 'Trip & ride routes', sub: true },
-  { key: 'attendance', label: 'Attendance' },
-  { key: 'workerAttendance', label: 'External worker attendance' },
-  { key: 'trips', label: 'Trips & rides' },
-  { key: 'acctEntries', label: 'Accounts entries' },
-  { key: 'alerts', label: 'Alerts & violations' },
-  { key: 'inv_docs', label: 'Invoicing documents' },
-  { key: 'inv_payments', label: 'Invoicing payments' },
-  { key: 'inv_clients', label: 'Invoicing clients' },
-  { key: 'inv_products', label: 'Invoicing products' },
-  { key: 'inv_ledger', label: 'Invoicing accounts' },
+  { key: 'siteUpdates', label: 'Site update photos & notes', app: 'att', cat: 'photo' },
+  { key: 'petty', label: 'Petty cash (with receipt photos)', app: 'att', cat: 'photo' },
+  { key: 'acctFiles', label: 'Accounts receipt copies', app: 'att', cat: 'photo' },
+  { key: 'idFiles', label: 'ID document copies', app: 'att', cat: 'photo' },
+  { key: '_track', label: 'GPS trails (staff on duty)', app: 'att', cat: 'gps', sub: true },
+  { key: '_points', label: 'Trip & ride routes', app: 'att', cat: 'gps', sub: true },
+  { key: 'attendance', label: 'Attendance', app: 'att', cat: 'rec' },
+  { key: 'workerAttendance', label: 'External worker attendance', app: 'att', cat: 'rec' },
+  { key: 'trips', label: 'Trips & rides', app: 'att', cat: 'rec' },
+  { key: 'acctEntries', label: 'Accounts entries', app: 'att', cat: 'rec' },
+  { key: 'alerts', label: 'Alerts & violations', app: 'att', cat: 'rec' },
+  { key: 'inv_images', label: 'Invoicing photos & attachments', app: 'inv', cat: 'photo' },
+  { key: 'inv_docs', label: 'Quotations, invoices & delivery notes', app: 'inv', cat: 'rec' },
+  { key: 'inv_payments', label: 'Invoicing payments', app: 'inv', cat: 'rec' },
+  { key: 'inv_clients', label: 'Clients', app: 'inv', cat: 'rec' },
+  { key: 'inv_products', label: 'Products', app: 'inv', cat: 'rec' },
+  { key: 'inv_ledger', label: 'Invoicing accounts', app: 'inv', cat: 'rec' },
 ];
-const OTHER = ['users', 'sites', 'projects', 'schedules', 'offDays', 'extWorkers', 'workerLocks', 'idInfo', 'changeRequests', 'settings',
-  'workerRates', 'driverPayments', 'siteKeys', 'acctSettings', 'inv_config', 'inv_access', 'inv_counters', 'inv_profiles', 'inv_numbers'];
-const ALL_COLLECTIONS = [...new Set([...AREAS.filter((a) => !a.sub).map((a) => a.key), ...OTHER])];
+// Smaller collections, measured together per app.
+const OTHER = {
+  att: ['sites', 'projects', 'schedules', 'offDays', 'extWorkers', 'workerLocks', 'idInfo', 'changeRequests', 'settings',
+    'workerRates', 'driverPayments', 'siteKeys', 'acctSettings'],
+  inv: ['inv_config', 'inv_access', 'inv_counters', 'inv_profiles', 'inv_numbers'],
+  shared: ['users'],
+};
+const OTHER_LABEL = { att: 'Other attendance data (sites, schedules, settings…)', inv: 'Other invoicing data (settings, numbering, access…)', shared: 'Staff logins & profiles' };
+const ALL_COLLECTIONS = [...new Set([...AREAS.filter((a) => !a.sub).map((a) => a.key), ...Object.values(OTHER).flat()])];
 
 const mb = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.max(0, Math.round(b / 1024))} KB`);
 // Approximate stored size of a document (field data + names + Firestore's per-document overhead).
@@ -65,11 +75,7 @@ export function mount(el, _p, { setHeader }) {
           <span class="muted">of 1 GB free · ${pct}% used · estimated ${esc(new Date(est.at).toLocaleString())}</span></div>
         <div style="height:12px;background:#f0ede8;border-radius:8px;margin:10px 0 6px"><i style="display:block;height:12px;width:${Math.max(1, pct)}%;background:${color};border-radius:8px"></i></div>
         ${pct >= 70 ? `<div class="small" style="color:${color};font-weight:700;margin-bottom:8px">⚠ ${pct >= 90 ? 'Almost full' : 'Getting full'} — download a backup below, then free up space (or move to the Blaze plan).</div>` : ''}
-        <div class="small muted" style="margin-bottom:10px">Photos: <b>${mb(est.photos)}</b> · records: <b>${mb(used - est.photos)}</b> · ${est.docs.toLocaleString()} records in total</div>
-        <div class="table-wrap"><table class="t tr-t"><thead><tr><th>What</th><th class="num">Records</th><th class="num">Size</th><th style="width:30%"></th></tr></thead><tbody>
-          ${est.rows.map((r) => `<tr><td>${r.photo ? '📷 ' : ''}${esc(r.label)}</td><td class="num">${r.count.toLocaleString()}</td><td class="num"><b>${mb(r.bytes)}</b></td>
-            <td><div style="height:6px;background:#f0ede8;border-radius:4px"><i style="display:block;height:6px;width:${used ? Math.max(1, Math.round((r.bytes / used) * 100)) : 0}%;background:${r.photo ? '#D98A1A' : '#3A7BD5'};border-radius:4px"></i></div></td></tr>`).join('')}
-        </tbody></table></div>`
+        ${est.rows[0]?.app ? breakdown(est, used) : '<div class="small muted">Press Recalculate to see totals per app and per category.</div>'}`
         : '<div class="empty"><b>Not calculated yet</b>Press “Calculate size”. It counts every collection and samples record sizes (a few hundred reads).</div>'}
         <div class="small muted" style="margin-top:8px">Estimate (Firestore also stores indexes). Exact figures: <a href="${consoleUrl}" target="_blank" rel="noopener">Firebase Console → Firestore → Usage</a>.</div>
       </div>
@@ -140,6 +146,42 @@ export function mount(el, _p, { setHeader }) {
   return () => {};
 }
 
+// Totals per app and per category, then the detail grouped by app.
+const CAT_COLOR = { photo: '#D98A1A', gps: '#7B4FC9', rec: '#3A7BD5' };
+const APP_COLOR = { att: '#404041', inv: '#2E9E6A', shared: '#8a8a8e' };
+function breakdown(est, used) {
+  const sum = (f) => est.rows.filter(f).reduce((a, r) => a + r.bytes, 0);
+  const cnt = (f) => est.rows.filter(f).reduce((a, r) => a + r.count, 0);
+  const pct = (b) => (used ? Math.round((b / used) * 100) : 0);
+  const card = (title, b, n, color, sub = '') => `<div class="card" style="padding:12px 14px;border-left:4px solid ${color}">
+      <div class="small muted">${esc(title)}</div><b style="font-size:19px">${mb(b)}</b> <span class="small muted">${pct(b)}%</span>
+      <div class="small muted">${n.toLocaleString()} records${sub}</div></div>`;
+  const bar = (b, color) => `<div style="height:6px;background:#f0ede8;border-radius:4px"><i style="display:block;height:6px;width:${Math.max(b ? 1 : 0, pct(b))}%;background:${color};border-radius:4px"></i></div>`;
+  return `
+    <h3 style="margin:6px 0 8px;font-size:14px">By app</h3>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+      ${Object.entries(APPS).map(([k, l]) => card(l, sum((r) => r.app === k), cnt((r) => r.app === k), APP_COLOR[k],
+        ` · photos ${mb(sum((r) => r.app === k && r.cat === 'photo'))}`)).join('')}
+    </div>
+    <h3 style="margin:14px 0 8px;font-size:14px">By category</h3>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+      ${Object.entries(CATS).map(([k, l]) => card(l, sum((r) => r.cat === k), cnt((r) => r.cat === k), CAT_COLOR[k])).join('')}
+    </div>
+    <h3 style="margin:14px 0 8px;font-size:14px">Detail</h3>
+    <div class="table-wrap"><table class="t tr-t"><thead><tr><th>What</th><th>Category</th><th class="num">Records</th><th class="num">Size</th><th class="num">%</th><th style="width:22%"></th></tr></thead><tbody>
+      ${Object.entries(APPS).map(([k, l]) => {
+        const rows = est.rows.filter((r) => r.app === k);
+        if (!rows.length) return '';
+        const tb = rows.reduce((a, r) => a + r.bytes, 0), tc = rows.reduce((a, r) => a + r.count, 0);
+        return `<tr><td colspan="6" style="background:#f6f4f0;font-weight:800;color:${APP_COLOR[k]}">${esc(l)}</td></tr>
+          ${rows.map((r) => `<tr><td style="padding-left:22px">${esc(r.label)}</td><td class="small"><span style="color:${CAT_COLOR[r.cat]}">●</span> ${esc(CATS[r.cat])}</td>
+            <td class="num">${r.count.toLocaleString()}</td><td class="num"><b>${mb(r.bytes)}</b></td><td class="num small">${pct(r.bytes)}%</td><td>${bar(r.bytes, CAT_COLOR[r.cat])}</td></tr>`).join('')}
+          <tr><td style="padding-left:22px;font-weight:800">Subtotal</td><td></td><td class="num"><b>${tc.toLocaleString()}</b></td><td class="num"><b>${mb(tb)}</b></td><td class="num small"><b>${pct(tb)}%</b></td><td>${bar(tb, APP_COLOR[k])}</td></tr>`;
+      }).join('')}
+      <tr><td style="font-weight:800">TOTAL</td><td></td><td class="num"><b>${est.docs.toLocaleString()}</b></td><td class="num"><b>${mb(used)}</b></td><td class="num small"><b>${Math.round((used / FREE_BYTES) * 100)}% of 1 GB</b></td><td></td></tr>
+    </tbody></table></div>`;
+}
+
 // ------------------------------------------------------------------ size estimate
 async function sampleAvg(q) {
   const snap = await getDocs(query(q, limit(20)));
@@ -149,7 +191,10 @@ async function sampleAvg(q) {
 async function estimate(progress) {
   const rows = [];
   let total = 0, photos = 0, docs = 0;
-  const add = (label, count, bytes, photo = false) => { rows.push({ label, count, bytes: Math.round(bytes), photo }); total += bytes; docs += count; if (photo) photos += bytes; };
+  const add = (label, count, bytes, app, cat) => {
+    rows.push({ label, count, bytes: Math.round(bytes), app, cat, photo: cat === 'photo' });
+    total += bytes; docs += count; if (cat === 'photo') photos += bytes;
+  };
   for (const a of AREAS) {
     progress(`Measuring ${a.label}…`);
     if (a.key === '_track') {
@@ -160,31 +205,33 @@ async function estimate(progress) {
         if (k && !avg) avg = await sampleAvg(c);
         n += k;
       }
-      add(a.label, n, n * (avg || 180));
+      add(a.label, n, n * (avg || 180), a.app, a.cat);
     } else if (a.key === '_points') {
       const t = await getDocs(C('trips'));
       const n = t.docs.reduce((s, d) => s + (Number(d.data().pointsCount) || 0), 0);
-      add(a.label, n, n * 120);
+      add(a.label, n, n * 120, a.app, a.cat);
     } else if (a.key === 'idFiles') {
       const s = await getDocs(C('idFiles'));
       const bytes = s.docs.reduce((x, d) => x + (Number(d.data().size) || 0) * 1.34 + 400, 0);
-      add(a.label, s.size, bytes, true);
+      add(a.label, s.size, bytes, a.app, a.cat);
     } else {
       const c = C(a.key);
       const n = (await getCountFromServer(c)).data().count;
       const avg = n ? await sampleAvg(c) : 0;
-      add(a.label, n, n * avg, !!a.photo);
+      add(a.label, n, n * avg, a.app, a.cat);
     }
   }
-  progress('Measuring everything else…');
-  let on = 0, ob = 0;
-  for (const k of OTHER) {
-    try {
-      const n = (await getCountFromServer(C(k))).data().count;
-      on += n; ob += n ? n * (await sampleAvg(C(k))) : 0;
-    } catch { /* collection not readable / not present */ }
+  for (const [app, keys] of Object.entries(OTHER)) {
+    progress(`Measuring ${OTHER_LABEL[app]}…`);
+    let on = 0, ob = 0;
+    for (const k of keys) {
+      try {
+        const n = (await getCountFromServer(C(k))).data().count;
+        on += n; ob += n ? n * (await sampleAvg(C(k))) : 0;
+      } catch { /* collection not readable / not present */ }
+    }
+    add(OTHER_LABEL[app], on, ob, app, 'rec');
   }
-  add('Other (staff, sites, settings, numbering…)', on, ob);
   rows.sort((a, b) => b.bytes - a.bytes);
   return { at: Date.now(), total: Math.round(total), photos: Math.round(photos), docs, rows };
 }
