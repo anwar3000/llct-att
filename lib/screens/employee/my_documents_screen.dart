@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../widgets/common.dart';
+import '../../widgets/doc_widgets.dart';
 import 'scan_documents_screen.dart';
 
 /// Employee's own ID documents: numbers, expiry dates and copies (max 2 MB each).
@@ -31,7 +29,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
   final _dates = <String, String>{};
   List<IdFileMeta> _files = [];
   bool _loaded = false, _dirty = false, _saving = false;
-  String? _uploadingKind;
+  String? _uploading;
   String? _error;
 
   TextEditingController _c(String field) => _ctrl.putIfAbsent(field, () => TextEditingController());
@@ -122,101 +120,61 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
   }
 
   // ------------------------------------------------------------ upload
-  Future<void> _upload(IdKind k) async {
-    final src = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text('Add ${k.label} copy · max 2 MB',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-          ),
-          ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(c, 'camera')),
-          ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(c, 'gallery')),
-          ListTile(
-              leading: const Icon(Icons.picture_as_pdf_outlined),
-              title: const Text('Choose a PDF or file'),
-              onTap: () => Navigator.pop(c, 'file')),
-          const SizedBox(height: 8),
-        ]),
-      ),
-    );
-    if (src == null || !mounted) return;
+  /// Upload into one slot; the old copy of that slot is removed after the new one is saved.
+  Future<void> _uploadSlot(IdSlot sl, IdFileMeta? old) async {
     try {
-      String name, mime;
-      List<int>? bytes;
-      if (src == 'file') {
-        final r = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
-          withData: true,
-        );
-        final f = r?.files.single;
-        if (f == null) return;
-        if (f.size > kMaxDocBytes) throw Exception('${f.name} is larger than 2 MB. Please choose a smaller file.');
-        bytes = f.bytes;
-        name = f.name;
-        final ext = (f.extension ?? '').toLowerCase();
-        mime = ext == 'pdf' ? 'application/pdf' : (ext == 'png' ? 'image/png' : 'image/jpeg');
-      } else {
-        final x = await ImagePicker().pickImage(
-          source: src == 'camera' ? ImageSource.camera : ImageSource.gallery,
-          maxWidth: 2000,
-          maxHeight: 2000,
-          imageQuality: 80,
-        );
-        if (x == null) return;
-        bytes = await x.readAsBytes();
-        name = '${k.label}.jpg';
-        mime = 'image/jpeg';
-      }
-      if (bytes == null) throw Exception('Could not read the file.');
-      if (bytes.length > kMaxDocBytes) {
-        throw Exception('File is ${(bytes.length / 1048576).toStringAsFixed(1)} MB — the limit is 2 MB.');
-      }
-      setState(() => _uploadingKind = k.key);
+      final p = await pickDocument(context, sl.label);
+      if (p == null || !mounted) return;
+      setState(() => _uploading = sl.key);
       await Db.uploadMyIdFile(
-          me: widget.me, owner: _owner, kind: k.key, name: name, mime: mime, bytes: Uint8List.fromList(bytes));
-      if (mounted) showSnack(context, '${k.label} copy uploaded');
+          me: widget.me, owner: _owner, kind: sl.kind, side: sl.side, name: _niceName(sl.short, p), mime: p.mime, bytes: p.bytes);
+      if (old != null) {
+        try {
+          await Db.deleteIdFile(old);
+          DocBytes.forget(old.id);
+        } catch (_) {}
+      }
+      if (mounted) showSnack(context, '${sl.label} uploaded');
     } catch (e) {
       if (mounted) showSnack(context, '$e'.replaceFirst('Exception: ', ''), error: true);
     } finally {
-      if (mounted) setState(() => _uploadingKind = null);
+      if (mounted) setState(() => _uploading = null);
     }
   }
 
-  Future<void> _open(IdFileMeta f) async {
-    if (!f.isImage) {
-      showSnack(context, '${f.name} is saved. PDFs can be viewed by management on the dashboard.');
-      return;
-    }
+  Future<void> _addOther() async {
+    final heading = await askHeading(context,
+        title: 'Additional document',
+        hint: 'e.g. Driving licence',
+        suggestions: const ['Driving licence', 'Health card', 'Insurance card', 'Degree certificate', 'Experience letter', 'Labour contract']);
+    if (heading == null || !mounted) return;
     try {
-      final bytes = await Db.readIdFile(f);
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (c) => Dialog(
-          clipBehavior: Clip.antiAlias,
-          child: InteractiveViewer(child: Image.memory(bytes, fit: BoxFit.contain)),
-        ),
-      );
+      final p = await pickDocument(context, heading);
+      if (p == null || !mounted) return;
+      setState(() => _uploading = 'other');
+      await Db.uploadMyIdFile(
+          me: widget.me, owner: _owner, kind: 'other', title: heading, name: _niceName(heading, p), mime: p.mime, bytes: p.bytes);
+      if (mounted) showSnack(context, '$heading uploaded');
     } catch (e) {
-      if (mounted) showSnack(context, 'Could not open: $e', error: true);
+      if (mounted) showSnack(context, '$e'.replaceFirst('Exception: ', ''), error: true);
+    } finally {
+      if (mounted) setState(() => _uploading = null);
     }
   }
 
-  Future<void> _delete(IdFileMeta f) async {
-    if (!await confirm(context, 'Delete copy?', 'Delete ${f.name}?', danger: true, ok: 'Delete')) return;
+  String _niceName(String label, PickedDoc p) {
+    final base = label.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '').trim().replaceAll(' ', '_');
+    return '$base.${p.mime == 'application/pdf' ? 'pdf' : (p.mime == 'image/png' ? 'png' : 'jpg')}';
+  }
+
+  void _open(IdFileMeta f, String title) => DocViewer.open(context,
+      id: f.id, title: title, fileName: f.name, mime: f.mime, load: () => Db.readIdFile(f));
+
+  Future<void> _delete(IdFileMeta f, String what) async {
+    if (!await confirm(context, 'Delete copy?', 'Delete the $what copy?', danger: true, ok: 'Delete')) return;
     try {
       await Db.deleteIdFile(f);
+      DocBytes.forget(f.id);
     } catch (e) {
       if (mounted) showSnack(context, 'Could not delete: $e', error: true);
     }
@@ -257,12 +215,12 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                           onPressed: () => Navigator.of(context)
                               .push(MaterialPageRoute(builder: (_) => ScanDocumentsScreen(me: widget.me, owner: widget.owner))),
                           icon: const Icon(Icons.document_scanner_outlined),
-                          label: const Text('SCAN MY DOCUMENTS', style: TextStyle(fontWeight: FontWeight.w800)),
+                          label: Text(widget.owner == null ? 'SCAN MY DOCUMENTS' : 'SCAN DOCUMENTS', style: const TextStyle(fontWeight: FontWeight.w800)),
                         ),
                       ),
                       const Padding(
                         padding: EdgeInsets.fromLTRB(4, 6, 4, 12),
-                        child: Text('Step by step: Emirates ID front & back, passport front & back, visa, SIRA card, MCC certificate, photo.',
+                        child: Text('Step by step: EID front, EID back, visa, passport front, passport address page, SIRA, Abu Dhabi MCC, photo. Or upload each one below.',
                             style: TextStyle(fontSize: 12, color: AppColors.muted)),
                       ),
                       Container(
@@ -276,13 +234,28 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      for (final k in idKinds) ...[_docCard(k), const SizedBox(height: 10)],
+                      ..._slotCards(),
                       TextField(
                         controller: _c('nationality'),
                         onChanged: (_) => _dirty = true,
                         decoration: const InputDecoration(
                             labelText: 'Nationality', prefixIcon: Icon(Icons.flag_outlined)),
                       ),
+                      const SizedBox(height: 18),
+                      Row(children: [
+                        const Expanded(
+                            child: Text('ADDITIONAL DOCUMENTS',
+                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: .6, color: AppColors.muted))),
+                        _uploading == 'other'
+                            ? const Padding(
+                                padding: EdgeInsets.all(10),
+                                child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+                            : TextButton.icon(
+                                onPressed: _addOther,
+                                icon: const Icon(Icons.add_circle_outline),
+                                label: const Text('Add with heading')),
+                      ]),
+                      ..._otherCards(),
                     ],
                   ),
         bottomNavigationBar: !_loaded || _error != null
@@ -303,70 +276,145 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     );
   }
 
-  Widget _docCard(IdKind k) {
-    final files = _files.where((f) => f.kind == k.key).toList();
-    final exp = k.expField == null ? '' : (_dates[k.expField!] ?? '');
-    final uploading = _uploadingKind == k.key;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(
-                child: Text(k.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
-            if (k.expField != null) _expiryPill(exp),
-            const SizedBox(width: 4),
-            uploading
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
-                : IconButton(
-                    tooltip: 'Upload copy',
-                    onPressed: () => _upload(k),
-                    icon: const Icon(Icons.add_circle_outline, color: AppColors.accentDark)),
-          ]),
-          if (k.numField != null) ...[
-            const SizedBox(height: 6),
+  List<Widget> _slotCards() {
+    final a = assignIdSlots(_files.where((f) => !f.pending).toList());
+    _extra = a.extra;
+    final out = <Widget>[];
+    final shownNumbers = <String>{};
+    for (final sl in idSlots) {
+      final f = a.slot[sl.key];
+      final k = sl.idKind;
+      final withNumbers = k.numField != null && shownNumbers.add(k.key);
+      final exp = k.expField == null ? '' : (_dates[k.expField!] ?? '');
+      final busy = _uploading == sl.key;
+      out.add(Card(
+        margin: const EdgeInsets.only(bottom: 10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Expanded(
-                flex: 3,
-                child: TextField(
-                  controller: _c(k.numField!),
-                  onChanged: (_) => _dirty = true,
-                  decoration: const InputDecoration(labelText: 'Number', isDense: true),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _pickDate(k.expField!),
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Expiry', isDense: true),
-                    child: Text(exp.isEmpty ? 'Select' : fmtDate(_parse(exp)!),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: exp.isEmpty ? AppColors.muted : null, fontSize: 13)),
+              InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: busy ? null : (f == null ? () => _uploadSlot(sl, null) : () => _open(f, sl.label)),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    width: 84,
+                    height: 58,
+                    child: f == null
+                        ? DocPlaceholder(icon: sl.kind == 'photo' ? Icons.person_outline : Icons.add_a_photo_outlined)
+                        : DocThumb(id: f.id, isImage: f.isImage, load: () => Db.readIdFile(f)),
                   ),
                 ),
               ),
-            ]),
-          ],
-          const SizedBox(height: 8),
-          files.isEmpty
-              ? const Text('No copy uploaded', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
-              : Wrap(spacing: 6, runSpacing: 6, children: [
-                  for (final f in files)
-                    InputChip(
-                      avatar: Icon(f.isImage ? Icons.image_outlined : Icons.picture_as_pdf_outlined, size: 18),
-                      label: Text(f.name, overflow: TextOverflow.ellipsis),
-                      onPressed: () => _open(f),
-                      onDeleted: () => _delete(f),
-                    ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(sl.short, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, letterSpacing: .3)),
+                  const SizedBox(height: 3),
+                  f == null
+                      ? Text(sl.kind == 'sira' || sl.kind == 'mcc' || sl.kind == 'labour' ? 'Not uploaded (if you have one)' : 'Not uploaded',
+                          style: const TextStyle(color: AppColors.danger, fontSize: 12.5))
+                      : Text('Uploaded${f.uploadedAt == null ? '' : ' ${fmtDateShort(f.uploadedAt!)}'}${f.isImage ? '' : ' · PDF'}',
+                          style: const TextStyle(color: AppColors.success, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  if (withNumbers && exp.isNotEmpty) ...[const SizedBox(height: 4), _expiryPill(exp)],
                 ]),
-        ]),
-      ),
-    );
+              ),
+              if (busy)
+                const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+              else if (f == null)
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: AppColors.primaryDark),
+                  onPressed: () => _uploadSlot(sl, null),
+                  icon: const Icon(Icons.upload, size: 18),
+                  label: const Text('Upload'),
+                )
+              else
+                PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'view') _open(f, sl.label);
+                    if (v == 'replace') _uploadSlot(sl, f);
+                    if (v == 'delete') _delete(f, sl.label);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined), title: Text('View / share'))),
+                    PopupMenuItem(value: 'replace', child: ListTile(leading: Icon(Icons.upload), title: Text('Replace'))),
+                    PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete'))),
+                  ],
+                ),
+            ]),
+            if (withNumbers) ...[
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _c(k.numField!),
+                    onChanged: (_) => _dirty = true,
+                    decoration: InputDecoration(labelText: '${k.label.replaceAll(' / work permit', '')} number', isDense: true),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _pickDate(k.expField!),
+                    child: InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Expiry', isDense: true),
+                      child: Text(exp.isEmpty ? 'Select' : fmtDate(_parse(exp)!),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: exp.isEmpty ? AppColors.muted : null, fontSize: 13)),
+                    ),
+                  ),
+                ),
+              ]),
+            ],
+          ]),
+        ),
+      ));
+    }
+    return out;
+  }
+
+  List<IdFileMeta> _extra = [];
+
+  List<Widget> _otherCards() {
+    if (_extra.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.fromLTRB(4, 0, 4, 8),
+          child: Text('Driving licence, health card, certificates… add each one with its own heading.',
+              style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+        ),
+      ];
+    }
+    return [
+      for (final f in _extra)
+        Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            contentPadding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(width: 56, height: 42, child: DocThumb(id: f.id, isImage: f.isImage, load: () => Db.readIdFile(f))),
+            ),
+            title: Text(idFileHeading(f), style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text('${f.isImage ? 'Photo' : 'PDF'}${f.uploadedAt == null ? '' : ' · ${fmtDateShort(f.uploadedAt!)}'}'),
+            onTap: () => _open(f, idFileHeading(f)),
+            trailing: IconButton(
+                tooltip: 'Delete',
+                icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                onPressed: () => _delete(f, idFileHeading(f))),
+          ),
+        ),
+    ];
   }
 }

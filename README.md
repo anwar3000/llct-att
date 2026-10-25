@@ -35,6 +35,13 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **One box per document + company documents (v1.8.3):**
+  - **Personal IDs (Android app, iPhone app, dashboard):** a separate box for EID FRONT, EID BACK, VISA, PASSPORT FRONT, PASSPORT ADDRESS, SIRA, ABU DHABI MCC, PHOTO and LABOUR CARD, each with Upload / Replace / Delete (replacing removes the old copy). Number and expiry sit under the first box of each document.
+  - **Additional documents:** any other document (driving licence, health card…) uploaded with its own heading.
+  - **Older uploads** without front/back fill the empty box of their document automatically; anything left over shows under Additional documents.
+  - **Company documents** (dashboard → Company documents; app → Team → ID docs → Company documents): LLCT trade license (Dubai), Abu Dhabi LLCT trade license, Chamber of Commerce, WC insurance, VAT/TRN, establishment card, MOHRE card, tenancy/Ejari, third-party liability, staff medical insurance, MOA, plus additional documents with a heading. Each has number, issue and expiry dates (renew-soon warning within 30 days) and any number of copies. Download all as a ZIP with an Excel list (web) or share all (app).
+  - **Who:** admin and managers manage; people with *Can view & download ID documents* can view and share.
+  - **Rules:** new `companyDocs` / `companyFiles` sections — publish the updated `firestore.rules`.
 - **Upload IDs for anyone from the app (v1.8.2):** on a person's ID page (Team → ID docs → person, or the badge icon on an employee's page), admin and managers get **Scan documents** (the guided step-by-step scanner) and **Upload / edit** (numbers, expiry dates, photo / gallery / PDF per document, delete). Works for staff and external workers.
 - **ID documents in the Android app (v1.8.1):**
   - **Where:** admin and managers: Team → *ID docs* (and the badge icon on an employee's page). People admin allowed: profile picture → *Staff ID documents*.

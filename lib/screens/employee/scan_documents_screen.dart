@@ -20,11 +20,11 @@ class ScanStep {
 }
 
 const kScanSteps = [
-  ScanStep('eid', 'front', 'Emirates ID — front', 'card', numField: 'eidNo', expField: 'eidExpiry', numLabel: 'Emirates ID number'),
-  ScanStep('eid', 'back', 'Emirates ID — back', 'card'),
-  ScanStep('passport', 'front', 'Passport — photo page', 'page', numField: 'passportNo', expField: 'passportExpiry', numLabel: 'Passport number'),
-  ScanStep('passport', 'back', 'Passport — last page (address)', 'page'),
-  ScanStep('visa', 'front', 'Visa page', 'page', numField: 'visaNo', expField: 'visaExpiry', numLabel: 'Visa / file number'),
+  ScanStep('eid', 'front', 'EID front', 'card', numField: 'eidNo', expField: 'eidExpiry', numLabel: 'Emirates ID number'),
+  ScanStep('eid', 'back', 'EID back', 'card'),
+  ScanStep('visa', 'front', 'Visa', 'page', numField: 'visaNo', expField: 'visaExpiry', numLabel: 'Visa / file number'),
+  ScanStep('passport', 'front', 'Passport front (photo page)', 'page', numField: 'passportNo', expField: 'passportExpiry', numLabel: 'Passport number'),
+  ScanStep('passport', 'back', 'Passport address page', 'page'),
   ScanStep('sira', 'front', 'SIRA card (if you have one)', 'card', numField: 'siraNo', expField: 'siraExpiry', numLabel: 'SIRA number', optional: true),
   ScanStep('mcc', 'front', 'Abu Dhabi MCC certificate (if you have one)', 'page', numField: 'mccNo', expField: 'mccExpiry', numLabel: 'Certificate number', optional: true),
   ScanStep('photo', 'front', 'Passport-size photo', 'photo'),

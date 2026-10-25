@@ -12,7 +12,7 @@ import {
   esc, icon, avatar, pill, toast, modal, confirmBox, friendlyError, fmtTime, fmtDate, fmtDay, fmtMins, fmtMoney, fmtMonth,
   dateKey, monthKey, parseKey, b64img, photoViewer, CURRENCY,
 } from './util.js';
-import { DOC_KINDS, prepareFile, viewFile, expiryPill, scanWizard } from './iddocs.js';
+import { scanWizard, slotListHtml, wireSlotList } from './iddocs.js';
 
 window.__appStarted = true;
 const app = document.getElementById('app');
@@ -1284,6 +1284,17 @@ function openScan() {
   });
 }
 
+function docCtx() {
+  return {
+    files: () => S.idFiles.filter((f) => !f.pending),
+    info: () => S.idInfo || {},
+    fieldAttr: 'data-f',
+    upload: (p) => uploadIdFile({ ownerId: S.me.id, ownerType: 'staff', ownerName: S.me.name, ...p }),
+    remove: (f) => deleteIdFile(f),
+    busy: (m) => busy(m),
+  };
+}
+
 function drawMe(main) {
   const i = S.idInfo || {};
   const miss = missingProfile();
@@ -1299,16 +1310,8 @@ function drawMe(main) {
     </div>
     <h3 class="st-h">My ID documents <span class="small muted" style="font-weight:500">· photo or PDF, max 2 MB</span></h3>
     <button class="st-big" id="me-scan" style="height:58px;margin:6px 0 12px;background:#D98A1A;color:#fff;font-size:16px">📷 SCAN MY DOCUMENTS</button>
-    ${DOC_KINDS.map((k) => {
-      const files = S.idFiles.filter((f) => f.kind === k.k);
-      return `<div class="st-card pad st-doc">
-        <div class="row"><b>${esc(k.label)}</b><span class="spacer"></span>${k.exp ? expiryPill(i[k.exp]) : ''}</div>
-        ${k.num ? `<div class="row" style="gap:8px;flex-wrap:nowrap;margin-top:6px"><input data-f="${k.num}" placeholder="Number" value="${esc(i[k.num] || '')}" style="flex:3">
-          <input data-f="${k.exp}" type="date" value="${esc(i[k.exp] || '')}" style="flex:2"></div>` : ''}
-        <div class="row" style="gap:6px;margin-top:8px">${files.map((f) => `<span class="pchip"><a href="javascript:void 0" data-view="${f.id}">${f.mime === 'application/pdf' ? 'PDF' : 'IMG'} ${esc(f.name.slice(0, 16))}</a><button data-delf="${f.id}">×</button></span>`).join('')}
-          <label class="st-btn sm">${icon('plus', 14)} Upload<input type="file" accept="image/*,application/pdf" data-up="${k.k}" hidden></label></div>
-      </div>`;
-    }).join('')}
+    <div class="small muted" style="margin:-6px 2px 10px">or upload each one below</div>
+    ${slotListHtml(docCtx())}
     <label class="f" style="margin-top:10px"><span>Nationality</span><input data-f="nationality" value="${esc(i.nationality || '')}"></label>
     <button class="st-btn primary block" id="me-save">Save numbers & dates</button>
     <div class="st-card pad" style="margin-top:18px">
@@ -1324,27 +1327,7 @@ function drawMe(main) {
     try { await saveIdInfo(S.me.id, 'staff', { ...data, name: S.me.name }); toast('Saved'); } catch (e) { toast(friendlyError(e), true); }
     ev.currentTarget.disabled = false;
   };
-  main.querySelectorAll('[data-up]').forEach((inp) => {
-    inp.onchange = async () => {
-      const f = inp.files[0]; inp.value = '';
-      if (!f) return;
-      busy('Uploading…');
-      try {
-        const p = await prepareFile(f);
-        await uploadIdFile({ ownerId: S.me.id, ownerType: 'staff', ownerName: S.me.name, kind: inp.dataset.up, ...p });
-        toast('Uploaded');
-      } catch (e) { toast(friendlyError(e), true); }
-      busy('');
-    };
-  });
-  main.querySelectorAll('[data-view]').forEach((a) => { a.onclick = () => viewFile(S.idFiles.find((f) => f.id === a.dataset.view)); });
-  main.querySelectorAll('[data-delf]').forEach((b) => {
-    b.onclick = async () => {
-      const f = S.idFiles.find((x) => x.id === b.dataset.delf);
-      if (!f || !await confirmBox('Delete copy?', `Delete ${f.name}?`, { ok: 'Delete', danger: true })) return;
-      try { await deleteIdFile(f); toast('Deleted'); } catch (e) { toast(friendlyError(e), true); }
-    };
-  });
+  wireSlotList(main, docCtx());
   main.querySelector('#me-out').onclick = async () => {
     if (S.open && !await confirmBox('Sign out?', `You are still checked in at ${S.open.siteName}. Sign out anyway?`, { ok: 'Sign out' })) return;
     logout();

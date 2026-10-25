@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import '../models/models.dart';
+import '../widgets/doc_widgets.dart' show DocBytes;
 import 'db.dart';
 
 /// Loads ID copies (cached for the session) and builds the ID sheet PDF —
@@ -16,19 +17,7 @@ import 'db.dart';
 ///   page 1 Emirates ID front + back · page 2 visa + numbers table + photo + SIRA
 ///   page 3 passport front + back · page 4 Abu Dhabi MCC (only when uploaded).
 class IdSheet {
-  static final Map<String, Future<Uint8List>> _cache = {};
-
-  static Future<Uint8List> bytes(IdFileMeta f) {
-    final c = _cache[f.id];
-    if (c != null) return c;
-    final fut = Db.readIdFile(f);
-    _cache[f.id] = fut;
-    fut.catchError((_) {
-      _cache.remove(f.id);
-      return Uint8List(0);
-    });
-    return fut;
-  }
+  static Future<Uint8List> bytes(IdFileMeta f) => DocBytes.get(f.id, () => Db.readIdFile(f));
 
   /// Copies of one kind, front first then back, then by upload time.
   static List<IdFileMeta> ofKind(List<IdFileMeta> files, String kind) {
@@ -80,17 +69,6 @@ class IdSheet {
   static const _line = PdfColor.fromInt(0xFFE1DED8);
   static const _soft = PdfColor.fromInt(0xFFFAF9F7);
   static const _grey = PdfColor.fromInt(0xFFA5A5A5);
-
-  static Future<List<pw.MemoryImage>> _images(List<IdFileMeta> files, String kind) async {
-    final out = <pw.MemoryImage>[];
-    for (final f in ofKind(files, kind).where((f) => f.isImage)) {
-      try {
-        final b = await bytes(f);
-        if (b.isNotEmpty) out.add(pw.MemoryImage(b));
-      } catch (_) {/* skip unreadable copy */}
-    }
-    return out;
-  }
 
   /// Builds one PDF for one or more people.
   static Future<Uint8List> build(List<IdPerson> people, {void Function(String)? progress}) async {
@@ -145,16 +123,13 @@ class IdSheet {
           ]),
         );
 
-    pw.Widget twoSides(List<pw.MemoryImage> imgs, String name) {
-      if (imgs.length == 1) return pw.Expanded(child: slot(imgs[0], name.toUpperCase(), ''));
-      return pw.Expanded(
-        child: pw.Column(children: [
-          pw.Expanded(child: slot(imgs.isNotEmpty ? imgs[0] : null, '${name.toUpperCase()} - FRONT', '$name front - not uploaded')),
-          pw.SizedBox(height: 14),
-          pw.Expanded(child: slot(imgs.length > 1 ? imgs[1] : null, '${name.toUpperCase()} - BACK', '$name back - not uploaded')),
-        ]),
-      );
-    }
+    pw.Widget twoSides(pw.MemoryImage? front, pw.MemoryImage? back, String name, String backName) => pw.Expanded(
+          child: pw.Column(children: [
+            pw.Expanded(child: slot(front, '${name.toUpperCase()} - FRONT', '$name front - not uploaded')),
+            pw.SizedBox(height: 14),
+            pw.Expanded(child: slot(back, '${name.toUpperCase()} - ${backName.toUpperCase()}', '$name $backName - not uploaded')),
+          ]),
+        );
 
     pw.Page page(IdPerson p, String section, pw.Widget body) => pw.Page(
           pageFormat: PdfPageFormat.a4,
@@ -173,17 +148,26 @@ class IdSheet {
     for (var n = 0; n < people.length; n++) {
       final p = people[n];
       progress?.call('${p.owner.name} (${n + 1}/${people.length})');
-      final eid = await _images(p.files, 'eid');
-      final visa = await _images(p.files, 'visa');
-      final pass = await _images(p.files, 'passport');
-      final sira = await _images(p.files, 'sira');
-      final mcc = await _images(p.files, 'mcc');
-      final photos = await _images(p.files, 'photo');
-      final photo = photos.isEmpty ? null : photos.first;
+      final sl = assignIdSlots(p.files).slot;
+      Future<pw.MemoryImage?> img(String key) async {
+        final f = sl[key];
+        if (f == null || !f.isImage) return null;
+        try {
+          final b = await bytes(f);
+          return b.isEmpty ? null : pw.MemoryImage(b);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      final eidF = await img('eid/front'), eidB = await img('eid/back');
+      final passF = await img('passport/front'), passB = await img('passport/back');
+      final visaI = await img('visa/front'), siraI = await img('sira/front'), mccI = await img('mcc/front');
+      final photo = await img('photo/front');
       final i = p.info;
 
       // Page 1 — Emirates ID
-      doc.addPage(page(p, 'Emirates ID', twoSides(eid, 'Emirates ID')));
+      doc.addPage(page(p, 'Emirates ID', twoSides(eidF, eidB, 'Emirates ID', 'back')));
 
       // Page 2 — Visa (top half) · numbers table, SIRA, photo (bottom half)
       final rows = idKinds.where((k) => k.numField != null).map((k) {
@@ -225,14 +209,14 @@ class IdSheet {
         'Visa & details',
         pw.Expanded(
           child: pw.Column(children: [
-            pw.Expanded(child: slot(visa.isEmpty ? null : visa.first, 'VISA', 'Visa page - not uploaded')),
+            pw.Expanded(child: slot(visaI, 'VISA', 'Visa page - not uploaded')),
             pw.SizedBox(height: 14),
             pw.Expanded(
               child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
                 pw.Expanded(
                   child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
                     table,
-                    if (sira.isNotEmpty) ...[pw.SizedBox(height: 10), pw.Expanded(child: slot(sira.first, 'SIRA CARD', ''))],
+                    if (siraI != null) ...[pw.SizedBox(height: 10), pw.Expanded(child: slot(siraI, 'SIRA CARD', ''))],
                   ]),
                 ),
                 pw.SizedBox(width: 14),
@@ -272,10 +256,10 @@ class IdSheet {
       ));
 
       // Page 3 — Passport
-      doc.addPage(page(p, 'Passport', twoSides(pass, 'Passport')));
+      doc.addPage(page(p, 'Passport', twoSides(passF, passB, 'Passport', 'address page')));
 
       // Page 4 — Abu Dhabi MCC (only when uploaded)
-      if (mcc.isNotEmpty) doc.addPage(page(p, 'MCC certificate', twoSides(mcc, 'MCC certificate')));
+      if (mccI != null) doc.addPage(page(p, 'Abu Dhabi MCC', pw.Expanded(child: slot(mccI, 'ABU DHABI MCC CERTIFICATE', '')))); 
     }
     return doc.save();
   }

@@ -894,9 +894,12 @@ class IdFileMeta {
   final String side;
   /// Waiting for approval (uploaded through the Documents Portal).
   final bool pending;
+  /// Heading of an additional document (kind 'other').
+  final String title;
 
   IdFileMeta({
     this.pending = false,
+    this.title = '',
     this.side = '',
     required this.id,
     required this.ownerId,
@@ -920,6 +923,7 @@ class IdFileMeta {
       mime: _str(m['mime'], 'application/octet-stream'),
       side: _str(m['side']),
       pending: m['pending'] == true,
+      title: _str(m['title']),
       size: _int(m['size']),
       chunks: _int(m['chunks'], 1),
       uploadedAt: _ts(m['uploadedAt']),
@@ -946,6 +950,135 @@ const idKinds = [
   IdKind('photo', 'Photo'),
   IdKind('other', 'Other documents'),
 ];
+
+/// One place for one copy: EID front, EID back, visa, passport front, passport address page…
+class IdSlot {
+  final String kind, side, label, short;
+  const IdSlot(this.kind, this.side, this.label, this.short);
+  String get key => '$kind/$side';
+  bool get twoSided => kind == 'eid' || kind == 'passport';
+  IdKind get idKind => idKinds.firstWhere((k) => k.key == kind);
+}
+
+const idSlots = [
+  IdSlot('eid', 'front', 'Emirates ID - front', 'EID FRONT'),
+  IdSlot('eid', 'back', 'Emirates ID - back', 'EID BACK'),
+  IdSlot('visa', 'front', 'Visa', 'VISA'),
+  IdSlot('passport', 'front', 'Passport - front (photo page)', 'PASSPORT FRONT'),
+  IdSlot('passport', 'back', 'Passport - address page', 'PASSPORT ADDRESS'),
+  IdSlot('sira', 'front', 'SIRA card', 'SIRA'),
+  IdSlot('mcc', 'front', 'Abu Dhabi MCC certificate', 'ABU DHABI MCC'),
+  IdSlot('photo', 'front', 'Passport-size photo', 'PHOTO'),
+  IdSlot('labour', 'front', 'Labour card / work permit', 'LABOUR CARD'),
+];
+
+/// Puts each copy into its slot (newest wins). Copies without a side (older uploads) fill the empty
+/// slot of their kind; anything left over — and 'other' documents — is returned in [extra].
+({Map<String, IdFileMeta> slot, List<IdFileMeta> extra}) assignIdSlots(List<IdFileMeta> files) {
+  final slot = <String, IdFileMeta>{};
+  final extra = <IdFileMeta>[];
+  final sorted = [...files]..sort((a, b) => (b.uploadedAt ?? DateTime(2100)).compareTo(a.uploadedAt ?? DateTime(2100)));
+  final loose = <IdFileMeta>[];
+  for (final f in sorted) {
+    final s = idSlots.where((s) => s.kind == f.kind).toList();
+    if (s.isEmpty) {
+      extra.add(f);
+      continue;
+    }
+    final side = f.side.isEmpty ? (s.length == 1 ? s.first.side : '') : f.side;
+    final key = '${f.kind}/$side';
+    if (side.isNotEmpty && s.any((x) => x.key == key) && !slot.containsKey(key)) {
+      slot[key] = f;
+    } else {
+      loose.add(f);
+    }
+  }
+  // Older copies without a side: oldest first → front, then back.
+  for (final f in loose.reversed) {
+    final free = idSlots.where((s) => s.kind == f.kind && !slot.containsKey(s.key)).firstOrNull;
+    if (f.side.isEmpty && free != null) {
+      slot[free.key] = f;
+    } else {
+      extra.add(f);
+    }
+  }
+  extra.sort((a, b) => (a.uploadedAt ?? DateTime(2000)).compareTo(b.uploadedAt ?? DateTime(2000)));
+  return (slot: slot, extra: extra);
+}
+
+/// Heading shown for an additional document.
+String idFileHeading(IdFileMeta f) {
+  if (f.title.isNotEmpty) return f.title;
+  final k = idKinds.where((k) => k.key == f.kind).firstOrNull;
+  if (f.kind == 'other' || k == null) return f.name;
+  return '${k.label} (extra copy)';
+}
+
+// ------------------------------------------------------------------ company documents
+class CompanyDocType {
+  final String key, label;
+  const CompanyDocType(this.key, this.label);
+}
+
+/// Standard company documents; anything else is added as an additional document with its own heading.
+const companyDocTypes = [
+  CompanyDocType('tradeLicense', 'LLCT trade license (Dubai)'),
+  CompanyDocType('adTradeLicense', 'Abu Dhabi LLCT trade license'),
+  CompanyDocType('chamber', 'Chamber of Commerce certificate'),
+  CompanyDocType('wcInsurance', "WC insurance (workmen's compensation)"),
+  CompanyDocType('vat', 'VAT / TRN certificate'),
+  CompanyDocType('estCard', 'Establishment card (immigration)'),
+  CompanyDocType('mohre', 'MOHRE / labour establishment card'),
+  CompanyDocType('tenancy', 'Office tenancy contract / Ejari'),
+  CompanyDocType('tplInsurance', 'Third-party liability insurance'),
+  CompanyDocType('medical', 'Staff medical insurance'),
+  CompanyDocType('moa', 'Memorandum of association (MOA)'),
+];
+
+class CompanyDoc {
+  final String id, key, title, number, issueDate, expiry, notes;
+  final bool custom;
+  final DateTime? updatedAt;
+  const CompanyDoc({required this.id, this.key = '', required this.title, this.number = '', this.issueDate = '', this.expiry = '', this.notes = '', this.custom = false, this.updatedAt});
+
+  factory CompanyDoc.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return CompanyDoc(
+      id: d.id,
+      key: _str(m['key']),
+      title: _str(m['title'], 'Document'),
+      number: _str(m['number']),
+      issueDate: _str(m['issueDate']),
+      expiry: _str(m['expiry']),
+      notes: _str(m['notes']),
+      custom: m['custom'] == true,
+      updatedAt: _ts(m['updatedAt']),
+    );
+  }
+}
+
+class CompanyFile {
+  final String id, docId, name, mime;
+  final int size, chunks;
+  final DateTime? uploadedAt;
+  final String uploadedBy;
+  const CompanyFile({required this.id, required this.docId, required this.name, required this.mime, this.size = 0, this.chunks = 1, this.uploadedAt, this.uploadedBy = ''});
+  bool get isImage => mime.startsWith('image/');
+
+  factory CompanyFile.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return CompanyFile(
+      id: d.id,
+      docId: _str(m['docId']),
+      name: _str(m['name'], 'file'),
+      mime: _str(m['mime'], 'application/octet-stream'),
+      size: _int(m['size']),
+      chunks: _int(m['chunks'], 1),
+      uploadedAt: _ts(m['uploadedAt']),
+      uploadedBy: _str(m['uploadedBy']),
+    );
+  }
+}
 
 /// Max size of one uploaded document copy.
 const kMaxDocBytes = 2 * 1024 * 1024;

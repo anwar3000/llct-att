@@ -17,6 +17,164 @@ export const DOC_KINDS = [
   { k: 'other', label: 'Other documents' },
 ];
 const KIND_LABEL = Object.fromEntries(DOC_KINDS.map((d) => [d.k, d.label]));
+
+/** One place per copy, in this order. */
+export const ID_SLOTS = [
+  { kind: 'eid', side: 'front', label: 'Emirates ID - front', short: 'EID FRONT' },
+  { kind: 'eid', side: 'back', label: 'Emirates ID - back', short: 'EID BACK' },
+  { kind: 'visa', side: 'front', label: 'Visa', short: 'VISA' },
+  { kind: 'passport', side: 'front', label: 'Passport - front (photo page)', short: 'PASSPORT FRONT' },
+  { kind: 'passport', side: 'back', label: 'Passport - address page', short: 'PASSPORT ADDRESS' },
+  { kind: 'sira', side: 'front', label: 'SIRA card', short: 'SIRA', optional: true },
+  { kind: 'mcc', side: 'front', label: 'Abu Dhabi MCC certificate', short: 'ABU DHABI MCC', optional: true },
+  { kind: 'photo', side: 'front', label: 'Passport-size photo', short: 'PHOTO' },
+  { kind: 'labour', side: 'front', label: 'Labour card / work permit', short: 'LABOUR CARD', optional: true },
+].map((x) => ({ ...x, key: `${x.kind}/${x.side}` }));
+const TWO_SIDED = ['eid', 'passport'];
+
+/** Puts each copy in its slot (newest wins); older copies without a side fill empty slots; the rest are "additional". */
+export function assignSlots(files) {
+  const slot = {};
+  const extra = [];
+  const loose = [];
+  const t = (f) => (f.uploadedAt ? +f.uploadedAt : 9e15);
+  for (const f of [...files].sort((a, b) => t(b) - t(a))) {
+    const kinds = ID_SLOTS.filter((x) => x.kind === f.kind);
+    if (!kinds.length) { extra.push(f); continue; }
+    const side = f.side || (kinds.length === 1 ? kinds[0].side : '');
+    const key = `${f.kind}/${side}`;
+    if (side && kinds.some((x) => x.key === key) && !slot[key]) slot[key] = f; else loose.push(f);
+  }
+  for (const f of loose.reverse()) {
+    const free = ID_SLOTS.find((x) => x.kind === f.kind && !slot[x.key]);
+    if (!f.side && free) slot[free.key] = f; else extra.push(f);
+  }
+  extra.sort((a, b) => t(a) - t(b));
+  return { slot, extra };
+}
+export function fileHeading(f) {
+  if (f.title) return f.title;
+  if (f.kind === 'other' || !KIND_LABEL[f.kind]) return f.name;
+  return `${KIND_LABEL[f.kind]} (extra copy)`;
+}
+const OTHER_SUGGEST = ['Driving licence', 'Health card', 'Insurance card', 'Degree certificate', 'Experience letter', 'Labour contract'];
+export function askHeading(title = 'Additional document', suggestions = OTHER_SUGGEST) {
+  return new Promise((resolve) => {
+    modal({
+      title,
+      body: `<label class="f"><span>Heading</span><input id="ah-t" placeholder="e.g. ${esc(suggestions[0] || 'Document')}"></label>
+        <div class="chips" style="margin-top:8px">${suggestions.map((x) => `<span class="chip" data-s="${esc(x)}">${esc(x)}</span>`).join('')}</div>`,
+      foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Next: choose file</button>',
+      onMount: (m, close) => {
+        const inp = m.querySelector('#ah-t');
+        inp.focus();
+        m.querySelectorAll('[data-s]').forEach((c) => { c.onclick = () => { inp.value = c.dataset.s; inp.focus(); }; });
+        const ok = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } close(); resolve(v); };
+        inp.onkeydown = (e) => { if (e.key === 'Enter') ok(); };
+        m.querySelector('[data-no]').onclick = () => { close(); resolve(null); };
+        m.querySelector('[data-x]').addEventListener('click', () => resolve(null));
+        m.querySelector('[data-yes]').onclick = ok;
+      },
+    });
+  });
+}
+/** Lets the user pick a file (hidden input) — resolves with a File or null. */
+export function chooseFile(accept = 'image/*,application/pdf') {
+  return new Promise((resolve) => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.accept = accept;
+    i.onchange = () => resolve(i.files[0] || null);
+    i.click();
+  });
+}
+
+/**
+ * Slot list (EID front, EID back, visa, passport front, passport address page, SIRA, MCC, photo, labour)
+ * plus additional documents with headings. Used by the dashboard and the iPhone app.
+ * ctx: { files(), info(), fieldAttr, upload({kind, side, title, ...prepared}), remove(f), busy?(msg) }
+ */
+export function slotListHtml(ctx) {
+  const { slot, extra } = assignSlots(ctx.files());
+  const info = ctx.info() || {};
+  const fa = ctx.fieldAttr || 'data-field';
+  const seen = new Set();
+  const when = (f) => (f.uploadedAt ? ` ${fmtDate(f.uploadedAt)}` : '');
+  return `<div class="slots">${ID_SLOTS.map((sl) => {
+    const f = slot[sl.key];
+    const k = DOC_KINDS.find((d) => d.k === sl.kind);
+    const nums = k.num && !seen.has(k.k);
+    if (nums) seen.add(k.k);
+    return `<div class="slot ${f ? 'has' : ''}" data-slot="${sl.key}">
+      <div class="slot-th" ${f ? `data-view="${f.id}" title="View"` : `data-pick="${sl.key}" title="Upload"`}>${f ? (isImg(f) ? '' : '<b>PDF</b>') : icon('plus', 18)}</div>
+      <div class="slot-main"><div class="slot-t">${sl.short}</div>
+        <div class="small ${f ? 'green-t' : sl.optional ? 'muted' : 'red-t'}">${f ? `Uploaded${esc(when(f))}${isImg(f) ? '' : ' · PDF'}` : sl.optional ? 'Not uploaded (if available)' : 'Not uploaded'}</div>
+        ${nums ? `<div class="slot-nums"><input ${fa}="${k.num}" value="${esc(info[k.num] || '')}" placeholder="${esc(k.label.replace(' / work permit', ''))} number">
+          <input type="date" ${fa}="${k.exp}" value="${esc(info[k.exp] || '')}" title="Expiry date"><span data-exp="${k.k}">${expiryPill(info[k.exp])}</span></div>` : ''}
+      </div>
+      <div class="slot-act">${f ? `<button class="btn sm ghost" data-pick="${sl.key}" title="Replace">${icon('upload', 14)} Replace</button>
+        <button class="btn sm ghost icon" data-del="${f.id}" title="Delete">${icon('trash', 14)}</button>`
+        : `<button class="btn sm" data-pick="${sl.key}">${icon('upload', 14)} Upload</button>`}</div>
+    </div>`;
+  }).join('')}
+  <div class="slot-sec"><b>ADDITIONAL DOCUMENTS</b><span class="spacer"></span><button class="btn sm ghost" data-add-other>${icon('plus', 14)} Add with heading</button></div>
+  ${extra.length ? extra.map((f) => `<div class="slot has">
+      <div class="slot-th" data-view="${f.id}">${isImg(f) ? '' : '<b>PDF</b>'}</div>
+      <div class="slot-main"><div class="slot-t">${esc(fileHeading(f))}</div><div class="small muted">${isImg(f) ? 'Photo' : 'PDF'}${esc(when(f))}</div></div>
+      <div class="slot-act"><button class="btn sm ghost icon" data-del="${f.id}" title="Delete">${icon('trash', 14)}</button></div></div>`).join('')
+    : '<div class="small muted" style="padding:4px 2px 8px">Driving licence, health card, certificates… add each one with its own heading.</div>'}
+  </div>`;
+}
+export function wireSlotList(el, ctx) {
+  const all = () => ctx.files();
+  const find = (id) => all().find((f) => f.id === id);
+  el.querySelectorAll('.slot-th[data-view]').forEach(async (t) => {
+    const f = find(t.dataset.view);
+    if (!f || !isImg(f)) return;
+    try { const b64 = await fileData(f); t.innerHTML = `<img src="${dataUrl(f, b64)}" alt="">`; } catch { /* ignore */ }
+  });
+  el.querySelectorAll('[data-view]').forEach((t) => { t.onclick = () => { const f = find(t.dataset.view); if (f) viewFile(f); }; });
+  const doUpload = async (file, meta, old) => {
+    ctx.busy?.('Uploading…');
+    try {
+      const p = await prepareFile(file);
+      await ctx.upload({ ...p, ...meta });
+      if (old) { try { await ctx.remove(old); cache.delete(old.id); } catch { /* keep old */ } }
+      toast(`${meta.title || ID_SLOTS.find((x) => x.key === `${meta.kind}/${meta.side}`)?.label || 'Document'} uploaded`);
+    } catch (e) { toast(friendlyError(e), true); }
+    ctx.busy?.('');
+  };
+  el.querySelectorAll('[data-pick]').forEach((b) => {
+    b.onclick = async () => {
+      const sl = ID_SLOTS.find((x) => x.key === b.dataset.pick);
+      const file = await chooseFile();
+      if (!file) return;
+      const old = assignSlots(all()).slot[sl.key];
+      const ext = /pdf/i.test(file.type) || /\.pdf$/i.test(file.name) ? 'pdf' : 'jpg';
+      await doUpload(file, { kind: sl.kind, side: sl.side, name: `${sl.short.replace(/ /g, '_')}.${ext}` }, old);
+    };
+  });
+  el.querySelector('[data-add-other]')?.addEventListener('click', async () => {
+    const title = await askHeading();
+    if (!title) return;
+    const file = await chooseFile();
+    if (!file) return;
+    await doUpload(file, { kind: 'other', side: '', title }, null);
+  });
+  el.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      const f = find(b.dataset.del);
+      if (!f || !await confirmBox('Delete copy?', `Delete ${fileHeading(f)}?`, { ok: 'Delete', danger: true })) return;
+      try { await ctx.remove(f); cache.delete(f.id); toast('Deleted'); } catch (e) { toast(friendlyError(e), true); }
+    };
+  });
+  el.querySelectorAll('input[type=date]').forEach((i) => {
+    i.addEventListener('change', () => {
+      const k = DOC_KINDS.find((d) => d.exp === (i.dataset.field || i.dataset.f));
+      const box = k && el.querySelector(`[data-exp="${k.k}"]`);
+      if (box) box.innerHTML = expiryPill(i.value);
+    });
+  });
+}
 export const MAX_FILE = 2 * 1024 * 1024; // 2 MB per document copy
 
 // ------------------------------------------------------------------ owners
@@ -121,7 +279,7 @@ export async function viewFile(f) {
     }
   } catch (e) { toast(friendlyError(e), true); }
 }
-function b64ToBlob(b64, mime) {
+export function b64ToBlob(b64, mime) {
   const bin = atob(b64);
   const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -134,105 +292,53 @@ function b64ToBlob(b64, mime) {
  * Returns a cleanup function.
  */
 export function docsPanel(el, owner) {
-  const info = store.info(owner.id) || {};
-  el.innerHTML = `
-    <div class="row" style="margin-bottom:10px;gap:10px"><button class="btn" data-scan style="background:#D98A1A;border-color:#D98A1A">📷 Scan documents step by step</button>
-      <span class="small muted">EID front & back · passport front & back · visa · SIRA · MCC certificate · photo</span></div>
-    <div class="idrows">
-      <div class="idrow idrow-head"><span>Document</span><span>Number</span><span>Expiry</span><span>Status</span><span>Copies</span><span></span></div>
-      ${DOC_KINDS.map((k) => `<div class="idrow" data-kind="${k.k}">
-        <span class="idlbl">${esc(k.label)}</span>
-        ${k.num ? `<input data-field="${k.num}" value="${esc(info[k.num] || '')}" placeholder="Number" aria-label="${esc(k.label)} number">
-          <input type="date" data-field="${k.exp}" value="${esc(info[k.exp] || '')}" aria-label="${esc(k.label)} expiry">
-          <span data-exp="${k.k}">${expiryPill(info[k.exp])}</span>` : '<span></span><span></span><span></span>'}
-        <div class="idfiles" data-files="${k.k}"></div>
-        <label class="btn sm ghost upl" title="Upload a photo or PDF">${icon('plus', 14)} Upload<input type="file" multiple accept="image/*,application/pdf" data-up="${k.k}" hidden></label>
-      </div>`).join('')}
-    </div>
-    <div class="row" style="margin-top:12px;gap:12px;align-items:flex-end">
-      <label class="f" style="margin:0;flex:1;min-width:160px"><span>Nationality</span><input data-field="nationality" value="${esc(info.nationality || '')}"></label>
-      <label class="f" style="margin:0;flex:2;min-width:200px"><span>Notes</span><input data-field="idNotes" value="${esc(info.idNotes || '')}"></label>
-      <button class="btn" data-save-info>${icon('check', 16)} Save ID details</button>
-    </div>
-    <div class="small muted" style="margin-top:6px">Copies (photo or PDF, max 2 MB each) upload straight away. Numbers and dates are saved with the button.</div>`;
-
-  const drawFiles = () => {
-    el.querySelectorAll('[data-files]').forEach((box) => {
-      const files = store.files(owner.id).filter((f) => f.kind === box.dataset.files);
-      box.innerHTML = files.length ? files.map((f) => `<div class="idfile" data-fid="${f.id}" title="${esc(f.name)} · ${sizeTxt(f.size)} — click to view">
-        <div class="thumb">${isImg(f) ? '' : '<b>PDF</b>'}</div>
-        <button class="x" data-del="${f.id}" title="Delete">${icon('close', 11)}</button></div>`).join('')
-        : '<span class="small muted">—</span>';
-      files.filter(isImg).forEach(async (f) => {
-        try {
-          const b64 = await fileData(f);
-          const t = box.querySelector(`[data-fid="${f.id}"] .thumb`);
-          if (t) t.innerHTML = `<img src="${dataUrl(f, b64)}" alt="">`;
-        } catch { /* ignore thumbnail errors */ }
-      });
-    });
-    el.querySelectorAll('[data-fid]').forEach((row) => {
-      row.onclick = (e) => {
-        if (e.target.closest('[data-del]')) return;
-        const f = store.idFiles.find((x) => x.id === row.dataset.fid);
-        if (f) viewFile(f);
-      };
-    });
-    el.querySelectorAll('[data-del]').forEach((b) => {
-      b.onclick = async () => {
-        const f = store.idFiles.find((x) => x.id === b.dataset.del);
-        if (!f || !await confirmBox('Delete copy?', `Delete ${f.name}?`, { ok: 'Delete', danger: true })) return;
-        try { await deleteIdFile(f); cache.delete(f.id); toast('Deleted'); } catch (e) { toast(friendlyError(e), true); }
-      };
-    });
-  };
-
-  el.querySelector('[data-scan]').onclick = () => scanWizard({
-    owner,
+  const ctx = {
     files: () => store.files(owner.id),
     info: () => store.info(owner.id) || {},
-    upload: (st, p) => uploadIdFile({ ownerId: owner.id, ownerType: owner.type, ownerName: owner.name, kind: st.kind, side: st.side,
-      name: `${st.kind}-${st.side}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 }),
-    remove: async (f) => { await deleteIdFile(f); cache.delete(f.id); },
-    saveInfo: (fields) => saveIdInfo(owner.id, owner.type, fields),
-    onDone: () => docsPanel(el, owner),
-  });
-  el.querySelectorAll('[data-up]').forEach((inp) => {
-    inp.onchange = async () => {
-      const files = [...inp.files];
-      inp.value = '';
-      const lbl = inp.closest('label');
-      for (const file of files) {
-        lbl.classList.add('busy');
-        try {
-          const p = await prepareFile(file);
-          await uploadIdFile({ ownerId: owner.id, ownerType: owner.type, ownerName: owner.name, kind: inp.dataset.up, ...p });
-          toast(`Uploaded ${p.name}`);
-        } catch (e) { toast(friendlyError(e), true); }
-        lbl.classList.remove('busy');
-      }
-    };
-  });
-  el.querySelectorAll('input[type=date][data-field]').forEach((i) => {
-    i.onchange = () => {
-      const k = DOC_KINDS.find((d) => d.exp === i.dataset.field);
-      el.querySelector(`[data-exp="${k.k}"]`).innerHTML = expiryPill(i.value);
-    };
-  });
-  el.querySelector('[data-save-info]').onclick = async (ev) => {
-    const btn = ev.currentTarget;
-    const data = {};
-    el.querySelectorAll('[data-field]').forEach((i) => { data[i.dataset.field] = i.value.trim(); });
-    btn.disabled = true;
-    try { await saveIdInfo(owner.id, owner.type, { ...data, name: owner.name }); toast('ID details saved'); } catch (e) { toast(friendlyError(e), true); }
-    btn.disabled = false;
+    fieldAttr: 'data-field',
+    upload: (p) => uploadIdFile({ ownerId: owner.id, ownerType: owner.type, ownerName: owner.name, ...p }),
+    remove: (f) => deleteIdFile(f),
   };
-
-  drawFiles();
-  let sig = '';
+  const draw = () => {
+    // keep typed numbers / dates while copies change
+    const typed = {};
+    el.querySelectorAll('[data-field]').forEach((i) => { typed[i.dataset.field] = i.value; });
+    el.innerHTML = `
+    <div class="row" style="margin-bottom:10px;gap:10px"><button class="btn" data-scan style="background:#D98A1A;border-color:#D98A1A">📷 Scan documents step by step</button>
+      <span class="small muted">or upload each one below · photo or PDF, max 2 MB</span></div>
+    ${slotListHtml(ctx)}
+    <div class="row" style="margin-top:12px;gap:12px;align-items:flex-end">
+      <label class="f" style="margin:0;flex:1;min-width:160px"><span>Nationality</span><input data-field="nationality" value="${esc((store.info(owner.id) || {}).nationality || '')}"></label>
+      <label class="f" style="margin:0;flex:2;min-width:200px"><span>Notes</span><input data-field="idNotes" value="${esc((store.info(owner.id) || {}).idNotes || '')}"></label>
+      <button class="btn" data-save-info>${icon('check', 16)} Save numbers & dates</button>
+    </div>
+    <div class="small muted" style="margin-top:6px">Copies upload straight away. Numbers and expiry dates are saved with the button.</div>`;
+    el.querySelectorAll('[data-field]').forEach((i) => { if (typed[i.dataset.field] != null) i.value = typed[i.dataset.field]; });
+    wireSlotList(el, ctx);
+    el.querySelector('[data-scan]').onclick = () => scanWizard({
+      owner,
+      files: () => store.files(owner.id),
+      info: () => store.info(owner.id) || {},
+      upload: (st, p) => uploadIdFile({ ownerId: owner.id, ownerType: owner.type, ownerName: owner.name, kind: st.kind, side: st.side,
+        name: `${st.kind}-${st.side}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 }),
+      remove: async (f) => { await deleteIdFile(f); cache.delete(f.id); },
+      saveInfo: (fields) => saveIdInfo(owner.id, owner.type, fields),
+      onDone: () => draw(),
+    });
+    el.querySelector('[data-save-info]').onclick = async (ev) => {
+      const btn = ev.currentTarget;
+      const data = {};
+      el.querySelectorAll('[data-field]').forEach((i) => { data[i.dataset.field] = i.value.trim(); });
+      btn.disabled = true;
+      try { await saveIdInfo(owner.id, owner.type, { ...data, name: owner.name }); toast('ID details saved'); } catch (e) { toast(friendlyError(e), true); }
+      btn.disabled = false;
+    };
+  };
+  draw();
+  let sig = JSON.stringify(store.files(owner.id).map((f) => f.id));
   return store.on(() => {
-    const s = JSON.stringify(store.files(owner.id).map((f) => f.id));
-    if (s !== sig) { sig = s; drawFiles(); }
+    const s2 = JSON.stringify(store.files(owner.id).map((f) => f.id));
+    if (s2 !== sig) { sig = s2; draw(); }
   });
 }
 
@@ -284,11 +390,15 @@ export async function downloadIdZip(owners, title = 'ID documents', progress) {
     used.add(folder);
     const dir = zip.folder(folder.trim());
     const n = {};
-    for (const { f, b64 } of await ownerFiles(o, progress)) {
-      const base = KIND_LABEL[f.kind] || 'Document';
+    const files = await ownerFiles(o, progress);
+    const { slot } = assignSlots(files.map((x) => x.f));
+    const slotOf = Object.fromEntries(Object.entries(slot).map(([k, f]) => [f.id, ID_SLOTS.find((x) => x.key === k)]));
+    for (const { f, b64 } of files) {
+      const sl = slotOf[f.id];
+      const base = sl ? sl.label : fileHeading(f);
       n[base] = (n[base] || 0) + 1;
       const ext = f.mime === 'application/pdf' ? 'pdf' : 'jpg';
-      dir.file(`${safe(o.name)} - ${base}${n[base] > 1 ? ` ${n[base]}` : ''}.${ext}`, b64, { base64: true });
+      dir.file(`${safe(o.name)} - ${safe(base)}${n[base] > 1 ? ` ${n[base]}` : ''}.${ext}`, b64, { base64: true });
       count++;
     }
   }
@@ -401,22 +511,6 @@ async function pdfToImages(b64, max = 2) {
   }
   return out;
 }
-/** Images of one kind of document, front first: files named "back" go last, then upload order. */
-async function kindImages(files, kind) {
-  // Scanned copies know their side; for older uploads: "back" in the name goes last, then upload order.
-  const rank = (f) => (f.side === 'front' ? 0 : f.side === 'back' ? 3 : /back|rear|reverse/i.test(f.name) ? 2 : /front/i.test(f.name) ? 0.5 : 1);
-  const list = files.filter((x) => x.f.kind === kind)
-    .map((x, i) => ({ ...x, o: rank(x.f), i }))
-    .sort((a, b) => a.o - b.o || a.i - b.i);
-  const out = [];
-  for (const { f, b64 } of list) {
-    if (isImg(f)) out.push(dataUrl(f, b64));
-    else {
-      try { out.push(...(await pdfToImages(b64, 2))); } catch (e) { console.warn('pdf render', e); }
-    }
-  }
-  return out;
-}
 /** Crops an image to a box ratio (for the passport photo). */
 async function coverCrop(src, ratio) {
   const img = await loadImage(src);
@@ -476,12 +570,11 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
     doc.text(clean(label), x + 15, y + 17.5);
     doc.setTextColor(40, 40, 40);
   };
-  // Two sides on one page; a single image (both sides on one scan) uses the whole page.
-  const twoSides = async (imgs, name) => {
+  // Front and back (or address page) on one page.
+  const twoSides = async (front, back, name, backName = 'back') => {
     const top = 74, gap = 14, h = (H - 40 - top - gap) / 2;
-    if (imgs.length === 1) { await slot(imgs[0], M, top, CW, h * 2 + gap, `${name}`, ''); return; }
-    await slot(imgs[0], M, top, CW, h, `${name} - FRONT`, `${name} front - not uploaded`);
-    await slot(imgs[1], M, top + h + gap, CW, h, `${name} - BACK`, `${name} back - not uploaded`);
+    await slot(front, M, top, CW, h, `${name} - FRONT`, `${name} front - not uploaded`);
+    await slot(back, M, top + h + gap, CW, h, `${name} - ${backName.toUpperCase()}`, `${name} ${backName} - not uploaded`);
   };
 
   for (let n = 0; n < owners.length; n++) {
@@ -489,15 +582,29 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
     progress?.(`${o.name} (${n + 1}/${owners.length})`);
     const files = await ownerFiles(o, progress);
     const i = store.info(o.id) || {};
-    const eid = await kindImages(files, 'eid');
-    const visa = await kindImages(files, 'visa');
-    const pass = await kindImages(files, 'passport');
-    const sira = await kindImages(files, 'sira');
-    const photo = (await kindImages(files, 'photo'))[0];
+    const { slot: sl } = assignSlots(files.map((x) => x.f));
+    const b64Of = new Map(files.map((x) => [x.f.id, x.b64]));
+    // Images of one slot (a PDF gives up to 2 pages — e.g. both sides of the EID in one PDF).
+    const imgs = async (key) => {
+      const f = sl[key];
+      if (!f) return [];
+      const b64 = b64Of.get(f.id);
+      if (isImg(f)) return [dataUrl(f, b64)];
+      try { return await pdfToImages(b64, 2); } catch (e) { console.warn('pdf render', e); return []; }
+    };
+    const pair = async (kind) => {
+      const fr = await imgs(`${kind}/front`), bk = await imgs(`${kind}/back`);
+      return [fr[0] || null, bk[0] || (sl[`${kind}/back`] ? null : fr[1] || null)];
+    };
+    const eid = await pair('eid');
+    const visa = await imgs('visa/front');
+    const pass = await pair('passport');
+    const sira = await imgs('sira/front');
+    const photo = (await imgs('photo/front'))[0];
 
     // Page 1 — Emirates ID
     header(o, 'Emirates ID');
-    await twoSides(eid, 'Emirates ID');
+    await twoSides(eid[0], eid[1], 'Emirates ID');
 
     // Page 2 — Visa (top) · details, photo, SIRA (bottom)
     header(o, 'Visa & details');
@@ -549,10 +656,10 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
 
     // Page 3 — Passport
     header(o, 'Passport');
-    await twoSides(pass, 'Passport');
+    await twoSides(pass[0], pass[1], 'Passport', 'address page');
 
     // Page 4 — Abu Dhabi MCC certificate (only when uploaded)
-    const mcc = await kindImages(files, 'mcc');
+    const mcc = await imgs('mcc/front');
     if (mcc.length) {
       header(o, 'MCC certificate');
       await slot(mcc[0], M, 74, CW, H - 40 - 74, 'ABU DHABI MCC CERTIFICATE', '');
@@ -572,11 +679,11 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
 // ------------------------------------------------------------------ guided scanning
 // One document at a time, in a fixed order, with tips for a clear photo and a blur / light check.
 export const SCAN_STEPS = [
-  { kind: 'eid', side: 'front', title: 'Emirates ID — front', shape: 'card', num: 'eidNo', exp: 'eidExpiry', numLabel: 'Emirates ID number' },
-  { kind: 'eid', side: 'back', title: 'Emirates ID — back', shape: 'card' },
-  { kind: 'passport', side: 'front', title: 'Passport — photo page', shape: 'page', num: 'passportNo', exp: 'passportExpiry', numLabel: 'Passport number' },
-  { kind: 'passport', side: 'back', title: 'Passport — last page (address)', shape: 'page' },
-  { kind: 'visa', side: 'front', title: 'Visa page', shape: 'page', num: 'visaNo', exp: 'visaExpiry', numLabel: 'Visa / file number' },
+  { kind: 'eid', side: 'front', title: 'EID front', shape: 'card', num: 'eidNo', exp: 'eidExpiry', numLabel: 'Emirates ID number' },
+  { kind: 'eid', side: 'back', title: 'EID back', shape: 'card' },
+  { kind: 'visa', side: 'front', title: 'Visa', shape: 'page', num: 'visaNo', exp: 'visaExpiry', numLabel: 'Visa / file number' },
+  { kind: 'passport', side: 'front', title: 'Passport front (photo page)', shape: 'page', num: 'passportNo', exp: 'passportExpiry', numLabel: 'Passport number' },
+  { kind: 'passport', side: 'back', title: 'Passport address page', shape: 'page' },
   { kind: 'sira', side: 'front', title: 'SIRA card (if you have one)', shape: 'card', num: 'siraNo', exp: 'siraExpiry', numLabel: 'SIRA number', optional: true },
   { kind: 'mcc', side: 'front', title: 'Abu Dhabi MCC certificate (if you have one)', shape: 'page', num: 'mccNo', exp: 'mccExpiry', numLabel: 'Certificate number', optional: true },
   { kind: 'photo', side: 'front', title: 'Passport-size photo', shape: 'photo' },

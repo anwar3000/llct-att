@@ -251,6 +251,21 @@ service cloud.firestore {
       }
     }
 
+    // ------------------------------------------- company documents
+    // Trade licenses, Chamber of Commerce, WC insurance… Management manages; people allowed to view IDs can view.
+    match /companyDocs/{id} {
+      allow read: if isManagement() || canIds();
+      allow write: if isManagement();
+    }
+    match /companyFiles/{fileId} {
+      allow read: if isManagement() || canIds();
+      allow write: if isManagement();
+      match /chunks/{n} {
+        allow read: if isManagement() || canIds();
+        allow write: if isManagement();
+      }
+    }
+
     // ------------------------------------------- change requests from the Documents Portal
     // New people / name & ID changes wait here until an admin approves them.
     match /changeRequests/{id} {

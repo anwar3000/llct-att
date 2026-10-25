@@ -17,6 +17,7 @@ import * as working from './pages/working.js';
 import * as trips from './pages/trips.js';
 import * as accounts from './pages/accounts.js';
 import * as backup from './pages/backup.js';
+import * as company from './pages/company.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -36,6 +37,7 @@ const NAV = [
   { path: 'workers', label: 'External workers', icon: 'worker', page: workers },
   { path: 'attendance', label: 'Attendance', icon: 'clock', page: attendance },
   { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
+  { path: 'company', label: 'Company documents', icon: 'folder', page: company },
   { path: 'requests', label: 'Change requests', icon: 'pending', page: requests, badge: () => store.requests.length },
   { path: 'petty', label: 'Petty cash', icon: 'wallet', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
   { path: 'accounts', label: 'Accounts', icon: 'bank', page: accounts, adminOnly: true },

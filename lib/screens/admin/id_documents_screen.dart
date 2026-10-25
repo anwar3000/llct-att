@@ -8,7 +8,9 @@ import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../services/id_sheet.dart';
 import '../../widgets/common.dart';
+import '../../widgets/doc_widgets.dart';
 import '../employee/my_documents_screen.dart';
+import 'company_documents_screen.dart';
 import '../employee/scan_documents_screen.dart';
 
 const _kTagKinds = [('passport', 'PP'), ('eid', 'EID'), ('visa', 'VISA'), ('sira', 'SIRA'), ('mcc', 'MCC')];
@@ -123,7 +125,7 @@ class _IdDocumentsScreenState extends State<IdDocumentsScreen> {
     final shown = people.where(_match).toList();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ID documents'),
+        title: const Text('Documents'),
         actions: [
           if (ready)
             IconButton(
@@ -143,6 +145,18 @@ class _IdDocumentsScreenState extends State<IdDocumentsScreen> {
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(14, 12, 14, 30),
                       children: [
+                        Card(
+                          color: AppColors.accentSoft,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: ListTile(
+                            leading: const Icon(Icons.business_center_outlined, color: AppColors.accentDark),
+                            title: const Text('Company documents', style: TextStyle(fontWeight: FontWeight.w800)),
+                            subtitle: const Text('Trade licenses, Chamber of Commerce, WC insurance, VAT…'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.of(context)
+                                .push(MaterialPageRoute(builder: (_) => CompanyDocumentsScreen(me: widget.me))),
+                          ),
+                        ),
                         TextField(
                           decoration: const InputDecoration(
                               prefixIcon: Icon(Icons.search), hintText: 'Search name, phone or document number', isDense: true),
@@ -294,7 +308,7 @@ class _PersonView extends StatelessWidget {
       var n = 0;
       for (final f in files) {
         set('Loading copies ${++n}/${files.length}…');
-        items.add((name: _fileName(person, f, n), data: await IdSheet.bytes(f), mime: f.mime));
+        items.add((name: '${n.toString().padLeft(2, '0')}_${_fileName(person, f, n)}', data: await IdSheet.bytes(f), mime: f.mime));
       }
       await IdSheet.shareFiles(items, subject: '${person.owner.name} - ID documents');
     });
@@ -303,7 +317,7 @@ class _PersonView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = person;
-    final photo = IdSheet.ofKind(p.files, 'photo').where((f) => f.isImage).firstOrNull;
+    final photo = assignIdSlots(p.files).slot['photo/front'];
     return Scaffold(
       appBar: AppBar(title: Text(p.owner.name)),
       body: Center(
@@ -323,7 +337,7 @@ class _PersonView extends StatelessWidget {
                         height: 90,
                         child: photo == null
                             ? Container(color: AppColors.surface, alignment: Alignment.center, child: Avatar(p.owner.name, size: 46))
-                            : _Thumb(file: photo, fit: BoxFit.cover),
+                            : DocThumb(id: photo.id, isImage: photo.isImage, load: () => IdSheet.bytes(photo)),
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -392,7 +406,7 @@ class _PersonView extends StatelessWidget {
                 ),
               ),
               const SectionTitle('Copies'),
-              for (final k in idKinds) ..._kindCopies(context, k),
+              ..._copies(context),
               if (p.files.isEmpty)
                 const EmptyState(icon: Icons.photo_library_outlined, title: 'No copies uploaded', message: 'Nothing scanned or uploaded yet.'),
             ],
@@ -432,127 +446,77 @@ class _PersonView extends StatelessWidget {
     );
   }
 
-  List<Widget> _kindCopies(BuildContext context, IdKind k) {
-    final list = IdSheet.ofKind(person.files, k.key);
-    if (list.isEmpty) return const [];
-    return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
-        child: Text(k.label, style: const TextStyle(fontWeight: FontWeight.w800)),
-      ),
-      GridView.extent(
-        maxCrossAxisExtent: 260,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: 1.35,
-        children: [
-          for (var i = 0; i < list.length; i++)
-            InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => IdCopyViewer(person: person, file: list[i], title: '${k.label}${_sideLabel(list[i])}'))),
+  Widget _tile(BuildContext context, String label, IdFileMeta? f, {bool optional = false}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: f == null
+          ? null
+          : () => DocViewer.open(context,
+              id: f.id, title: '${person.owner.name} - $label', fileName: _fileName(person, f, 1), mime: f.mime, load: () => IdSheet.bytes(f)),
+      child: Container(
+        decoration: BoxDecoration(
+          color: f == null ? AppColors.surface : AppColors.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE1DED8)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(fit: StackFit.expand, children: [
+          if (f != null)
+            DocThumb(id: f.id, isImage: f.isImage, load: () => IdSheet.bytes(f))
+          else
+            Center(
+              child: Text(optional ? 'Not uploaded\n(if available)' : 'Not uploaded',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: optional ? AppColors.muted : AppColors.danger, fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+          Positioned(
+            left: 6,
+            top: 6,
+            right: 6,
+            child: Align(
+              alignment: Alignment.centerLeft,
               child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.card,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE1DED8)),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(fit: StackFit.expand, children: [
-                  list[i].isImage
-                      ? _Thumb(file: list[i], fit: BoxFit.cover)
-                      : const Center(child: Icon(Icons.picture_as_pdf, size: 44, color: AppColors.danger)),
-                  Positioned(
-                    left: 6,
-                    top: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(5)),
-                      child: Text(
-                          list[i].side.isNotEmpty ? list[i].side.toUpperCase() : (list[i].isImage ? 'COPY ${i + 1}' : 'PDF'),
-                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
-                    ),
-                  ),
-                ]),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(5)),
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
               ),
             ),
-        ],
+          ),
+        ]),
       ),
+    );
+  }
+
+  List<Widget> _copies(BuildContext context) {
+    final a = assignIdSlots(person.files);
+    Widget grid(List<Widget> c) => GridView.extent(
+          maxCrossAxisExtent: 260,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.35,
+          children: c,
+        );
+    return [
+      grid([
+        for (final sl in idSlots)
+          if (sl.kind != 'labour' || a.slot[sl.key] != null)
+            _tile(context, sl.short, a.slot[sl.key], optional: sl.kind == 'sira' || sl.kind == 'mcc' || sl.kind == 'labour'),
+      ]),
+      if (a.extra.isNotEmpty) ...[
+        const SectionTitle('Additional documents'),
+        grid([for (final f in a.extra) _tile(context, idFileHeading(f).toUpperCase(), f)]),
+      ],
     ];
   }
 }
 
-String _sideLabel(IdFileMeta f) => f.side.isEmpty ? '' : ' - ${f.side}';
-
 String _fileName(IdPerson p, IdFileMeta f, int n) {
-  final kind = idKinds.where((k) => k.key == f.kind).firstOrNull?.label ?? f.kind;
-  return '${IdSheet.safeName(p.owner.name)}_${IdSheet.safeName(kind)}${f.side.isEmpty ? '' : '_${f.side}'}_$n${IdSheet.extFor(f)}';
-}
-
-class _Thumb extends StatelessWidget {
-  final IdFileMeta file;
-  final BoxFit fit;
-  const _Thumb({required this.file, this.fit = BoxFit.cover});
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Uint8List>(
-      future: IdSheet.bytes(file),
-      builder: (_, s) {
-        if (s.hasError) return const Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted));
-        if (!s.hasData) return const Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)));
-        return Image.memory(s.data!, fit: fit, gaplessPlayback: true, cacheWidth: 600,
-            errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted)));
-      },
-    );
-  }
-}
-
-/// Full-screen copy with pinch-zoom and share / save.
-class IdCopyViewer extends StatelessWidget {
-  final IdPerson person;
-  final IdFileMeta file;
-  final String title;
-  const IdCopyViewer({super.key, required this.person, required this.file, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    Future<void> share() => runWithProgress(context, (set) async {
-          final b = await IdSheet.bytes(file);
-          await IdSheet.shareFiles([(name: _fileName(person, file, 1), data: b, mime: file.mime)],
-              subject: '${person.owner.name} - $title');
-        });
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [IconButton(tooltip: 'Share / save', icon: const Icon(Icons.ios_share), onPressed: share)],
-      ),
-      body: file.isImage
-          ? FutureBuilder<Uint8List>(
-              future: IdSheet.bytes(file),
-              builder: (_, s) => !s.hasData
-                  ? const Center(child: CircularProgressIndicator())
-                  : InteractiveViewer(maxScale: 6, child: Center(child: Image.memory(s.data!, fit: BoxFit.contain))),
-            )
-          : Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.picture_as_pdf, size: 70, color: Colors.white70),
-                const SizedBox(height: 12),
-                Text(file.name, style: const TextStyle(color: Colors.white)),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(minimumSize: const Size(160, 46)),
-                  onPressed: share,
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('Open / share PDF'),
-                ),
-              ]),
-            ),
-    );
-  }
+  final sl = idSlots.where((s) => s.kind == f.kind && (s.side == f.side || (f.side.isEmpty && !s.twoSided))).firstOrNull;
+  final what = sl?.short ?? idFileHeading(f);
+  return '${IdSheet.safeName(p.owner.name)}_${IdSheet.safeName(what)}${sl == null ? '_$n' : ''}${IdSheet.extFor(f)}';
 }

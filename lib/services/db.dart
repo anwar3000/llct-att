@@ -814,6 +814,7 @@ class Db {
     required String mime,
     required Uint8List bytes,
     String side = '',
+    String title = '', // heading of an additional document
     IdOwner? owner, // management uploading for someone else
   }) async {
     final o = owner ?? IdOwner.fromUser(me);
@@ -839,8 +840,98 @@ class Db {
       'uploadedAt': FieldValue.serverTimestamp(),
       'uploadedBy': me.name,
       if (side.isNotEmpty) 'side': side,
+      if (title.isNotEmpty) 'title': title,
     });
     await batch.commit();
+  }
+
+  // ---------------------------------------------------------------- company documents
+  static CollectionReference<Map<String, dynamic>> get companyDocs => _fs.collection('companyDocs');
+  static CollectionReference<Map<String, dynamic>> get companyFiles => _fs.collection('companyFiles');
+
+  static Stream<List<CompanyDoc>> companyDocsStream() =>
+      companyDocs.snapshots().map((q) => q.docs.map(CompanyDoc.fromDoc).toList());
+
+  static Stream<List<CompanyFile>> companyFilesStream() => companyFiles.snapshots().map((q) =>
+      q.docs.map(CompanyFile.fromDoc).toList()
+        ..sort((a, b) => (a.uploadedAt ?? DateTime(2100)).compareTo(b.uploadedAt ?? DateTime(2100))));
+
+  /// Standard documents use their key as the id; additional ones get a new id. Returns the id.
+  static Future<String> saveCompanyDoc({
+    String? id,
+    String key = '',
+    required String title,
+    String number = '',
+    String issueDate = '',
+    String expiry = '',
+    String notes = '',
+    bool custom = false,
+    String by = '',
+  }) async {
+    final ref = id != null ? companyDocs.doc(id) : (key.isNotEmpty && !custom ? companyDocs.doc(key) : companyDocs.doc());
+    await ref.set({
+      'key': key,
+      'title': title,
+      'number': number,
+      'issueDate': issueDate,
+      'expiry': expiry,
+      'notes': notes,
+      'custom': custom,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedBy': by,
+    }, SetOptions(merge: true));
+    return ref.id;
+  }
+
+  static Future<void> uploadCompanyFile({
+    required String docId,
+    required String name,
+    required String mime,
+    required Uint8List bytes,
+    String by = '',
+  }) async {
+    if (bytes.length > kMaxDocBytes) throw Exception('File is larger than 2 MB.');
+    final b64 = base64Encode(bytes);
+    final ref = companyFiles.doc();
+    final n = (b64.length / _chunk).ceil().clamp(1, 1000);
+    final batch = _fs.batch();
+    for (var i = 0; i < n; i++) {
+      final end = (i + 1) * _chunk;
+      batch.set(ref.collection('chunks').doc('$i'), {'d': b64.substring(i * _chunk, end > b64.length ? b64.length : end)});
+    }
+    batch.set(ref, {
+      'docId': docId,
+      'name': name,
+      'mime': mime,
+      'size': bytes.length,
+      'chunks': n,
+      'uploadedAt': FieldValue.serverTimestamp(),
+      'uploadedBy': by,
+    });
+    await batch.commit();
+  }
+
+  static Future<Uint8List> readCompanyFile(CompanyFile f) async {
+    final q = await companyFiles.doc(f.id).collection('chunks').get();
+    final parts = q.docs.toList()..sort((a, b) => int.parse(a.id).compareTo(int.parse(b.id)));
+    return base64Decode(parts.map((d) => _str(d.data()['d'])).join());
+  }
+
+  static Future<void> deleteCompanyFile(CompanyFile f) async {
+    final q = await companyFiles.doc(f.id).collection('chunks').get();
+    final batch = _fs.batch();
+    for (final d in q.docs) {
+      batch.delete(d.reference);
+    }
+    batch.delete(companyFiles.doc(f.id));
+    await batch.commit();
+  }
+
+  static Future<void> deleteCompanyDoc(String docId, List<CompanyFile> files) async {
+    for (final f in files.where((f) => f.docId == docId)) {
+      await deleteCompanyFile(f);
+    }
+    await companyDocs.doc(docId).delete();
   }
 
   static Future<Uint8List> readIdFile(IdFileMeta f) async {

@@ -188,6 +188,7 @@ export function mapIdFile(d) {
     mime: m.mime || 'application/octet-stream', size: num(m.size), chunks: num(m.chunks, 1), uploadedAt: toDate(m.uploadedAt),
     uploadedBy: m.uploadedBy || '', pending: m.pending === true, requestId: m.requestId || '', ownerName: m.ownerName || '',
     side: m.side || '', // front | back (from the scan wizard)
+    title: m.title || '', // heading of an additional document
   };
 }
 /** Text fields kept in idInfo/{ownerId}. */
@@ -876,7 +877,7 @@ export const saveIdInfo = (ownerId, ownerType, data) =>
   setDoc(doc(db, 'idInfo', ownerId), { ...data, ownerType, updatedAt: serverTimestamp() }, { merge: true });
 
 const CHUNK = 700000; // characters of base64 per Firestore doc (limit is 1 MiB)
-export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64, pending = false, requestId = '', side = '' }) {
+export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, mime, base64, pending = false, requestId = '', side = '', title = '' }) {
   const ref = doc(C('idFiles'));
   const n = Math.max(1, Math.ceil(base64.length / CHUNK));
   const b = writeBatch(db);
@@ -886,6 +887,7 @@ export async function uploadIdFile({ ownerId, ownerType, ownerName, kind, name, 
     uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '', uploadedById: store.me?.id || '',
     ...(pending ? { pending: true, requestId } : {}),
     ...(side ? { side } : {}),
+    ...(title ? { title } : {}),
   });
   await b.commit();
   return ref.id;
@@ -987,4 +989,62 @@ export async function rejectRequest(r, note = '') {
     if (file) await deleteIdFile(file);
   }
   await updateDoc(doc(db, 'changeRequests', r.id), { status: 'rejected', reviewNote: note, reviewedBy: store.me?.name || '', reviewedAt: serverTimestamp() });
+}
+
+// ------------------------------------------------------------------ company documents
+// Trade licenses, Chamber of Commerce, WC insurance… (companyDocs) with files in chunks (companyFiles).
+export const COMPANY_DOC_TYPES = [
+  { key: 'tradeLicense', label: 'LLCT trade license (Dubai)' },
+  { key: 'adTradeLicense', label: 'Abu Dhabi LLCT trade license' },
+  { key: 'chamber', label: 'Chamber of Commerce certificate' },
+  { key: 'wcInsurance', label: "WC insurance (workmen's compensation)" },
+  { key: 'vat', label: 'VAT / TRN certificate' },
+  { key: 'estCard', label: 'Establishment card (immigration)' },
+  { key: 'mohre', label: 'MOHRE / labour establishment card' },
+  { key: 'tenancy', label: 'Office tenancy contract / Ejari' },
+  { key: 'tplInsurance', label: 'Third-party liability insurance' },
+  { key: 'medical', label: 'Staff medical insurance' },
+  { key: 'moa', label: 'Memorandum of association (MOA)' },
+];
+export function mapCompanyDoc(d) {
+  const m = d.data() || {};
+  return { id: d.id, key: m.key || '', title: m.title || 'Document', number: m.number || '', issueDate: m.issueDate || '',
+    expiry: m.expiry || '', notes: m.notes || '', custom: m.custom === true, updatedAt: toDate(m.updatedAt) };
+}
+export function mapCompanyFile(d) {
+  const m = d.data() || {};
+  return { id: d.id, docId: m.docId || '', name: m.name || 'file', mime: m.mime || 'application/octet-stream', size: num(m.size),
+    chunks: num(m.chunks, 1), uploadedAt: toDate(m.uploadedAt), uploadedBy: m.uploadedBy || '', kind: 'company' };
+}
+export const watchCompanyDocs = (cb) => onSnapshot(C('companyDocs'), (s) => cb(s.docs.map(mapCompanyDoc)), (e) => { console.error(e); cb(null, e); });
+export const watchCompanyFiles = (cb) => onSnapshot(C('companyFiles'),
+  (s) => cb(s.docs.map(mapCompanyFile).sort((a, b) => (a.uploadedAt || 9e15) - (b.uploadedAt || 9e15))), (e) => { console.error(e); cb(null, e); });
+export async function saveCompanyDoc({ id = null, key = '', title, number = '', issueDate = '', expiry = '', notes = '', custom = false }) {
+  const ref = id ? doc(db, 'companyDocs', id) : (key && !custom ? doc(db, 'companyDocs', key) : doc(C('companyDocs')));
+  await setDoc(ref, { key, title, number, issueDate, expiry, notes, custom, updatedAt: serverTimestamp(), updatedBy: store.me?.name || '' }, { merge: true });
+  return ref.id;
+}
+export async function uploadCompanyFile({ docId, name, mime, base64 }) {
+  const ref = doc(C('companyFiles'));
+  const n = Math.max(1, Math.ceil(base64.length / CHUNK));
+  const b = writeBatch(db);
+  for (let i = 0; i < n; i++) b.set(doc(db, 'companyFiles', ref.id, 'chunks', String(i)), { d: base64.slice(i * CHUNK, (i + 1) * CHUNK) });
+  b.set(ref, { docId, name, mime, size: Math.round(base64.length * 0.75), chunks: n, uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '' });
+  await b.commit();
+  return ref.id;
+}
+export async function readCompanyFile(f) {
+  const snap = await getDocs(collection(db, 'companyFiles', f.id, 'chunks'));
+  return snap.docs.map((d) => [Number(d.id), d.data().d || '']).sort((a, b) => a[0] - b[0]).map((x) => x[1]).join('');
+}
+export async function deleteCompanyFile(f) {
+  const snap = await getDocs(collection(db, 'companyFiles', f.id, 'chunks'));
+  const b = writeBatch(db);
+  snap.docs.forEach((d) => b.delete(d.ref));
+  b.delete(doc(db, 'companyFiles', f.id));
+  await b.commit();
+}
+export async function deleteCompanyDoc(id, files) {
+  for (const f of files.filter((x) => x.docId === id)) await deleteCompanyFile(f);
+  await deleteDoc(doc(db, 'companyDocs', id));
 }

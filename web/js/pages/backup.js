@@ -23,6 +23,7 @@ const AREAS = [
   { key: 'petty', label: 'Petty cash (with receipt photos)', app: 'att', cat: 'photo' },
   { key: 'acctFiles', label: 'Accounts receipt copies', app: 'att', cat: 'photo' },
   { key: 'idFiles', label: 'ID document copies', app: 'att', cat: 'photo' },
+  { key: 'companyFiles', label: 'Company document copies', app: 'att', cat: 'photo' },
   { key: '_track', label: 'GPS trails (staff on duty)', app: 'att', cat: 'gps', sub: true },
   { key: '_points', label: 'Trip & ride routes', app: 'att', cat: 'gps', sub: true },
   { key: 'attendance', label: 'Attendance', app: 'att', cat: 'rec' },
@@ -40,7 +41,7 @@ const AREAS = [
 // Smaller collections, measured together per app.
 const OTHER = {
   att: ['sites', 'projects', 'schedules', 'offDays', 'extWorkers', 'workerLocks', 'idInfo', 'changeRequests', 'settings',
-    'workerRates', 'driverPayments', 'siteKeys', 'acctSettings'],
+    'workerRates', 'driverPayments', 'siteKeys', 'acctSettings', 'companyDocs'],
   inv: ['inv_config', 'inv_access', 'inv_counters', 'inv_profiles', 'inv_numbers'],
   shared: ['users'],
 };
@@ -89,7 +90,7 @@ export function mount(el, _p, { setHeader }) {
         <div class="row" style="gap:8px;flex-wrap:wrap"><label class="small">From <input type="date" id="ph-from" value="2000-01-01" style="width:150px"></label>
           <label class="small">To <input type="date" id="ph-to" value="${dateKey(now)}" style="width:150px"></label></div>
         <div class="small" style="margin:8px 0;display:grid;gap:4px">
-          ${[['site', 'Site update photos', true], ['petty', 'Petty cash receipts', true], ['acct', 'Accounts receipts', true], ['id', 'ID document copies', false], ['inv', 'Invoicing photos & attachments', false]]
+          ${[['site', 'Site update photos', true], ['petty', 'Petty cash receipts', true], ['acct', 'Accounts receipts', true], ['id', 'ID & company document copies', false], ['inv', 'Invoicing photos & attachments', false]]
             .map(([k, l, on]) => `<label class="row" style="gap:6px"><input type="checkbox" data-ph="${k}" ${on ? 'checked' : ''}> ${l}</label>`).join('')}
         </div>
         <button class="btn" id="bk-photos">Download photos ZIP</button></div></div>
@@ -210,8 +211,8 @@ async function estimate(progress) {
       const t = await getDocs(C('trips'));
       const n = t.docs.reduce((s, d) => s + (Number(d.data().pointsCount) || 0), 0);
       add(a.label, n, n * 120, a.app, a.cat);
-    } else if (a.key === 'idFiles') {
-      const s = await getDocs(C('idFiles'));
+    } else if (a.key === 'idFiles' || a.key === 'companyFiles') {
+      const s = await getDocs(C(a.key));
       const bytes = s.docs.reduce((x, d) => x + (Number(d.data().size) || 0) * 1.34 + 400, 0);
       add(a.label, s.size, bytes, a.app, a.cat);
     } else {
@@ -320,6 +321,17 @@ async function photosBackup(from, to, kinds, progress) {
       zip.file(name, data, { base64: true }); n++;
       index.push([name, up ? dateKey(up) : '', 'ID document', `${m.ownerName || ''} · ${m.kind}`]);
       if (n % 20 === 0) progress(`ID documents… ${n}`);
+    }
+    progress('Collecting company documents…');
+    const titles = Object.fromEntries((await allDocs('companyDocs')).map((d) => [d.id, d.data().title || d.id]));
+    for (const d of await allDocs('companyFiles')) {
+      const m = d.data();
+      const up = m.uploadedAt?.toDate?.();
+      const chunks = await getDocs(collection(db, 'companyFiles', d.id, 'chunks'));
+      const data = chunks.docs.map((c) => [Number(c.id), c.data().d || '']).sort((a, b) => a[0] - b[0]).map((x) => x[1]).join('');
+      const name = `company-documents/${safe(titles[m.docId] || m.docId)}_${d.id.slice(0, 5)}.${extOf(m.mime)}`;
+      zip.file(name, data, { base64: true }); n++;
+      index.push([name, up ? dateKey(up) : '', 'Company document', titles[m.docId] || '']);
     }
   }
   if (kinds.includes('inv')) {
