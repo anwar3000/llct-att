@@ -362,6 +362,13 @@ class _OverviewTabState extends State<OverviewTab> {
                     )),
               ],
 
+              // ----------------------------------------------- petty cash (admin)
+              if (widget.me.isAdmin && live.allPettyLoaded && live.allPetty.isNotEmpty) ...[
+                SectionTitle('Petty cash',
+                    trailing: TextButton(onPressed: () => widget.onNavigate(5), child: const Text('All petty'))),
+                _PettyCard(live, onOpen: () => widget.onNavigate(5)),
+              ],
+
               // ----------------------------------------------- team today
               SectionTitle('Team today · ${st.length} staff${ext.isEmpty ? '' : ' + ${ext.length} external'}',
                   trailing: TextButton(
@@ -668,6 +675,89 @@ class _StaffRow extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Overall petty cash: given, spent, with staff, waiting for approval — and each person's balance.
+class _PettyCard extends StatelessWidget {
+  final AdminLive live;
+  final VoidCallback onOpen;
+  const _PettyCard(this.live, {required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final all = live.allPetty;
+    final total = PettySummary.of(all);
+    final byEmp = <String, List<PettyTxn>>{};
+    for (final t in all) {
+      byEmp.putIfAbsent(t.employeeId, () => []).add(t);
+    }
+    final rows = byEmp.entries
+        .map((e) => (name: live.userById(e.key)?.name ?? e.value.first.employeeName, s: PettySummary.of(e.value)))
+        .where((r) => r.s.balance.abs() >= 0.01 || r.s.pendingCount > 0)
+        .toList()
+      ..sort((a, b) => b.s.balance.compareTo(a.s.balance));
+    Widget fig(String label, double v, Color c, [String? sub]) => Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: const TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(fmtMoney(v), style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c)),
+              ),
+              if (sub != null) Text(sub, style: const TextStyle(fontSize: 10.5, color: Colors.black45)),
+            ]),
+          ),
+        );
+    return Card(
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              fig('Given', total.credited, AppColors.success),
+              fig('Spent', total.spent, AppColors.danger),
+              fig('With staff', total.balance, AppColors.accentDark, 'given − spent'),
+              fig('Pending', total.pending, AppColors.warning, '${total.pendingCount} to approve'),
+            ]),
+            if (rows.isNotEmpty) ...[
+              const Divider(height: 18),
+              for (final r in rows.take(8))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(children: [
+                          TextSpan(text: r.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          if (r.s.pendingCount > 0)
+                            TextSpan(
+                                text: '  · ${r.s.pendingCount} pending ${fmtMoney(r.s.pending)}',
+                                style: const TextStyle(fontSize: 12, color: AppColors.warning)),
+                        ]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(fmtMoney(r.s.balance),
+                        style: TextStyle(fontWeight: FontWeight.w800, color: r.s.balance < 0 ? AppColors.danger : null)),
+                  ]),
+                ),
+              if (rows.length > 8)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('+ ${rows.length - 8} more', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                ),
+            ],
+          ]),
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import {
   esc, fromTz, STAFF_COLOR, EXT_COLOR, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
 } from '../util.js';
+import { pettySummary } from '../calc.js';
 
 const STATE = {
   onDuty: ['On duty', 'green'], done: ['Checked out', 'teal'], off: ['Off day', 'amber'], notIn: ['Not checked in', 'gray'],
@@ -132,6 +133,8 @@ export function mount(el, _params, { setHeader }) {
         ${approvalsHtml()}
       </div>
     </div>
+
+    ${isAdmin() && store.petty.length ? pettyStatusHtml() : ''}
 
     <div class="grid cols-2 mt">
       <div class="card">
@@ -271,4 +274,32 @@ function kpi(label, value, sub, ico, color, nav) {
   return `<div class="card kpi" ${nav ? `data-nav="${nav}"` : ''}>
     <div class="lbl"><span class="ico" style="background:${color}1f;color:${color}">${icon(ico, 16)}</span>${esc(label)}</div>
     <div class="val">${esc(value)}</div><div class="sub">${esc(sub)}</div></div>`;
+}
+
+// Overall petty cash status for admins: totals, then each person's balance (who holds the most cash first).
+function pettyStatusHtml() {
+  const all = store.petty;
+  const t = pettySummary(all);
+  const by = new Map();
+  for (const x of all) { if (!by.has(x.employeeId)) by.set(x.employeeId, []); by.get(x.employeeId).push(x); }
+  const rows = [...by.entries()].map(([id, l]) => ({ id, name: store.user(id)?.name || l[0].employeeName, s: pettySummary(l) }))
+    .filter((r) => Math.abs(r.s.balance) >= 0.01 || r.s.pendingCount)
+    .sort((a, b) => b.s.balance - a.s.balance);
+  const fig = (label, v, color, sub = '') => `<div style="flex:1;min-width:120px"><div class="small muted" style="font-weight:600">${label}</div>
+    <div style="font-size:20px;font-weight:800;color:${color}">${fmtMoney(v)}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
+  return `<div class="card mt">
+    <div class="card-head">${icon('wallet', 18, '#D98A1A')}<h2>Petty cash</h2><span class="spacer"></span><a class="small" href="#/petty">All petty →</a></div>
+    <div class="card-pad" style="display:flex;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--line, #eee)">
+      ${fig('Given (approved)', t.credited, '#2E9E6A')}
+      ${fig('Spent (approved)', t.spent, '#D64545')}
+      ${fig('Cash with staff', t.balance, '#D98A1A', 'given − spent')}
+      ${fig('Waiting for approval', t.pending, '#E08E2B', `${t.pendingCount} entries`)}
+    </div>
+    ${rows.length ? `<div class="table-wrap"><table class="t"><tr><th>Employee</th><th class="num">Given</th><th class="num">Spent</th><th class="num">Pending</th><th class="num">Balance</th></tr>
+      ${rows.slice(0, 12).map((r) => `<tr style="cursor:pointer" onclick="location.hash='#/petty'"><td><div class="person">${avatar(r.name, 26)}<span class="nm">${esc(r.name)}</span></div></td>
+        <td class="num">${fmtMoney(r.s.credited)}</td><td class="num">${fmtMoney(r.s.spent)}</td>
+        <td class="num">${r.s.pendingCount ? `${fmtMoney(r.s.pending)} <span class="small muted">(${r.s.pendingCount})</span>` : '—'}</td>
+        <td class="num"><b style="color:${r.s.balance < 0 ? '#D64545' : 'inherit'}">${fmtMoney(r.s.balance)}</b></td></tr>`).join('')}
+      </table></div>${rows.length > 12 ? `<div class="card-pad small muted">+ ${rows.length - 12} more on the Petty cash page</div>` : ''}` : ''}
+  </div>`;
 }

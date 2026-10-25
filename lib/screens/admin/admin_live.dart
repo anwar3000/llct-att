@@ -22,6 +22,9 @@ class AdminLive extends ChangeNotifier {
   List<OffDay> pendingOff = [];
   List<Schedule> schedules = [];
   List<PettyTxn> pendingPetty = [];
+  /// Every petty cash entry (admin only) — for the overall petty status on the overview.
+  List<PettyTxn> allPetty = [];
+  bool allPettyLoaded = false;
   List<GeoAlert> alerts = [];
   /// Set when external-worker data can't be read (usually: Firestore rules not published).
   String? externalError;
@@ -131,6 +134,11 @@ class AdminLive extends ChangeNotifier {
     }, onError: (_) {}));
     _subs.add(Db.activeTripsAll().listen((v) {
       activeTrips = v;
+      notifyListeners();
+    }, onError: (_) {}));
+    if (canSeeAccounts) _subs.add(Db.pettyAll(limit: 5000).listen((v) {
+      allPetty = v;
+      allPettyLoaded = true;
       notifyListeners();
     }, onError: (_) {}));
     if (canSeeAccounts) _subs.add(Db.pettyPending().listen((v) {
