@@ -69,12 +69,20 @@ class _AccountsViewState extends State<_AccountsView> {
   ({double cash, double bank})? _bf;
   Object? _error;
   int _token = 0;
+  Map<String, String> _projNames = {};
 
   @override
   void initState() {
     super.initState();
     _load();
+    Db.acctProjects().then((l) {
+      if (mounted) setState(() => _projNames = {for (final p in l) p.id: p.label});
+    }).catchError((_) {});
   }
+
+  /// The entry's project — or, for entries saved with only a site, the project that site belongs to.
+  String _projectIdOf(AcctEntry e) => e.projectId.isNotEmpty ? e.projectId : (widget.live.siteById(e.siteId)?.projectId ?? '');
+  String _projectOf(AcctEntry e) => e.projectName.isNotEmpty ? e.projectName : (_projNames[_projectIdOf(e)] ?? '');
 
   @override
   void dispose() {
@@ -275,7 +283,7 @@ class _AccountsViewState extends State<_AccountsView> {
         [
           e.date,
           e.method,
-          if (e.projectName.isNotEmpty) e.projectName,
+          if (_projectOf(e).isNotEmpty) _projectOf(e),
           if (e.reference.isNotEmpty) '${e.method == 'Cheque' ? 'Chq' : 'Ref'} ${e.reference}',
           if (e.bank.isNotEmpty) e.bank,
           if (e.note.isNotEmpty) e.note,
@@ -380,7 +388,7 @@ class _AccountsViewState extends State<_AccountsView> {
     final bankC = TextEditingController(text: e?.bank);
     final note = TextEditingController(text: e?.note);
     String siteId = e?.siteId ?? '';
-    String projectId = e?.projectId ?? '';
+    String projectId = e == null ? '' : _projectIdOf(e);
     String? photo;
     String? err;
     final sites = widget.live.sites.where((s) => s.approved).toList();
@@ -513,7 +521,11 @@ class _AccountsViewState extends State<_AccountsView> {
                       const DropdownMenuItem(value: '', child: Text('—')),
                       for (final s in sites) DropdownMenuItem(value: s.id, child: Text(s.name, overflow: TextOverflow.ellipsis)),
                     ],
-                    onChanged: (v) => set(() => siteId = v ?? ''),
+                    onChanged: (v) => set(() {
+                      siteId = v ?? '';
+                      final sp = widget.live.siteById(siteId)?.projectId ?? '';
+                      if (projectId.isEmpty && sp.isNotEmpty) projectId = sp;
+                    }),
                   ),
                   const SizedBox(height: 10),
                   TextField(controller: note, textInputAction: TextInputAction.done, decoration: const InputDecoration(labelText: 'Note')),

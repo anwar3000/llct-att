@@ -10,6 +10,14 @@ import { esc, icon, pill, fmtMoney, fmtDate, parseKey, dateKey, toast, modal, co
 
 const GREEN = '#2E9E6A', RED = '#D64545';
 const SRC = { manual: 'Manual', petty: 'Petty cash', driver: 'Driver payment' };
+const projLabel = (p) => [p.code, p.name].filter(Boolean).join(' · ');
+// Entries saved with only a site (the earlier "Site / project" box) take the project that site belongs to.
+function projectOfSite(siteId) { const s = siteId ? store.site(siteId) : null; return s && s.projectId ? store.projects.find((x) => x.id === s.projectId) || null : null; }
+function withProject(e) {
+  if (e.projectId) return e;
+  const p = projectOfSite(e.siteId);
+  return p ? { ...e, projectId: p.id, projectName: projLabel(p) } : e;
+}
 const r2 = (n) => Math.round((n || 0) * 100) / 100;
 
 export function mount(el, _p, { setHeader }) {
@@ -41,7 +49,7 @@ export function mount(el, _p, { setHeader }) {
 
   function lines() {
     const ql = q.toLowerCase();
-    return [...(manual || []), ...(showAuto ? auto : [])]
+    return [...(manual || []), ...(showAuto ? auto : [])].map(withProject)
       .filter((e) => (!type || e.type === type) && (!cat || e.category === cat) && (!method || e.method === method)
         && (!ql || [e.category, e.party, e.note, e.reference, e.bank, e.siteName, e.projectName, e.method].join(' ').toLowerCase().includes(ql)))
       .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0));
@@ -259,7 +267,7 @@ function entryDialog(e, kind = e?.type || 'expense') {
       <label class="f"><span id="ae-ref-l">Reference</span><input id="ae-ref" value="${esc(e?.reference || '')}"></label>
       <label class="f ae-chq"><span>Bank</span><input id="ae-bank" value="${esc(e?.bank || '')}" placeholder="e.g. Emirates NBD"></label>
       <label class="f ae-chq"><span>Cheque date</span><input id="ae-cdate" type="date" value="${esc(e?.chequeDate || '')}"></label>
-      <label class="f"><span>Project (optional)</span><select id="ae-proj"><option value="">—</option>${[...store.projects].sort((a, b) => (a.status !== 'active') - (b.status !== 'active') || a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}" ${p.id === e?.projectId ? 'selected' : ''}>${esc([p.code, p.name].filter(Boolean).join(' · '))}${p.status !== 'active' ? ` (${esc(p.status)})` : ''}</option>`).join('')}</select></label>
+      <label class="f"><span>Project (optional)</span><select id="ae-proj"><option value="">—</option>${[...store.projects].sort((a, b) => (a.status !== 'active') - (b.status !== 'active') || a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}" ${p.id === (e?.projectId || projectOfSite(e?.siteId)?.id) ? 'selected' : ''}>${esc([p.code, p.name].filter(Boolean).join(' · '))}${p.status !== 'active' ? ` (${esc(p.status)})` : ''}</option>`).join('')}</select></label>
       <label class="f"><span>Site (optional)</span><select id="ae-site"><option value="">—</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === e?.siteId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
       <label class="f"><span>Receipt / invoice / cheque copy</span><input id="ae-file" type="file" accept="image/*,application/pdf">
         ${e?.hasFile ? `<span class="small muted">Attached: ${esc(e.fileName)} <a href="javascript:void 0" id="ae-rmfile" style="color:${RED}">remove</a></span>` : ''}</label>
@@ -275,6 +283,7 @@ function entryDialog(e, kind = e?.type || 'expense') {
         m.querySelector('#ae-ref-l').textContent = chq ? 'Cheque no.' : v('#ae-m') === 'Cash' ? 'Receipt / voucher no.' : 'Transaction ref.';
       };
       m.querySelector('#ae-m').onchange = sync; sync();
+      m.querySelector('#ae-site').onchange = () => { const p = projectOfSite(v('#ae-site')); if (p && !v('#ae-proj')) m.querySelector('#ae-proj').value = p.id; };
       const partyKey = income ? 'receivedFrom' : 'paidTo';
       let saved = [];
       getAcctParties().then((p) => {
