@@ -1,7 +1,7 @@
 name: attendance_pro
 description: Field staff attendance with GPS check-in/out, site scheduling, site updates, petty cash and a live management dashboard.
 publish_to: 'none'
-version: 1.8.0+25
+version: 1.8.1+26
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -24,6 +24,11 @@ dependencies:
   intl: ^0.19.0
   image_picker: ^1.1.2
   file_picker: ^8.1.2
+
+  # ID documents: make the ID sheet PDF and share / save copies
+  pdf: ^3.11.1
+  share_plus: ^10.1.4
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

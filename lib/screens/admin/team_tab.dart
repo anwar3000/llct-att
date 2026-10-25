@@ -8,6 +8,7 @@ import '../../widgets/site_workforce.dart' show kExtColor;
 import 'admin_live.dart';
 import 'employee_detail_screen.dart';
 import 'employee_form.dart';
+import 'id_documents_screen.dart';
 import 'staff_status.dart';
 
 class TeamTab extends StatefulWidget {
@@ -112,13 +113,25 @@ class _TeamTabState extends State<TeamTab> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
             children: [
-              TextField(
-                onChanged: (v) => setState(() => _q = v),
-                decoration: const InputDecoration(
-                  hintText: 'Search name, ID, phone…',
-                  prefixIcon: Icon(Icons.search),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    onChanged: (v) => setState(() => _q = v),
+                    decoration: const InputDecoration(
+                      hintText: 'Search name, ID, phone…',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(builder: (_) => IdDocumentsScreen(me: widget.me))),
+                  icon: const Icon(Icons.badge_outlined, size: 19),
+                  label: const Text('ID docs'),
+                ),
+              ]),
               const SizedBox(height: 10),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,

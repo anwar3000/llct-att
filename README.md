@@ -35,6 +35,13 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **ID documents in the Android app (v1.8.1):**
+  - **Where:** admin and managers: Team → *ID docs* (and the badge icon on an employee's page). People admin allowed: profile picture → *Staff ID documents*.
+  - **List:** staff and external workers, with search (name, phone, document number) and filters: Staff, External, Missing copies, Expiring / expired. Tags show which copies each person has (PP, EID, VISA, SIRA, MCC).
+  - **Person page:** numbers and expiry dates with status, front/back copies, full-screen zoom, *Share / save* each copy, *Share all copies*, and *ID sheet PDF* (same layout as the web).
+  - **Bulk:** the PDF button on the list makes one ID sheet PDF for everyone shown.
+  - **Permission:** *Can view & download ID documents* on the employee form (app and web). Admins always can.
+  - **Rules:** new `canIds()` check. Publish the updated `firestore.rules`, or people given the permission will get "No access".
 - **Guided document scanning (v1.8.0):** *Scan my documents* in the staff app (Android: profile picture → My ID documents; iPhone: Me tab) and *Scan documents step by step* for admin (employee or worker page on the web).
   - **Order:** one document at a time:
     1. Emirates ID front

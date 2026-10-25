@@ -92,6 +92,8 @@ class AppUser {
   final DateTime? forceLogoutAt;
   /// Admin "allow check-in": GPS violations before this time no longer count.
   final DateTime? violationsClearedAt;
+  /// Admin gave this person access to everyone's ID documents in the app.
+  final bool canViewIds;
   /// Drivers get the Trips feature; their own rate per km overrides the company rate.
   final bool isDriver;
   final double? tripRatePerKm;
@@ -113,6 +115,7 @@ class AppUser {
     this.createdAt,
     this.forceLogoutAt,
     this.violationsClearedAt,
+    this.canViewIds = false,
     this.isDriver = false,
     this.tripRatePerKm,
     this.vehicle = '',
@@ -149,6 +152,7 @@ class AppUser {
       createdAt: _ts(m['createdAt']),
       forceLogoutAt: _ts(m['forceLogoutAt']),
       violationsClearedAt: _ts(m['violationsClearedAt']),
+      canViewIds: m['canViewIds'] == true,
       isDriver: m['isDriver'] == true,
       tripRatePerKm: _dbl(m['tripRatePerKm']),
       vehicle: _str(m['vehicle']),
@@ -888,8 +892,11 @@ class IdFileMeta {
   final DateTime? uploadedAt;
   /// front | back — set by the guided scanner.
   final String side;
+  /// Waiting for approval (uploaded through the Documents Portal).
+  final bool pending;
 
   IdFileMeta({
+    this.pending = false,
     this.side = '',
     required this.id,
     required this.ownerId,
@@ -912,6 +919,7 @@ class IdFileMeta {
       name: _str(m['name'], 'file'),
       mime: _str(m['mime'], 'application/octet-stream'),
       side: _str(m['side']),
+      pending: m['pending'] == true,
       size: _int(m['size']),
       chunks: _int(m['chunks'], 1),
       uploadedAt: _ts(m['uploadedAt']),
@@ -1143,4 +1151,12 @@ class AcctEntry {
       createdAt: _ts(m['createdAt']),
     );
   }
+}
+
+
+/// A person whose ID documents are kept: staff (users) or an external worker.
+class IdOwner {
+  final String id, type, name, org, phone, code;
+  const IdOwner({required this.id, required this.type, required this.name, this.org = '', this.phone = '', this.code = ''});
+  bool get isWorker => type == 'worker';
 }

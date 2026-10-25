@@ -53,6 +53,7 @@ export function mapUser(d) {
     forceLogoutAt: toDate(m.forceLogoutAt),
     violationsClearedAt: toDate(m.violationsClearedAt),
     isDriver: m.isDriver === true,
+    canViewIds: m.canViewIds === true,
     vehicle: m.vehicle || '',
     tripRatePerKm: typeof m.tripRatePerKm === 'number' ? m.tripRatePerKm : null,
     lastLocation: ll && typeof ll.lat === 'number' && typeof ll.lng === 'number'

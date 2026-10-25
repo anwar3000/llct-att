@@ -28,6 +28,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
   late int _quota = widget.existing?.monthlyOffQuota ?? kDefaultMonthlyOffQuota;
   late bool _active = widget.existing?.active ?? true;
   late bool _driver = widget.existing?.isDriver ?? false;
+  late bool _ids = widget.existing?.canViewIds ?? false;
   late final _vehicle = TextEditingController(text: widget.existing?.vehicle);
   late final _rate = TextEditingController(
       text: widget.existing?.tripRatePerKm == null ? '' : widget.existing!.tripRatePerKm!.toString());
@@ -59,6 +60,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           'monthlyOffQuota': _quota,
           'active': _active,
           'isDriver': _role == 'employee' && _driver,
+          'canViewIds': _role != 'admin' && _ids,
           'vehicle': _vehicle.text.trim(),
           'tripRatePerKm': double.tryParse(_rate.text.trim()),
         });
@@ -74,6 +76,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           monthlyOffQuota: _quota,
         );
         if (_email.text.trim().isNotEmpty) await Db.updateUser(uid, {'contactEmail': _email.text.trim()});
+        if (_role != 'admin' && _ids) await Db.updateUser(uid, {'canViewIds': true});
         if (_role == 'employee' && _driver) {
           await Db.updateUser(uid, {
             'isDriver': true,
@@ -274,6 +277,19 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
                         onPressed: _quota < 15 ? () => setState(() => _quota++) : null,
                         icon: const Icon(Icons.add_circle_outline)),
                   ]),
+                ),
+              ),
+            ],
+            if (_role != 'admin') ...[
+              _section('Permissions'),
+              Card(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.badge_outlined),
+                  title: const Text('Can view & download ID documents'),
+                  subtitle: const Text(
+                      'Sees everyone\'s passport, Emirates ID, visa, SIRA and MCC copies in the app and can share / download them and the ID sheet PDF.'),
+                  value: _ids,
+                  onChanged: (v) => setState(() => _ids = v),
                 ),
               ),
             ],

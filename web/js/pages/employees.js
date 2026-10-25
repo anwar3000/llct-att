@@ -120,6 +120,9 @@ export function editPerson(u) {
         <label class="f"><span>Rate per km (AED) — empty = company rate (${store.settings.tripRatePerKm || 0})</span><input name="tripRate" type="number" min="0" step="0.01" value="${u?.tripRatePerKm ?? ''}"></label>
         <div class="small muted" style="grid-column:1/-1">Driver login opens the driver app: Start / Stop trip, GPS distance, rate and trip history. No attendance check-in.</div>
       </div>
+      <label class="f row full" id="ef-ids" style="gap:8px;align-items:flex-start;background:#fff4e2;border-radius:10px;padding:10px 12px">
+        <input type="checkbox" name="canIds" ${u?.canViewIds ? 'checked' : ''} style="margin-top:3px">
+        <span><b>Can view &amp; download ID documents</b><br><span class="small muted">Sees everyone's passport, Emirates ID, visa, SIRA and MCC copies in the phone app and can share / download them and the ID sheet PDF. Admins always can.</span></span></label>
     </div><div class="error" id="ef-err"></div></form>`,
     foot: `${editing && isAdmin() && u.id !== store.me.id ? `<button class="btn danger" data-delp style="margin-right:auto">${icon('trash', 16)} Delete person</button>` : ''}
       <button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>${editing ? 'Save changes' : 'Create login'}</button>`,
@@ -130,6 +133,7 @@ export function editPerson(u) {
         m.querySelector('#ef-wp').style.display = emp ? '' : 'none';
         m.querySelector('#ef-drv').style.display = drv ? 'grid' : 'none';
         m.querySelector('#ef-off').style.display = drv ? 'none' : '';
+        m.querySelector('#ef-ids').style.display = f.role.value === 'admin' ? 'none' : '';
       };
       f.role.addEventListener('change', syncProfile);
       f.profile.addEventListener('change', syncProfile);
@@ -149,6 +153,7 @@ export function editPerson(u) {
           weeklyOffDays: [...off].sort(), monthlyOffQuota: Number(f.quota.value) || 0,
           isDriver: f.role.value === 'employee' && f.profile.value === 'driver', vehicle: f.vehicle.value.trim(),
           tripRatePerKm: f.tripRate.value === '' ? null : Number(f.tripRate.value),
+          canViewIds: f.role.value !== 'admin' && f.canIds.checked,
         };
         btn.disabled = true;
         try {

@@ -11,6 +11,7 @@ import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/profile_prompt.dart';
 import '../../widgets/trip_card.dart';
+import '../admin/id_documents_screen.dart';
 import '../employee/my_documents_screen.dart';
 
 /// The app for a "Driver (taxi)" work profile: no attendance check-in —
@@ -129,6 +130,17 @@ class _DriverShellState extends State<DriverShell> {
               icon: const Icon(Icons.badge_outlined),
               label: const Text('My ID documents'),
             ),
+            if (me.canViewIds) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(c);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => IdDocumentsScreen(me: me)));
+                },
+                icon: const Icon(Icons.folder_shared_outlined),
+                label: const Text('Staff ID documents'),
+              ),
+            ],
             const SizedBox(height: 8),
             const Text('LLCT Attendance v$kAppVersion', style: TextStyle(color: AppColors.muted, fontSize: 12)),
             const SizedBox(height: 10),

@@ -771,6 +771,20 @@ class Db {
   static Future<void> updateMyContact(String uid, {required String phone, required String email}) =>
       users.doc(uid).update({'phone': phone, 'contactEmail': email, 'contactUpdatedAt': FieldValue.serverTimestamp()});
 
+  /// Everyone's ID numbers (management / people allowed to view IDs).
+  static Stream<Map<String, Map<String, dynamic>>> allIdInfo() =>
+      idInfo.snapshots().map((q) => {for (final d in q.docs) d.id: d.data()});
+
+  /// Every official ID copy (not the ones still waiting for approval from the Documents Portal).
+  static Stream<List<IdFileMeta>> allIdFiles() => idFiles.snapshots().map((q) => q.docs
+      .where((d) => d.data()['pending'] != true)
+      .map(IdFileMeta.fromDoc)
+      .toList()
+    ..sort((a, b) => (a.uploadedAt ?? DateTime(2000)).compareTo(b.uploadedAt ?? DateTime(2000))));
+
+  static Stream<List<ExtWorker>> allWorkersStream() => extWorkers.snapshots().map((q) =>
+      q.docs.map(ExtWorker.fromDoc).toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+
   static Stream<Map<String, dynamic>> myIdInfo(String uid) =>
       idInfo.doc(uid).snapshots().map((d) => d.data() ?? {});
 

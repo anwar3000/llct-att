@@ -23,6 +23,8 @@ service cloud.firestore {
     function isManagement() { return isActive() && (role() == 'admin' || role() == 'manager'); }
     // Document clerk: uses the Documents Portal only — can view/download IDs and submit changes for admin approval.
     function isDocs() { return isActive() && role() == 'docs'; }
+    // Admin can let a person view & download everyone's ID documents (and see the staff list) in the app.
+    function canIds() { return isActive() && me().get('canViewIds', false) == true; }
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
     function owns() { return isActive() && resource.data.employeeId == request.auth.uid; }
     function createsOwn() { return isActive() && request.resource.data.employeeId == request.auth.uid; }
@@ -31,7 +33,7 @@ service cloud.firestore {
     // ---------------------------------------------------------------- users
     match /users/{uid} {
       // Staff can see the list of company drivers (to pick one for a ride).
-      allow read: if isSelf(uid) || isManagement() || isDocs() || (isActive() && resource.data.get('isDriver', false) == true);
+      allow read: if isSelf(uid) || isManagement() || isDocs() || canIds() || (isActive() && resource.data.get('isDriver', false) == true);
       allow create, delete: if isAdmin();
       // Admins edit profiles; staff may only update their own live location.
       // Staff may update their own live location, and their own mobile number / email.
@@ -212,7 +214,7 @@ service cloud.firestore {
     // Passport / Emirates ID / SIRA numbers & expiry for staff and external workers.
     // Management sees everything; each employee can view and update their own.
     match /idInfo/{ownerId} {
-      allow read: if isManagement() || isDocs() || (isSelf(ownerId) && isActive());
+      allow read: if isManagement() || isDocs() || canIds() || (isSelf(ownerId) && isActive());
       allow write: if isManagement() || (isSelf(ownerId) && isActive()
                       && request.resource.data.ownerType == 'staff'
                       && request.resource.data.keys().hasOnly(['ownerType', 'name', 'updatedAt', 'nationality',
@@ -229,7 +231,7 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/idFiles/$(fileId)).data.uploadedById == request.auth.uid;
     }
     match /idFiles/{fileId} {
-      allow read: if isManagement() || isDocs() || (isActive() && resource.data.ownerId == request.auth.uid);
+      allow read: if isManagement() || isDocs() || canIds() || (isActive() && resource.data.ownerId == request.auth.uid);
       allow create: if isManagement()
                     || (isActive() && request.resource.data.ownerId == request.auth.uid
                         && request.resource.data.ownerType == 'staff' && request.resource.data.size <= 2097152)
@@ -239,7 +241,7 @@ service cloud.firestore {
       allow delete: if isManagement() || (isActive() && resource.data.ownerId == request.auth.uid)
                     || (isDocs() && resource.data.pending == true && resource.data.uploadedById == request.auth.uid);
       match /chunks/{n} {
-        allow read: if isManagement() || isDocs() || ownsFile(fileId);
+        allow read: if isManagement() || isDocs() || canIds() || ownsFile(fileId);
         allow create: if isManagement() || (isActive()
                         && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.ownerId == request.auth.uid)
                       || (isDocs() && getAfter(/databases/$(database)/documents/idFiles/$(fileId)).data.uploadedById == request.auth.uid

@@ -15,6 +15,7 @@ import '../../widgets/tiles.dart';
 import 'admin_live.dart';
 import 'approvals.dart';
 import 'employee_form.dart';
+import 'id_documents_screen.dart';
 import 'staff_status.dart';
 
 class EmployeeDetailScreen extends StatefulWidget {
@@ -55,6 +56,13 @@ class _EmployeeDetailScreenState extends State<EmployeeDetailScreen> {
             appBar: AppBar(
               title: Text(u.name),
               actions: [
+                IconButton(
+                  tooltip: 'ID documents',
+                  icon: const Icon(Icons.badge_outlined),
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => IdPersonScreen(
+                          owner: IdOwner(id: u.id, type: 'user', name: u.name, org: u.designation, phone: u.phone, code: u.loginId)))),
+                ),
                 if (accounts)
                   IconButton(
                     tooltip: 'Edit profile',
