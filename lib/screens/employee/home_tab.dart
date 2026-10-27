@@ -668,42 +668,46 @@ class _HomeTabState extends State<HomeTab> {
     final done = _reportsToday > 0;
     final color = done ? AppColors.success : AppColors.warning;
     return Card(
+      margin: EdgeInsets.zero,
       color: done ? const Color(0xFFE6F4EC) : const Color(0xFFFFF4E2),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: color.withValues(alpha: 0.5), width: 1.4)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: color.withValues(alpha: 0.5))),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            Icon(done ? Icons.task_alt : Icons.assignment_late_outlined, color: color),
-            const SizedBox(width: 10),
+            Icon(done ? Icons.task_alt : Icons.assignment_late_outlined, color: color, size: 20),
+            const SizedBox(width: 8),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(done ? 'Report done for ${open.siteName}' : 'Service report for ${open.siteName}',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                Text(
-                    done
-                        ? '$_reportsToday made today. You can add another if needed.'
-                        : 'Make the service report or delivery note before you check out.',
-                    style: const TextStyle(fontSize: 12.5)),
-              ]),
+              child: Text(
+                  done ? 'Report done · $_reportsToday today' : 'Service report for ${open.siteName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
             ),
           ]),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(
               child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: done ? AppColors.success : AppColors.primary, minimumSize: const Size(0, 46)),
+                style: FilledButton.styleFrom(
+                    backgroundColor: done ? AppColors.success : AppColors.primary,
+                    minimumSize: const Size(0, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 onPressed: () => _openReport(open, 'service'),
-                icon: const Icon(Icons.build_circle_outlined, size: 20),
+                icon: const Icon(Icons.build_circle_outlined, size: 18),
                 label: const Text('Service report'),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 46)),
+                style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 onPressed: () => _openReport(open, 'delivery'),
-                icon: const Icon(Icons.local_shipping_outlined, size: 20),
+                icon: const Icon(Icons.local_shipping_outlined, size: 18),
                 label: const Text('Delivery note'),
               ),
             ),
@@ -724,10 +728,6 @@ class _HomeTabState extends State<HomeTab> {
         final wide = c.maxWidth >= 700;
         final left = <Widget>[
             _statusCard(open),
-            if (open != null && _canReport) ...[
-              const SizedBox(height: 12),
-              _reportCard(open),
-            ],
             if (_violationsToday > 0) ...[
               const SizedBox(height: 10),
               Card(
@@ -751,6 +751,10 @@ class _HomeTabState extends State<HomeTab> {
             open != null || _myWorkers.isNotEmpty ? _workersCard(open) : _workersHint(),
             const SizedBox(height: 12),
             _quickActions(open),
+            if (open != null && _canReport) ...[
+              const SizedBox(height: 10),
+              _reportCard(open),
+            ],
             if (_isOffToday) ...[
               const SizedBox(height: 12),
               Card(
