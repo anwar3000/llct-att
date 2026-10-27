@@ -1,7 +1,7 @@
 name: attendance_pro
 description: Field staff attendance with GPS check-in/out, site scheduling, site updates, petty cash and a live management dashboard.
 publish_to: 'none'
-version: 1.8.6+31
+version: 1.8.7+32
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -29,6 +29,9 @@ dependencies:
   pdf: ^3.11.1
   share_plus: ^10.1.4
   path_provider: ^2.1.4
+
+  # Open LLCT Invoicing (service reports / delivery notes) from the home screen
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

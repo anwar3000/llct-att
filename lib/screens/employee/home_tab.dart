@@ -8,6 +8,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../services/location_service.dart';
+import '../../services/reports_link.dart';
 import '../../services/tracking_service.dart';
 import '../../services/violation_service.dart';
 import '../../widgets/common.dart';
@@ -36,6 +37,11 @@ class _HomeTabState extends State<HomeTab> {
   List<OffDay> _offDays = [];
   bool _loaded = false;
   bool _busy = false;
+  // Service report / delivery note link (only for people allowed in LLCT Invoicing)
+  bool _canReport = false;
+  int _reportsToday = 0;
+  String? _reportsFor;
+  StreamSubscription? _reportsSub;
   int _workerCount = -1; // -1 = not loaded yet / could not load
   List<WorkerEntry> _sessionWorkers = [];
   List<WorkerEntry> _myWorkers = []; // every external worker I still have on site
@@ -48,6 +54,9 @@ class _HomeTabState extends State<HomeTab> {
   @override
   void initState() {
     super.initState();
+    ReportsLink.allowed(widget.me).then((v) {
+      if (mounted && v != _canReport) setState(() => _canReport = v);
+    });
     _subscribe();
     _dayWatcher = Timer.periodic(const Duration(minutes: 1), (_) {
       final k = dateKey(DateTime.now());
@@ -110,6 +119,7 @@ class _HomeTabState extends State<HomeTab> {
 
   @override
   void dispose() {
+    _reportsSub?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
@@ -635,16 +645,89 @@ class _HomeTabState extends State<HomeTab> {
 
   // ------------------------------------------------------------ UI
 
+  void _watchReports() {
+    final open = widget.open;
+    final key = open == null || !_canReport ? null : open.id;
+    if (key == _reportsFor) return;
+    _reportsFor = key;
+    _reportsSub?.cancel();
+    _reportsSub = null;
+    _reportsToday = 0;
+    if (open == null || !_canReport) return;
+    _reportsSub = ReportsLink.madeToday(widget.me, open).listen((n) {
+      if (mounted) setState(() => _reportsToday = n);
+    });
+  }
+
+  Future<void> _openReport(AttendanceSession open, String kind) async {
+    final ok = await ReportsLink.open(open, kind);
+    if (!ok && mounted) showSnack(context, 'Could not open LLCT Invoicing. Check the internet connection.', error: true);
+  }
+
+  Widget _reportCard(AttendanceSession open) {
+    final done = _reportsToday > 0;
+    final color = done ? AppColors.success : AppColors.warning;
+    return Card(
+      color: done ? const Color(0xFFE6F4EC) : const Color(0xFFFFF4E2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: color.withValues(alpha: 0.5), width: 1.4)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Icon(done ? Icons.task_alt : Icons.assignment_late_outlined, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(done ? 'Report done for ${open.siteName}' : 'Service report for ${open.siteName}',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text(
+                    done
+                        ? '$_reportsToday made today. You can add another if needed.'
+                        : 'Make the service report or delivery note before you check out.',
+                    style: const TextStyle(fontSize: 12.5)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: done ? AppColors.success : AppColors.primary, minimumSize: const Size(0, 46)),
+                onPressed: () => _openReport(open, 'service'),
+                icon: const Icon(Icons.build_circle_outlined, size: 20),
+                label: const Text('Service report'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 46)),
+                onPressed: () => _openReport(open, 'delivery'),
+                icon: const Icon(Icons.local_shipping_outlined, size: 20),
+                label: const Text('Delivery note'),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final open = widget.open;
     _watchSessionWorkers();
+    _watchReports();
     return Stack(children: [
       LayoutBuilder(builder: (context, c) {
         // Unfolded Fold / tablet: check-in side on the left, today's plan and history on the right.
         final wide = c.maxWidth >= 700;
         final left = <Widget>[
             _statusCard(open),
+            if (open != null && _canReport) ...[
+              const SizedBox(height: 12),
+              _reportCard(open),
+            ],
             if (_violationsToday > 0) ...[
               const SizedBox(height: 10),
               Card(
