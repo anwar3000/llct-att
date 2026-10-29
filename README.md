@@ -35,6 +35,7 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Number & expiry read from the document (v1.9.1):** when a copy is uploaded (ID boxes, scanner, company documents) the document number, expiry and issue date are read from it and filled into empty boxes, highlighted to check. *Read numbers from copies* fills them for documents already uploaded (per person, for everyone on the ID documents page, and for all company documents). Android reads on the phone (Google ML Kit, offline); the web uses the PDF's own text or OCR (Tesseract.js). Typed-in values are never overwritten automatically.
 - **One box per document + company documents (v1.8.3):**
   - **Personal IDs (Android app, iPhone app, dashboard):** a separate box for EID FRONT, EID BACK, VISA, PASSPORT FRONT, PASSPORT ADDRESS, SIRA, ABU DHABI MCC, PHOTO and LABOUR CARD, each with Upload / Replace / Delete (replacing removes the old copy). Number and expiry sit under the first box of each document.
   - **Additional documents:** any other document (driving licence, health card…) uploaded with its own heading.

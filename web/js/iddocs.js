@@ -5,6 +5,7 @@ import {
 } from './fb.js';
 import { esc, icon, pill, toast, modal, confirmBox, friendlyError, dateKey, fmtDate, parseKey } from './util.js';
 import { downloadReport, saveBlob, loadLogo } from './report-lib.js';
+import { readDocInfo } from './docread.js';
 
 export const DOC_KINDS = [
   { k: 'passport', label: 'Passport', num: 'passportNo', exp: 'passportExpiry' },
@@ -89,6 +90,52 @@ export function chooseFile(accept = 'image/*,application/pdf') {
 }
 
 /**
+ * Reads the number / expiry of one copy and returns the fields that are still empty in `info`
+ * (never overwrites what's already filled in).
+ */
+export async function infoFromCopy(p, kind, info) {
+  const k = DOC_KINDS.find((d) => d.k === kind);
+  if (!k?.num) return {};
+  const needNum = !String(info[k.num] || '').trim(), needExp = !info[k.exp];
+  if (!needNum && !needExp) return {};
+  const r = await readDocInfo(p, kind);
+  const data = {};
+  if (needNum && r.number) data[k.num] = r.number;
+  if (needExp && r.expiry) data[k.exp] = r.expiry;
+  return data;
+}
+const describeFound = (data) => DOC_KINDS.filter((k) => k.num && (data[k.num] || data[k.exp]))
+  .map((k) => [data[k.num] && `${k.label.replace(' / work permit', '')} no. ${data[k.num]}`, data[k.exp] && `expiry ${fmtDate(parseKey(data[k.exp]))}`].filter(Boolean).join(', ')).join(' · ');
+
+/** For everyone given: fills empty numbers / expiry dates from their uploaded copies. Returns what was filled. */
+export async function fillMissingFromCopies(owners, progress) {
+  const done = [];
+  for (let n = 0; n < owners.length; n++) {
+    const o = owners[n];
+    const files = store.files(o.id);
+    if (!files.length) continue;
+    const { slot, extra } = assignSlots(files);
+    const found = {};
+    for (const k of DOC_KINDS.filter((d) => d.num)) {
+      const info = { ...(store.info(o.id) || {}), ...found };
+      if (String(info[k.num] || '').trim() && info[k.exp]) continue;
+      const cands = [slot[`${k.k}/front`], slot[`${k.k}/back`], ...extra.filter((f) => f.kind === k.k)].filter(Boolean);
+      for (const f of cands) {
+        progress?.(`${o.name} (${n + 1}/${owners.length}): ${k.label}…`);
+        const cur = { ...(store.info(o.id) || {}), ...found };
+        if (String(cur[k.num] || '').trim() && cur[k.exp]) break;
+        try { Object.assign(found, await infoFromCopy({ mime: f.mime, base64: await fileData(f) }, k.k, cur)); } catch { /* skip */ }
+      }
+    }
+    if (Object.keys(found).length) {
+      await saveIdInfo(o.id, o.type, { ...found, name: o.name });
+      done.push({ owner: o, text: describeFound(found), data: found });
+    }
+  }
+  return done;
+}
+
+/**
  * Slot list (EID front, EID back, visa, passport front, passport address page, SIRA, MCC, photo, labour)
  * plus additional documents with headings. Used by the dashboard and the iPhone app.
  * ctx: { files(), info(), fieldAttr, upload({kind, side, title, ...prepared}), remove(f), busy?(msg) }
@@ -140,6 +187,20 @@ export function wireSlotList(el, ctx) {
       await ctx.upload({ ...p, ...meta });
       if (old) { try { await ctx.remove(old); cache.delete(old.id); } catch { /* keep old */ } }
       toast(`${meta.title || ID_SLOTS.find((x) => x.key === `${meta.kind}/${meta.side}`)?.label || 'Document'} uploaded`);
+      // Read the number and expiry from the copy into empty fields.
+      if (ctx.saveInfo && DOC_KINDS.find((k) => k.k === meta.kind)?.num) {
+        ctx.busy?.('Reading number & expiry…');
+        const data = await infoFromCopy(p, meta.kind, ctx.info() || {});
+        if (Object.keys(data).length) {
+          await ctx.saveInfo(data);
+          const fa = ctx.fieldAttr || 'data-field';
+          for (const [f, v] of Object.entries(data)) {
+            const inp = el.querySelector(`[${fa}="${f}"]`);
+            if (inp && !inp.value) { inp.value = v; inp.classList.add('auto-read'); inp.dispatchEvent(new Event('change')); }
+          }
+          toast(`Read from the copy: ${describeFound(data)} — please check`);
+        }
+      }
     } catch (e) { toast(friendlyError(e), true); }
     ctx.busy?.('');
   };
@@ -298,6 +359,7 @@ export function docsPanel(el, owner) {
     fieldAttr: 'data-field',
     upload: (p) => uploadIdFile({ ownerId: owner.id, ownerType: owner.type, ownerName: owner.name, ...p }),
     remove: (f) => deleteIdFile(f),
+    saveInfo: (data) => saveIdInfo(owner.id, owner.type, { ...data, name: owner.name }),
   };
   const draw = () => {
     // keep typed numbers / dates while copies change
@@ -305,7 +367,8 @@ export function docsPanel(el, owner) {
     el.querySelectorAll('[data-field]').forEach((i) => { typed[i.dataset.field] = i.value; });
     el.innerHTML = `
     <div class="row" style="margin-bottom:10px;gap:10px"><button class="btn" data-scan style="background:#D98A1A;border-color:#D98A1A">📷 Scan documents step by step</button>
-      <span class="small muted">or upload each one below · photo or PDF, max 2 MB</span></div>
+      <span class="small muted">or upload each one below · photo or PDF, max 2 MB</span><span class="spacer"></span>
+      <button class="btn ghost sm" data-readall title="Fill empty numbers and expiry dates from the uploaded copies">🔍 Read numbers from copies</button></div>
     ${slotListHtml(ctx)}
     <div class="row" style="margin-top:12px;gap:12px;align-items:flex-end">
       <label class="f" style="margin:0;flex:1;min-width:160px"><span>Nationality</span><input data-field="nationality" value="${esc((store.info(owner.id) || {}).nationality || '')}"></label>
@@ -313,8 +376,21 @@ export function docsPanel(el, owner) {
       <button class="btn" data-save-info>${icon('check', 16)} Save numbers & dates</button>
     </div>
     <div class="small muted" style="margin-top:6px">Copies upload straight away. Numbers and expiry dates are saved with the button.</div>`;
-    el.querySelectorAll('[data-field]').forEach((i) => { if (typed[i.dataset.field] != null) i.value = typed[i.dataset.field]; });
+    el.querySelectorAll('[data-field]').forEach((i) => { if (typed[i.dataset.field]) i.value = typed[i.dataset.field]; });
     wireSlotList(el, ctx);
+    el.querySelector('[data-readall]').onclick = async (ev) => {
+      const b = ev.currentTarget;
+      b.disabled = true; const t0 = b.textContent; b.textContent = 'Reading…';
+      try {
+        const r = await fillMissingFromCopies([owner], (m) => { b.textContent = m.split(': ').pop(); });
+        if (r.length) {
+          toast(`Read: ${r[0].text} — please check`);
+          // show the new values even before the store refreshes
+          el.querySelectorAll('[data-field]').forEach((i) => { const v = r[0].data[i.dataset.field]; if (v && !i.value) { i.value = v; i.classList.add('auto-read'); i.dispatchEvent(new Event('change')); } });
+        } else toast('Nothing new found — numbers already filled, or the copies are not clear enough to read.');
+      } catch (e) { toast(friendlyError(e), true); }
+      b.disabled = false; b.textContent = t0;
+    };
     el.querySelector('[data-scan]').onclick = () => scanWizard({
       owner,
       files: () => store.files(owner.id),
@@ -477,7 +553,7 @@ export async function downloadIdPack(owners, title = 'ID documents', progress) {
 // ------------------------------------------------------------------ ID sheets (3 pages per person)
 // Page 1: Emirates ID front & back · Page 2: visa page + document table, photo, SIRA card · Page 3: passport front & back.
 let pdfjsPromise = null;
-function pdfjs() {
+export function pdfjs() {
   if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
   if (!pdfjsPromise) {
     pdfjsPromise = new Promise((res, rej) => {
@@ -494,7 +570,7 @@ function pdfjs() {
   return pdfjsPromise;
 }
 /** A PDF copy → its first pages as JPEG images (page 1 = front, page 2 = back). */
-async function pdfToImages(b64, max = 2) {
+export async function pdfToImages(b64, max = 2) {
   const lib = await pdfjs();
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   const pdf = await lib.getDocument({ data: bytes }).promise;
@@ -795,7 +871,18 @@ export function scanWizard(ctx, startAt = 0) {
       inp.value = '';
       if (!f) return;
       msg('Checking the photo…');
-      try { prepared = await processScan(f); draw(); } catch (e) { msg(friendlyError(e)); }
+      try { prepared = await processScan(f); draw(); } catch (e) { msg(friendlyError(e)); return; }
+      // Fill the number / expiry boxes from the photo when they're empty.
+      const numI = box.querySelector('#sw-num'), expI = box.querySelector('#sw-exp');
+      if (!numI || (numI.value.trim() && expI.value)) return;
+      const mine = prepared;
+      box.querySelector('#sw-msg').textContent = 'Reading number & expiry…';
+      const r = await readDocInfo(prepared, st.kind);
+      if (mine !== prepared || !box.querySelector('#sw-num')) return;
+      const got = [];
+      if (r.number && !numI.value.trim()) { numI.value = r.number; numI.classList.add('auto-read'); got.push('number'); }
+      if (r.expiry && !expI.value) { expI.value = r.expiry; expI.classList.add('auto-read'); got.push('expiry'); }
+      box.querySelector('#sw-msg').textContent = got.length ? `Read the ${got.join(' and ')} from the photo — please check before saving.` : '';
     };
     box.querySelector('#sw-cam').onchange = (e) => pick(e.target);
     box.querySelector('#sw-file').onchange = (e) => pick(e.target);

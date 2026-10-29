@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -7,6 +8,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../widgets/common.dart';
+import '../../services/doc_reader.dart';
 import '../../widgets/doc_widgets.dart';
 import 'scan_documents_screen.dart';
 
@@ -135,10 +137,71 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
         } catch (_) {}
       }
       if (mounted) showSnack(context, '${sl.label} uploaded');
+      // Read the number / expiry from the copy into empty boxes.
+      if (mounted && sl.idKind.numField != null) {
+        final got = await _fillFrom(p.bytes, p.mime, sl.kind);
+        if (mounted && got.isNotEmpty) showSnack(context, 'Read from the copy: $got — please check');
+      }
     } catch (e) {
       if (mounted) showSnack(context, '$e'.replaceFirst('Exception: ', ''), error: true);
     } finally {
       if (mounted) setState(() => _uploading = null);
+    }
+  }
+
+  /// Reads one copy and fills the number / expiry of [kind] when they're empty (saved straight away).
+  /// Returns a short description of what was filled ('' = nothing).
+  Future<String> _fillFrom(Uint8List bytes, String mime, String kind) async {
+    final k = idKinds.firstWhere((x) => x.key == kind);
+    if (k.numField == null) return '';
+    final needNum = _c(k.numField!).text.trim().isEmpty, needExp = (_dates[k.expField!] ?? '').isEmpty;
+    if (!needNum && !needExp) return '';
+    final r = await DocReader.read(bytes, mime, kind);
+    final data = <String, String>{};
+    if (needNum && r.number.isNotEmpty) data[k.numField!] = r.number;
+    if (needExp && r.expiry.isNotEmpty) data[k.expField!] = r.expiry;
+    if (data.isEmpty || !mounted) return '';
+    setState(() {
+      if (data[k.numField!] != null) _c(k.numField!).text = data[k.numField!]!;
+      if (data[k.expField!] != null) _dates[k.expField!] = data[k.expField!]!;
+      _autoRead.addAll(data.keys);
+    });
+    await Db.saveIdInfo(_owner, data);
+    return [
+      if (data[k.numField!] != null) '${k.label.replaceAll(' / work permit', '')} no. ${data[k.numField!]}',
+      if (data[k.expField!] != null) 'expiry ${fmtDate(_parse(data[k.expField!]!)!)}',
+    ].join(', ');
+  }
+
+  bool _reading = false;
+  final _autoRead = <String>{};
+
+  /// Fills every empty number / expiry from the copies already uploaded.
+  Future<void> _readAll() async {
+    if (_reading) return;
+    setState(() => _reading = true);
+    final found = <String>[];
+    try {
+      final a = assignIdSlots(_files.where((f) => !f.pending).toList());
+      for (final k in idKinds.where((k) => k.numField != null)) {
+        final cands = [a.slot['${k.key}/front'], a.slot['${k.key}/back'], ...a.extra.where((f) => f.kind == k.key)].whereType<IdFileMeta>();
+        for (final f in cands) {
+          if (_c(k.numField!).text.trim().isNotEmpty && (_dates[k.expField!] ?? '').isNotEmpty) break;
+          final got = await _fillFrom(await Db.readIdFile(f), f.mime, k.key);
+          if (got.isNotEmpty) found.add(got);
+        }
+      }
+      if (mounted) {
+        showSnack(
+            context,
+            found.isEmpty
+                ? 'Nothing new found — numbers already filled, or the copies are not clear enough to read.'
+                : 'Read: ${found.join(' · ')} — please check');
+      }
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not read: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _reading = false);
     }
   }
 
@@ -195,7 +258,19 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(title: Text(widget.owner == null ? 'My ID documents' : 'ID documents · ${_owner.name}')),
+        appBar: AppBar(
+          title: Text(widget.owner == null ? 'My ID documents' : 'ID documents · ${_owner.name}'),
+          actions: [
+            _reading
+                ? const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                : IconButton(
+                    tooltip: 'Read numbers & expiry from the copies',
+                    icon: const Icon(Icons.document_scanner_outlined),
+                    onPressed: _files.isEmpty ? null : _readAll),
+          ],
+        ),
         body: !_loaded
             ? const Center(child: CircularProgressIndicator())
             : _error != null
@@ -357,7 +432,13 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                   child: TextField(
                     controller: _c(k.numField!),
                     onChanged: (_) => _dirty = true,
-                    decoration: InputDecoration(labelText: '${k.label.replaceAll(' / work permit', '')} number', isDense: true),
+                    onTap: () => setState(() => _autoRead.remove(k.numField)),
+                    decoration: InputDecoration(
+                        labelText: '${k.label.replaceAll(' / work permit', '')} number',
+                        isDense: true,
+                        filled: _autoRead.contains(k.numField),
+                        fillColor: const Color(0xFFFFF4D6),
+                        helperText: _autoRead.contains(k.numField) ? 'Read from the copy — check it' : null),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -367,7 +448,12 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _pickDate(k.expField!),
                     child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Expiry', isDense: true),
+                      decoration: InputDecoration(
+                          labelText: 'Expiry',
+                          isDense: true,
+                          filled: _autoRead.contains(k.expField),
+                          fillColor: const Color(0xFFFFF4D6),
+                          helperText: _autoRead.contains(k.expField) ? 'Read from copy' : null),
                       child: Text(exp.isEmpty ? 'Select' : fmtDate(_parse(exp)!),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

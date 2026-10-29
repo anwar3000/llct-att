@@ -7,6 +7,7 @@ import {
 import { esc, icon, pill, toast, modal, confirmBox, friendlyError, fmtDate, parseKey, dateKey } from '../util.js';
 import { prepareFile, chooseFile, askHeading, b64ToBlob } from '../iddocs.js';
 import { saveBlob } from '../report-lib.js';
+import { readDocInfo } from '../docread.js';
 
 const cache = new Map();
 const bytes = (f) => {
@@ -45,6 +46,7 @@ async function viewFile(f, title) {
 export function mount(el, _p, { setHeader }) {
   setHeader('Company documents', 'Trade licenses, Chamber of Commerce, WC insurance and more — numbers, expiry dates and copies',
     `<button class="btn" id="cd-add">${icon('plus', 16)} Additional document</button>
+     <button class="btn ghost" id="cd-read" title="Fill empty numbers and expiry dates from the uploaded copies">🔍 Read numbers from copies</button>
      <button class="btn ghost" id="cd-zip">${icon('download', 16)} Download all (ZIP)</button>`);
   let docs = null, files = null, err = null;
 
@@ -68,20 +70,75 @@ export function mount(el, _p, { setHeader }) {
       if (!e.doc) await saveCompanyDoc({ id: e.id, key: e.key, title: e.title, custom: e.custom });
       await uploadCompanyFile({ docId: e.id, name: `${safe(e.title)}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 });
       toast(`${e.title} uploaded`);
-      // Ask for the document number and expiry date right away if they're missing.
-      if (!e.doc?.number || !e.doc?.expiry) edit({ ...e, doc: e.doc || null });
+      // Read the number / dates from the copy and ask to confirm them if any are missing.
+      if (!e.doc?.number || !e.doc?.expiry) {
+        toast('Reading number & expiry from the document…');
+        const found = await readDocInfo(p, e.key || 'company');
+        edit({ ...e, doc: e.doc || null }, found);
+      }
     } catch (x) { toast(friendlyError(x), true); }
   }
 
-  function edit(e) {
-    const d = e.doc || {};
+  /** Reads the latest copy of a document and opens the details with what was found. */
+  async function readFromCopy(e) {
+    const fl = filesOf(e.id);
+    if (!fl.length) { toast('Upload a copy first'); return; }
+    toast('Reading the document…');
+    const f = fl[fl.length - 1];
+    try {
+      const found = await readDocInfo({ mime: f.mime, base64: await bytes(f) }, e.key || 'company');
+      if (!found.number && !found.expiry && !found.issue) { toast('Could not read a number or date from this copy — type them in.', true); }
+      edit(e, found, true);
+    } catch (x) { toast(friendlyError(x), true); }
+  }
+
+  /** Fills empty numbers / dates of every document from its copies. */
+  async function fillAll() {
+    const { std, add } = entries();
+    const todo = [...std, ...add].filter((e) => filesOf(e.id).length && (!e.doc?.number || !e.doc?.expiry));
+    if (!todo.length) { toast('Every document with a copy already has its number and expiry.'); return; }
+    const btn = document.getElementById('cd-read');
+    btn.disabled = true;
+    const filled = [];
+    try {
+      for (let n = 0; n < todo.length; n++) {
+        const e = todo[n];
+        btn.textContent = `Reading ${n + 1}/${todo.length}…`;
+        const d = e.doc || {};
+        const found = { number: '', expiry: '', issue: '' };
+        for (const f of [...filesOf(e.id)].reverse()) {
+          const r = await readDocInfo({ mime: f.mime, base64: await bytes(f) }, e.key || 'company');
+          for (const k of Object.keys(found)) if (!found[k] && r[k]) found[k] = r[k];
+          if (found.number && found.expiry) break;
+        }
+        const upd = { number: d.number || found.number, expiry: d.expiry || found.expiry, issueDate: d.issueDate || found.issue };
+        if (upd.number !== (d.number || '') || upd.expiry !== (d.expiry || '') || upd.issueDate !== (d.issueDate || '')) {
+          await saveCompanyDoc({ id: e.id, key: e.key, title: e.title, notes: d.notes || '', custom: e.custom, ...upd });
+          filled.push(`${e.title}: ${[upd.number !== (d.number || '') && `no. ${upd.number}`, upd.expiry !== (d.expiry || '') && `expiry ${fmtD(upd.expiry)}`].filter(Boolean).join(', ') || 'issue date'}`);
+        }
+      }
+      modal({ title: 'Read from copies', body: filled.length
+        ? `<p style="margin-top:0">Filled in — please check:</p><ul>${filled.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
+        : '<p style="margin:0">Nothing new found — the copies may not be clear enough to read. Type the numbers in with <b>Number & dates</b>.</p>' });
+    } catch (x) { toast(friendlyError(x), true); }
+    btn.disabled = false; btn.innerHTML = '🔍 Read numbers from copies';
+  }
+
+  function edit(e, found = null, preferFound = false) {
+    const d0 = e.doc || {};
+    // Fill empty boxes with what was read from the document (or replace, when asked to read again).
+    const pick = (cur, got) => (preferFound ? got || cur : cur || got) || '';
+    const d = found ? { ...d0, number: pick(d0.number, found.number), expiry: pick(d0.expiry, found.expiry), issueDate: pick(d0.issueDate, found.issue) } : d0;
+    const read = found && ((found.number && d.number === found.number && d.number !== d0.number) || (found.expiry && d.expiry === found.expiry && d.expiry !== d0.expiry) || (found.issue && d.issueDate === found.issue && d.issueDate !== d0.issueDate));
+    const mark = (k) => (found && d[k] && d[k] !== (d0[k] || '') ? ' class="auto-read"' : '');
     modal({
       title: e.title,
       body: `<div class="fields">
         ${e.custom ? `<label class="f full"><span>Heading</span><input name="title" value="${esc(e.title)}"></label>` : ''}
-        <label class="f full"><span>Number (license / policy / certificate no.)</span><input name="number" value="${esc(d.number || '')}"></label>
-        <label class="f"><span>Issue date</span><input type="date" name="issueDate" value="${esc(d.issueDate || '')}"></label>
-        <label class="f"><span>Expiry date</span><input type="date" name="expiry" value="${esc(d.expiry || '')}"></label>
+        ${read ? '<div class="full small" style="background:#fff8e6;border-radius:8px;padding:8px 10px">🔍 Highlighted boxes were read from the document — please check them before saving.</div>' : ''}
+        <label class="f full"><span>Number (license / policy / certificate no.)</span><input name="number"${mark('number')} value="${esc(d.number || '')}"></label>
+        <label class="f"><span>Issue date</span><input type="date" name="issueDate"${mark('issueDate')} value="${esc(d.issueDate || '')}"></label>
+        <label class="f"><span>Expiry date</span><input type="date" name="expiry"${mark('expiry')} value="${esc(d.expiry || '')}"></label>
         <label class="f full"><span>Notes</span><input name="notes" value="${esc(d.notes || '')}"></label></div>`,
       foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Save</button>',
       onMount: (m, close) => {
@@ -151,6 +208,7 @@ export function mount(el, _p, { setHeader }) {
       <div class="slot-act" style="flex-direction:column;align-items:stretch">
         <button class="btn sm" data-up="${esc(e.id)}">${icon('upload', 14)} Upload</button>
         <button class="btn sm ghost" data-ed="${esc(e.id)}">${icon('edit', 14)} Number & dates</button>
+        ${fl.length ? `<button class="btn sm ghost" data-rd="${esc(e.id)}" title="Read the number and dates from the uploaded copy">🔍 Read from copy</button>` : ''}
         ${e.custom ? `<button class="btn sm ghost" data-rm="${esc(e.id)}">${icon('trash', 14)} Delete</button>` : ''}
       </div></div>`;
   };
@@ -171,6 +229,7 @@ export function mount(el, _p, { setHeader }) {
     const find = (id) => all.find((x) => x.id === id);
     el.querySelectorAll('[data-up]').forEach((b) => { b.onclick = () => upload(find(b.dataset.up)); });
     el.querySelectorAll('[data-ed]').forEach((b) => { b.onclick = () => edit(find(b.dataset.ed)); });
+    el.querySelectorAll('[data-rd]').forEach((b) => { b.onclick = () => readFromCopy(find(b.dataset.rd)); });
     el.querySelectorAll('[data-rm]').forEach((b) => {
       b.onclick = async () => {
         const e = find(b.dataset.rm);
@@ -198,6 +257,7 @@ export function mount(el, _p, { setHeader }) {
 
   document.getElementById('cd-add').onclick = addAdditional;
   document.getElementById('cd-zip').onclick = zipAll;
+  document.getElementById('cd-read').onclick = fillAll;
   draw();
   const u1 = watchCompanyDocs((l, e) => { docs = l || []; if (e) err = e; draw(); });
   const u2 = watchCompanyFiles((l, e) => { files = l || []; if (e) err = e; draw(); });

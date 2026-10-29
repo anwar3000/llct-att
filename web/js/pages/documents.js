@@ -1,16 +1,41 @@
 // One place to pick staff and/or external workers and download their IDs for a customer.
 import { store } from '../fb.js';
-import { esc, icon, avatar, pill, fmtDate, parseKey } from '../util.js';
-import { allOwners, docsSummaryHtml, exportMenu, ownerExpiry, expiryState as ownerExpiryState } from '../iddocs.js';
+import { esc, icon, avatar, pill, fmtDate, parseKey, modal, toast, friendlyError } from '../util.js';
+import { allOwners, docsSummaryHtml, exportMenu, ownerExpiry, expiryState as ownerExpiryState, fillMissingFromCopies } from '../iddocs.js';
 
 export function mount(el, _p, { setHeader }) {
   setHeader('ID documents', 'Select people, then download a ZIP, PDF ID pack or Excel list to send to a customer',
-    `<button class="btn" id="d-dl">${icon('download', 16)} Download selected</button>`);
+    `<button class="btn ghost" id="d-read" title="Fill empty ID numbers and expiry dates from the uploaded copies">🔍 Read numbers from copies</button>
+     <button class="btn" id="d-dl">${icon('download', 16)} Download selected</button>`);
   let q = '', filter = 'all', site = '';
   const sel = new Set();
   document.getElementById('d-dl').onclick = () => {
     const owners = allOwners().filter((o) => sel.has(o.id));
     exportMenu(owners, 'ID documents');
+  };
+
+  document.getElementById('d-read').onclick = () => {
+    const picked = allOwners().filter((o) => sel.has(o.id));
+    const owners = (picked.length ? picked : allOwners().filter((o) => o.active))
+      .filter((o) => store.files(o.id).length);
+    const { el: m, close } = modal({
+      title: 'Read numbers & expiry from copies',
+      body: `<p style="margin-top:0">${picked.length ? `${picked.length} selected` : 'Everyone'} with uploaded copies (${owners.length}). Only <b>empty</b> numbers and expiry dates are filled — nothing typed in is changed. Reading photos takes a few seconds each.</p>
+        <div id="rd-msg" class="small muted"></div><div id="rd-out" style="max-height:340px;overflow:auto;margin-top:8px"></div>`,
+      foot: '<button class="btn ghost" data-no>Close</button><button class="btn" data-go>Start</button>',
+      onMount: (mm, cl) => { mm.querySelector('[data-no]').onclick = cl; },
+    });
+    m.querySelector('[data-go]').onclick = async (ev) => {
+      ev.currentTarget.disabled = true;
+      const msg = m.querySelector('#rd-msg');
+      try {
+        const r = await fillMissingFromCopies(owners, (t) => { msg.textContent = t; });
+        msg.textContent = r.length ? `Filled for ${r.length} ${r.length === 1 ? 'person' : 'people'} — please check:` : 'Nothing new found — numbers already filled, or the copies are not clear enough to read.';
+        m.querySelector('#rd-out').innerHTML = r.map((x) => `<a class="list-item" style="color:inherit" href="#/${x.owner.type === 'worker' ? 'workers' : 'employees'}/${x.owner.id}">
+          ${avatar(x.owner.name, 26)}<div class="grow"><b>${esc(x.owner.name)}</b><div class="small">${esc(x.text)}</div></div></a>`).join('');
+        m.querySelectorAll('#rd-out a').forEach((a) => a.addEventListener('click', close));
+      } catch (e) { msg.textContent = friendlyError(e); toast(friendlyError(e), true); }
+    };
   };
 
   const onSite = (o) => {

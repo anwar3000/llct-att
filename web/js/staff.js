@@ -1291,6 +1291,7 @@ function docCtx() {
     fieldAttr: 'data-f',
     upload: (p) => uploadIdFile({ ownerId: S.me.id, ownerType: 'staff', ownerName: S.me.name, ...p }),
     remove: (f) => deleteIdFile(f),
+    saveInfo: (data) => saveIdInfo(S.me.id, 'staff', { ...data, name: S.me.name }),
     busy: (m) => busy(m),
   };
 }

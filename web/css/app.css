@@ -430,3 +430,4 @@ tr.short-day td { background: #fdf1f1; }
 .cd-kv { display: flex; flex-direction: column; }
 .cd-kv span { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--muted); }
 .cd-kv b { font-size: 13.5px; }
+input.auto-read { background: #fff8e6; border-color: #f0c46b; }

@@ -7,6 +7,8 @@ import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
+import '../../services/doc_info.dart';
+import '../../services/doc_reader.dart';
 import '../../services/id_sheet.dart';
 import '../../widgets/common.dart';
 import '../../widgets/doc_widgets.dart';
@@ -86,9 +88,14 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
       await Db.uploadCompanyFile(docId: e.id, name: p.name, mime: p.mime, bytes: p.bytes, by: widget.me.name);
       if (mounted) showSnack(context, '${e.title} uploaded');
       // Ask for the document number and expiry date right away if they're not filled in yet.
+      // Read them from the copy first and show what was found to confirm.
       if (mounted && ((e.doc?.number ?? '').isEmpty || (e.doc?.expiry ?? '').isEmpty)) {
+        showSnack(context, 'Reading number & expiry from the document…');
+        final found = await DocReader.read(p.bytes, p.mime, e.key.isEmpty ? 'company' : e.key);
+        if (!mounted) return;
         setState(() => _busy = null);
-        await _editDetails(_Entry(e.id, e.key, e.title, e.doc ?? CompanyDoc(id: e.id, key: e.key, title: e.title, custom: e.custom), e.custom));
+        await _editDetails(_Entry(e.id, e.key, e.title, e.doc ?? CompanyDoc(id: e.id, key: e.key, title: e.title, custom: e.custom), e.custom),
+            found: found);
       }
     } catch (err) {
       if (mounted) showSnack(context, '$err'.replaceFirst('Exception: ', ''), error: true);
@@ -112,12 +119,82 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
     }
   }
 
-  Future<void> _editDetails(_Entry e) async {
+  /// Reads the latest copy of [e] and opens its details with what was found.
+  Future<void> _readFromCopy(_Entry e) async {
+    final fl = _filesOf(e.id);
+    if (fl.isEmpty) return;
+    setState(() => _busy = e.id);
+    DocInfo found = const DocInfo();
+    try {
+      final f = fl.last;
+      found = await DocReader.read(await DocBytes.get(f.id, () => Db.readCompanyFile(f)), f.mime, e.key.isEmpty ? 'company' : e.key);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _busy = null);
+    if (found.isEmpty) showSnack(context, 'Could not read a number or date from this copy — type them in.', error: true);
+    await _editDetails(e, found: found, preferFound: true);
+  }
+
+  /// Fills every empty number / expiry from the uploaded copies.
+  Future<void> _readAll() async {
+    final todo = [..._standard, ..._additional]
+        .where((e) => _filesOf(e.id).isNotEmpty && ((e.doc?.number ?? '').isEmpty || (e.doc?.expiry ?? '').isEmpty))
+        .toList();
+    if (todo.isEmpty) {
+      showSnack(context, 'Every document with a copy already has its number and expiry.');
+      return;
+    }
+    final filled = <String>[];
+    await runWithProgress(context, (set) async {
+      for (var n = 0; n < todo.length; n++) {
+        final e = todo[n];
+        set('Reading ${e.title} (${n + 1}/${todo.length})…');
+        var num = '', exp = '', iss = '';
+        for (final f in _filesOf(e.id).reversed) {
+          final r = await DocReader.read(await DocBytes.get(f.id, () => Db.readCompanyFile(f)), f.mime, e.key.isEmpty ? 'company' : e.key);
+          if (num.isEmpty) num = r.number;
+          if (exp.isEmpty) exp = r.expiry;
+          if (iss.isEmpty) iss = r.issue;
+          if (num.isNotEmpty && exp.isNotEmpty) break;
+        }
+        final d = e.doc;
+        final newNum = (d?.number ?? '').isEmpty ? num : d!.number;
+        final newExp = (d?.expiry ?? '').isEmpty ? exp : d!.expiry;
+        final newIss = (d?.issueDate ?? '').isEmpty ? iss : d!.issueDate;
+        if (newNum != (d?.number ?? '') || newExp != (d?.expiry ?? '') || newIss != (d?.issueDate ?? '')) {
+          await Db.saveCompanyDoc(
+              id: e.id, key: e.key, title: e.title, number: newNum, issueDate: newIss, expiry: newExp,
+              notes: d?.notes ?? '', custom: e.custom, by: widget.me.name);
+          filled.add('${e.title}: ${[
+            if (newNum != (d?.number ?? '')) 'no. $newNum',
+            if (newExp != (d?.expiry ?? '')) 'expiry ${IdSheet.fmtDay(newExp)}',
+          ].join(', ')}');
+        }
+      }
+    });
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Read from copies'),
+        content: Text(filled.isEmpty
+            ? 'Nothing new found — the copies may not be clear enough to read. Type the numbers in with "Number & dates".'
+            : 'Filled in — please check:\n\n${filled.join('\n')}'),
+        actions: [FilledButton(style: FilledButton.styleFrom(minimumSize: const Size(96, 44)), onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+      ),
+    );
+  }
+
+  Future<void> _editDetails(_Entry e, {DocInfo? found, bool preferFound = false}) async {
     final d = e.doc;
+    String pick(String cur, String got) => (preferFound ? (got.isNotEmpty ? got : cur) : (cur.isNotEmpty ? cur : got));
     final title = TextEditingController(text: e.title);
-    final number = TextEditingController(text: d?.number ?? '');
+    final number = TextEditingController(text: found == null ? d?.number ?? '' : pick(d?.number ?? '', found.number));
     final notes = TextEditingController(text: d?.notes ?? '');
-    var issue = d?.issueDate ?? '', expiry = d?.expiry ?? '';
+    var issue = found == null ? d?.issueDate ?? '' : pick(d?.issueDate ?? '', found.issue);
+    var expiry = found == null ? d?.expiry ?? '' : pick(d?.expiry ?? '', found.expiry);
+    final readSome = found != null &&
+        (number.text != (d?.number ?? '') || issue != (d?.issueDate ?? '') || expiry != (d?.expiry ?? ''));
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -143,6 +220,14 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
             title: Text(e.custom ? 'Document details' : e.title),
             content: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
+                if (readSome)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(10)),
+                    child: const Text('Read from the document — please check before saving.',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  ),
                 if (e.custom) ...[
                   TextField(controller: title, decoration: const InputDecoration(labelText: 'Heading', isDense: true)),
                   const SizedBox(height: 10),
@@ -220,6 +305,8 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
         actions: [
           if (ready && _files!.isNotEmpty)
             IconButton(tooltip: 'Share all files', icon: const Icon(Icons.ios_share), onPressed: _shareAll),
+          if (ready && _canEdit && _files!.isNotEmpty)
+            IconButton(tooltip: 'Read numbers & expiry from copies', icon: const Icon(Icons.document_scanner_outlined), onPressed: _readAll),
         ],
       ),
       body: _error != null
@@ -305,11 +392,14 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
                 onSelected: (v) {
                   if (v == 'upload') _upload(e);
                   if (v == 'edit') _editDetails(e);
+                  if (v == 'read') _readFromCopy(e);
                   if (v == 'delete') _deleteEntry(e);
                 },
                 itemBuilder: (_) => [
                   const PopupMenuItem(value: 'upload', child: ListTile(leading: Icon(Icons.upload), title: Text('Upload file'))),
                   const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Number & dates'))),
+                  if (files.isNotEmpty)
+                    const PopupMenuItem(value: 'read', child: ListTile(leading: Icon(Icons.document_scanner_outlined), title: Text('Read from copy'))),
                   if (e.custom || files.isNotEmpty || d != null)
                     PopupMenuItem(
                         value: 'delete',

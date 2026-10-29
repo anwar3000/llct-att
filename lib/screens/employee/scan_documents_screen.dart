@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
+import '../../services/doc_reader.dart';
 
 /// One step of the guided scan.
 class ScanStep {
@@ -101,6 +102,7 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
       _i = i;
       _bytes = null;
       _warn = [];
+      _readNote = '';
       _loadFields();
     });
   }
@@ -175,8 +177,29 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
       _bytes = bytes;
       _mime = mime;
       _warn = warn;
+      _readNote = '';
+    });
+    // Fill the number / expiry boxes from the photo when they're empty.
+    final st = _step;
+    if (st.numField == null || (_num.text.trim().isNotEmpty && _exp.isNotEmpty)) return;
+    setState(() => _readNote = 'Reading number & expiry…');
+    final r = await DocReader.read(bytes, mime, st.kind);
+    if (!mounted || !identical(_bytes, bytes)) return;
+    final got = <String>[];
+    setState(() {
+      if (r.number.isNotEmpty && _num.text.trim().isEmpty) {
+        _num.text = r.number;
+        got.add('number');
+      }
+      if (r.expiry.isNotEmpty && _exp.isEmpty) {
+        _exp = r.expiry;
+        got.add('expiry');
+      }
+      _readNote = got.isEmpty ? '' : 'Read the ${got.join(' and ')} from the photo — please check before saving.';
     });
   }
+
+  String _readNote = '';
 
   Future<void> _saveNumbers() async {
     final st = _step;
@@ -330,6 +353,11 @@ class _ScanDocumentsScreenState extends State<ScanDocumentsScreen> {
         ]),
         if (st.numField != null) ...[
           const SizedBox(height: 12),
+          if (_readNote.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(_readNote, style: const TextStyle(fontSize: 12.5, color: AppColors.accentDark, fontWeight: FontWeight.w600)),
+            ),
           TextField(controller: _num, decoration: InputDecoration(labelText: st.numLabel)),
           const SizedBox(height: 8),
           ListTile(
