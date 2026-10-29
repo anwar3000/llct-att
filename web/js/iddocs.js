@@ -425,12 +425,12 @@ export async function downloadIdPack(owners, title = 'ID documents', progress) {
   const clean = (v) => (v == null ? '' : String(v).replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ]/g, ''));
   const logo = await loadLogo();
   const header = (name, sub) => {
-    doc.setFillColor(64, 64, 65); doc.rect(0, 0, W, 54, 'F');
-    doc.setFillColor(252, 176, 64); doc.rect(0, 54, W, 3, 'F');
+    doc.setFillColor(255, 247, 233); doc.rect(0, 0, W, 54, 'F');
+    doc.setFillColor(252, 176, 64); doc.rect(0, 54, W, 2.5, 'F');
     let tx = 28;
-    if (logo) { doc.addImage(logo, 'PNG', 28, 10, 70, 33); tx = 110; }
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text(clean(name), tx, 27);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(252, 176, 64); doc.text(clean(sub), tx, 42);
+    if (logo) { doc.addImage(logo, 'PNG', 28, 10, 70, 33); doc.setDrawColor(238, 214, 170); doc.setLineWidth(0.8); doc.line(108, 12, 108, 42); tx = 120; }
+    doc.setTextColor(43, 43, 44); doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text(clean(name), tx, 27);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(115, 112, 106); doc.text(clean(sub), tx, 42);
     doc.setTextColor(28, 42, 51);
   };
   for (let idx = 0; idx < owners.length; idx++) {
@@ -537,15 +537,26 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
   const header = (o, section) => {
     if (!first) doc.addPage();
     first = false;
-    doc.setFillColor(43, 43, 44); doc.rect(0, 0, W, 58, 'F');
-    doc.setFillColor(252, 176, 64); doc.rect(0, 58, W, 3, 'F');
+    // Light bar in the logo's colours: cream background, orange rule, charcoal text.
+    const BH = 66;
+    doc.setFillColor(255, 247, 233); doc.rect(0, 0, W, BH, 'F');
+    doc.setFillColor(252, 176, 64); doc.rect(0, BH, W, 2.5, 'F');
     let tx = M;
-    if (logo) { doc.addImage(logo, 'PNG', M, 11, 74, 35); tx = M + 88; }
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(clean(o.name), tx, 28);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(252, 176, 64);
-    doc.text(clean([o.type === 'worker' ? 'External worker' : 'Staff', o.org, o.trade, o.code ? `ID ${o.code}` : ''].filter(Boolean).join('  ·  ')), tx, 43);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
-    doc.text(clean(section.toUpperCase()), W - M, 34, { align: 'right' });
+    if (logo) {
+      doc.addImage(logo, 'PNG', M, 14, 80, 38);
+      doc.setDrawColor(238, 214, 170); doc.setLineWidth(0.8); doc.line(M + 94, 16, M + 94, 50);
+      tx = M + 108;
+    }
+    doc.setTextColor(43, 43, 44); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(clean(o.name), tx, 31);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(115, 112, 106);
+    doc.text(clean([o.type === 'worker' ? 'External worker' : 'Staff', o.org, o.trade, o.code ? `ID ${o.code}` : ''].filter(Boolean).join('  |  ')), tx, 45);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(150, 145, 136);
+    doc.text('LEADERS LINE TRADING LLC', W - M, 24, { align: 'right' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(43, 43, 44);
+    const sec = clean(section.toUpperCase());
+    doc.text(sec, W - M, 39, { align: 'right' });
+    const sw = doc.getTextWidth(sec);
+    doc.setFillColor(252, 176, 64); doc.rect(W - M - Math.min(sw, 40), 43.5, Math.min(sw, 40), 2.2, 'F');
     doc.setTextColor(40, 40, 40);
   };
   // A framed slot with a label; the image is fitted inside (or "not uploaded").
@@ -565,14 +576,15 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(165, 165, 165);
       doc.text(clean(missing), x + w / 2, y + h / 2, { align: 'center' });
     }
-    doc.setFillColor(64, 64, 65); doc.roundedRect(x + 8, y + 7, doc.getTextWidth(clean(label)) * 1.05 + 14, 15, 4, 4, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.setFillColor(252, 176, 64); doc.roundedRect(x + 8, y + 7, doc.getTextWidth(clean(label)) * 1.05 + 14, 15, 4, 4, 'F');
+    doc.setTextColor(43, 43, 44);
     doc.text(clean(label), x + 15, y + 17.5);
     doc.setTextColor(40, 40, 40);
   };
   // Front and back (or address page) on one page.
   const twoSides = async (front, back, name, backName = 'back') => {
-    const top = 74, gap = 14, h = (H - 40 - top - gap) / 2;
+    const top = 80, gap = 14, h = (H - 40 - top - gap) / 2;
     await slot(front, M, top, CW, h, `${name} - FRONT`, `${name} front - not uploaded`);
     await slot(back, M, top + h + gap, CW, h, `${name} - ${backName.toUpperCase()}`, `${name} ${backName} - not uploaded`);
   };
@@ -608,12 +620,13 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
 
     // Page 2 — Visa (top) · details, photo, SIRA (bottom)
     header(o, 'Visa & details');
-    const top = 74, half = (H - 40 - top - 14) / 2;
+    const top = 80, half = (H - 40 - top - 14) / 2;
     await slot(visa[0], M, top, CW, half, 'VISA', 'Visa page - not uploaded');
     const y2 = top + half + 14;
     const rightW = 150, leftW = CW - rightW - 14, rx = M + leftW + 14;
     const today = parseKey(dateKey(new Date()));
-    const rows = DOC_KINDS.filter((k) => k.num).map((k) => {
+    // Only documents this person actually has (a number, an expiry date or an uploaded copy).
+    const rows = DOC_KINDS.filter((k) => k.num && (String(i[k.num] || '').trim() || i[k.exp] || files.some((x) => x.f.kind === k.k))).map((k) => {
       const exp = i[k.exp];
       let status = '-';
       if (exp) {
@@ -622,11 +635,13 @@ export async function downloadIdSheets(owners, title = 'ID documents', progress)
       }
       return [k.label.replace(' / work permit', ''), i[k.num] || '-', fmtD(exp), status];
     });
+    if (!rows.length) rows.push(['No document numbers recorded', '-', '-', '-']);
     doc.autoTable({
       startY: y2, margin: { left: M, right: W - M - leftW }, tableWidth: leftW,
       head: [['Document', 'Number', 'Expiry', 'Status']], body: rows.map((r) => r.map(clean)), theme: 'grid',
       styles: { fontSize: 9, cellPadding: 5, lineColor: [225, 222, 216], textColor: [40, 40, 40] },
       headStyles: { fillColor: [64, 64, 65], textColor: [255, 255, 255], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [252, 249, 243] },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 92 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 74 }, 3: { cellWidth: 72 } },
       didParseCell: (d) => {
         if (d.section !== 'body' || d.column.index !== 3) return;

@@ -69,6 +69,11 @@ class IdSheet {
   static const _line = PdfColor.fromInt(0xFFE1DED8);
   static const _soft = PdfColor.fromInt(0xFFFAF9F7);
   static const _grey = PdfColor.fromInt(0xFFA5A5A5);
+  static const _cream = PdfColor.fromInt(0xFFFFF7E9);
+  static const _creamLine = PdfColor.fromInt(0xFFEED6AA);
+  static const _rowAlt = PdfColor.fromInt(0xFFFCF9F3);
+  static const _mutedText = PdfColor.fromInt(0xFF73706A);
+  static const _faintText = PdfColor.fromInt(0xFF969188);
 
   /// Builds one PDF for one or more people.
   static Future<Uint8List> build(List<IdPerson> people, {void Function(String)? progress}) async {
@@ -78,25 +83,37 @@ class IdSheet {
       logo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List());
     } catch (_) {}
 
+    // Light bar in the logo's colours: cream background, orange rule, charcoal text.
     pw.Widget header(IdPerson p, String section) => pw.Column(children: [
           pw.Container(
-            height: 58,
-            color: _dark,
+            height: 66,
+            color: _cream,
             padding: const pw.EdgeInsets.symmetric(horizontal: 30),
             child: pw.Row(children: [
-              if (logo != null) ...[pw.Image(logo, width: 74, height: 35), pw.SizedBox(width: 14)],
+              if (logo != null) ...[
+                pw.Image(logo, width: 80, height: 38),
+                pw.SizedBox(width: 14),
+                pw.Container(width: 0.8, height: 34, color: _creamLine),
+                pw.SizedBox(width: 14),
+              ],
               pw.Expanded(
                 child: pw.Column(mainAxisAlignment: pw.MainAxisAlignment.center, crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                  pw.Text(_clean(p.owner.name), style: pw.TextStyle(color: PdfColors.white, fontSize: 15, fontWeight: pw.FontWeight.bold), maxLines: 1),
+                  pw.Text(_clean(p.owner.name), style: pw.TextStyle(color: _dark, fontSize: 15, fontWeight: pw.FontWeight.bold), maxLines: 1),
                   pw.SizedBox(height: 3),
-                  pw.Text(_clean(p.subtitle), style: const pw.TextStyle(color: _orange, fontSize: 9), maxLines: 1),
+                  pw.Text(_clean(p.subtitle), style: const pw.TextStyle(color: _mutedText, fontSize: 9), maxLines: 1),
                 ]),
               ),
-              pw.Text(section.toUpperCase(), style: pw.TextStyle(color: PdfColors.white, fontSize: 11, fontWeight: pw.FontWeight.bold)),
+              pw.Column(mainAxisAlignment: pw.MainAxisAlignment.center, crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+                pw.Text('LEADERS LINE TRADING LLC', style: const pw.TextStyle(color: _faintText, fontSize: 7.5)),
+                pw.SizedBox(height: 4),
+                pw.Text(section.toUpperCase(), style: pw.TextStyle(color: _dark, fontSize: 11.5, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 3),
+                pw.Container(width: 40, height: 2.2, color: _orange),
+              ]),
             ]),
           ),
-          pw.Container(height: 3, color: _orange),
-          pw.SizedBox(height: 13),
+          pw.Container(height: 2.5, color: _orange),
+          pw.SizedBox(height: 14),
         ]);
 
     pw.Widget slot(pw.MemoryImage? img, String label, String missing) => pw.Container(
@@ -109,8 +126,8 @@ class IdSheet {
           child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
             pw.Container(
               padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: pw.BoxDecoration(color: _chip, borderRadius: pw.BorderRadius.circular(4)),
-              child: pw.Text(label, style: pw.TextStyle(color: PdfColors.white, fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              decoration: pw.BoxDecoration(color: _orange, borderRadius: pw.BorderRadius.circular(4)),
+              child: pw.Text(label, style: pw.TextStyle(color: _dark, fontSize: 8, fontWeight: pw.FontWeight.bold)),
             ),
             pw.SizedBox(height: 4),
             pw.Expanded(
@@ -170,7 +187,12 @@ class IdSheet {
       doc.addPage(page(p, 'Emirates ID', twoSides(eidF, eidB, 'Emirates ID', 'back')));
 
       // Page 2 — Visa (top half) · numbers table, SIRA, photo (bottom half)
-      final rows = idKinds.where((k) => k.numField != null).map((k) {
+      // Only documents this person actually has (a number, an expiry date or an uploaded copy).
+      final rows = idKinds
+          .where((k) =>
+              k.numField != null &&
+              ('${i[k.numField] ?? ''}'.trim().isNotEmpty || '${i[k.expField] ?? ''}'.isNotEmpty || p.files.any((f) => f.kind == k.key)))
+          .map((k) {
         final exp = '${i[k.expField] ?? ''}';
         return [k.label.replaceAll(' / work permit', ''), '${i[k.numField] ?? ''}'.isEmpty ? '-' : '${i[k.numField]}', fmtDay(exp), statusText(exp)];
       }).toList();
@@ -193,12 +215,14 @@ class IdSheet {
           pw.TableRow(decoration: const pw.BoxDecoration(color: _chip), children: [
             for (final h in ['Document', 'Number', 'Expiry', 'Status']) cell(h, head: true),
           ]),
-          for (final r in rows)
-            pw.TableRow(children: [
-              cell(r[0], bold: true),
-              cell(r[1]),
-              cell(r[2]),
-              cell(r[3], bold: true, color: stColor(r[3])),
+          if (rows.isEmpty)
+            pw.TableRow(children: [cell('No document numbers recorded'), cell('-'), cell('-'), cell('-')]),
+          for (var ri = 0; ri < rows.length; ri++)
+            pw.TableRow(decoration: ri.isOdd ? const pw.BoxDecoration(color: _rowAlt) : null, children: [
+              cell(rows[ri][0], bold: true),
+              cell(rows[ri][1]),
+              cell(rows[ri][2]),
+              cell(rows[ri][3], bold: true, color: stColor(rows[ri][3])),
             ]),
         ],
       );
