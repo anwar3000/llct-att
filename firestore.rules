@@ -252,16 +252,16 @@ service cloud.firestore {
     }
 
     // ------------------------------------------- company documents
-    // Trade licenses, Chamber of Commerce, WC insurance… Management manages; people allowed to view IDs can view.
+    // Trade licenses, Chamber of Commerce, WC insurance… Management manages; every active staff member can view & download.
     match /companyDocs/{id} {
-      allow read: if isManagement() || canIds();
+      allow read: if isActive();
       allow write: if isManagement();
     }
     match /companyFiles/{fileId} {
-      allow read: if isManagement() || canIds();
+      allow read: if isActive();
       allow write: if isManagement();
       match /chunks/{n} {
-        allow read: if isManagement() || canIds();
+        allow read: if isActive();
         allow write: if isManagement();
       }
     }

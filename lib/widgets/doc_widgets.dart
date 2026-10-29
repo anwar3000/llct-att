@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:printing/printing.dart';
 
 import '../core/theme.dart';
 import '../models/models.dart';
@@ -132,10 +133,23 @@ class DocThumb extends StatelessWidget {
   final BoxFit fit;
   const DocThumb({super.key, required this.id, required this.isImage, required this.load, this.fit = BoxFit.cover});
 
-  @override
-  Widget build(BuildContext context) {
-    if (!isImage) {
-      return Container(
+  static final Map<String, Future<Uint8List?>> _pdfThumbs = {};
+
+  /// First page of a PDF as a small PNG (cached for the session).
+  static Future<Uint8List?> pdfThumb(String id, Future<Uint8List> Function() load) =>
+      _pdfThumbs.putIfAbsent(id, () async {
+        try {
+          final bytes = await DocBytes.get(id, load);
+          await for (final page in Printing.raster(bytes, pages: const [0], dpi: 50)) {
+            return await page.toPng();
+          }
+        } catch (_) {
+          _pdfThumbs.remove(id);
+        }
+        return null;
+      });
+
+  static Widget _pdfIcon() => Container(
         color: const Color(0xFFFCEDED),
         alignment: Alignment.center,
         child: const Column(mainAxisSize: MainAxisSize.min, children: [
@@ -143,14 +157,38 @@ class DocThumb extends StatelessWidget {
           Text('PDF', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w800, fontSize: 11)),
         ]),
       );
+
+  static const _spinner = Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isImage) {
+      // PDF: show its first page, with a small PDF badge.
+      return FutureBuilder<Uint8List?>(
+        future: pdfThumb(id, load),
+        builder: (_, s) {
+          if (s.connectionState != ConnectionState.done) return _spinner;
+          if (s.data == null) return _pdfIcon();
+          return Stack(fit: StackFit.expand, children: [
+            Container(color: Colors.white, child: Image.memory(s.data!, fit: fit, alignment: Alignment.topCenter, gaplessPlayback: true)),
+            Positioned(
+              right: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(4)),
+                child: const Text('PDF', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ]);
+        },
+      );
     }
     return FutureBuilder<Uint8List>(
       future: DocBytes.get(id, load),
       builder: (_, s) {
         if (s.hasError) return const Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted));
-        if (!s.hasData) {
-          return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
-        }
+        if (!s.hasData) return _spinner;
         return Image.memory(s.data!,
             fit: fit,
             gaplessPlayback: true,
@@ -194,6 +232,20 @@ class DocViewer extends StatelessWidget {
           Future<void> Function()? onDelete}) =>
       Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => DocViewer(id: id, title: title, fileName: fileName, mime: mime, load: load, onDelete: onDelete)));
+
+  Future<List<Uint8List>> _pdfPages() async {
+    try {
+      final bytes = await DocBytes.get(id, load);
+      final out = <Uint8List>[];
+      await for (final page in Printing.raster(bytes, dpi: 130)) {
+        out.add(await page.toPng());
+        if (out.length >= 10) break;
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -257,22 +309,41 @@ class DocViewer extends StatelessWidget {
                       ? const Center(child: CircularProgressIndicator())
                       : InteractiveViewer(maxScale: 6, child: Center(child: Image.memory(s.data!, fit: BoxFit.contain))),
             )
-          : Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.picture_as_pdf, size: 70, color: Colors.white70),
-                  const SizedBox(height: 12),
-                  Text(fileName, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(minimumSize: const Size(180, 46)),
-                    onPressed: share,
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open / share PDF'),
+          : FutureBuilder<List<Uint8List>>(
+              // PDF: every page drawn as an image, pinch to zoom.
+              future: _pdfPages(),
+              builder: (_, s) {
+                if (s.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+                final pages = s.data ?? const <Uint8List>[];
+                if (pages.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.picture_as_pdf, size: 70, color: Colors.white70),
+                        const SizedBox(height: 12),
+                        Text(fileName, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(minimumSize: const Size(180, 46)),
+                          onPressed: share,
+                          icon: const Icon(Icons.open_in_new),
+                          label: const Text('Open / share PDF'),
+                        ),
+                      ]),
+                    ),
+                  );
+                }
+                return InteractiveViewer(
+                  maxScale: 6,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(10),
+                    itemCount: pages.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, i) => Container(color: Colors.white, child: Image.memory(pages[i], fit: BoxFit.contain)),
                   ),
-                ]),
-              ),
+                );
+              },
             ),
     );
   }

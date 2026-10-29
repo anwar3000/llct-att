@@ -4,6 +4,7 @@
 import {
   auth, db, onAuthStateChanged, login, logout, getMe, store, mapSession, mapSite, mapPetty, mapUpdate, mapWorker,
   mapWorkerEntry, mapOff, mapIdInfo, mapIdFile, saveIdInfo, uploadIdFile, deleteIdFile, Timestamp, serverTimestamp, mapTrip,
+  COMPANY_DOC_TYPES, watchCompanyDocs, watchCompanyFiles, readCompanyFile, companyDueState,
 } from './fb.js';
 import {
   collection, doc, query, where, onSnapshot, addDoc, setDoc, updateDoc, getDocs, getDoc, deleteDoc, runTransaction, writeBatch,
@@ -12,7 +13,7 @@ import {
   esc, icon, avatar, pill, toast, modal, confirmBox, friendlyError, fmtTime, fmtDate, fmtDay, fmtMins, fmtMoney, fmtMonth,
   dateKey, monthKey, parseKey, b64img, photoViewer, CURRENCY,
 } from './util.js';
-import { scanWizard, slotListHtml, wireSlotList } from './iddocs.js';
+import { scanWizard, slotListHtml, wireSlotList, b64ToBlob, pdfThumb } from './iddocs.js';
 
 window.__appStarted = true;
 const app = document.getElementById('app');
@@ -1296,6 +1297,57 @@ function docCtx() {
   };
 }
 
+// Company documents (trade licenses, insurance…): everyone can view & download.
+function openCompanyDocs() {
+  let docs = null, files = null;
+  const { el } = modal({ title: 'Company documents', wide: true, body: '<div id="co-list" class="small muted">Loading…</div>' });
+  const ext = (f) => (f.mime === 'application/pdf' ? 'pdf' : f.mime === 'image/png' ? 'png' : 'jpg');
+  const draw = () => {
+    if (!docs || !files) return;
+    const order = COMPANY_DOC_TYPES.map((t) => t.key);
+    const list = docs.filter((d) => d.number || d.expiry || files.some((f) => f.docId === d.id))
+      .sort((a, b) => ((order.indexOf(a.id) + 1) || 99) - ((order.indexOf(b.id) + 1) || 99) || a.title.localeCompare(b.title));
+    const box = el.querySelector('#co-list');
+    if (!list.length) { box.innerHTML = '<div class="empty">No company documents yet.</div>'; return; }
+    box.className = '';
+    box.innerHTML = list.map((d) => {
+      const fl = files.filter((f) => f.docId === d.id);
+      const st = companyDueState(d.expiry);
+      return `<div class="st-card pad" style="margin-bottom:8px">
+        <div class="row"><b style="font-size:14px">${esc(d.title.toUpperCase())}</b><span class="spacer"></span>
+          ${st === 'expired' ? pill('Expired', 'red') : st === 'soon' ? pill('Renew soon', 'amber') : st === 'ok' ? pill('Valid', 'green') : ''}</div>
+        <div class="small" style="margin-top:4px">No. <b class="mono">${esc(d.number || '—')}</b> · Expiry <b>${d.expiry ? esc(fmtDate(parseKey(d.expiry))) : '—'}</b></div>
+        <div class="row" style="gap:8px;margin-top:8px">${fl.map((f, i) => `<button class="slot-th" data-co="${f.id}" title="Open / download" style="width:84px;height:60px">${f.mime.startsWith('image/') ? '' : '<b>PDF</b>'}</button>`).join('') || '<span class="small muted">No copy uploaded</span>'}</div>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('[data-co]').forEach(async (b) => {
+      const f = files.find((x) => x.id === b.dataset.co);
+      const d = docs.find((x) => x.id === f.docId);
+      let b64 = null;
+      const load = async () => { if (!b64) b64 = await readCompanyFile(f); return b64; };
+      b.onclick = async () => {
+        try {
+          const data = await load();
+          const url = URL.createObjectURL(b64ToBlob(data, f.mime));
+          const a = document.createElement('a');
+          a.href = url; a.download = `${(d?.title || 'document').replace(/[\\/:*?"<>|]+/g, ' ')}.${ext(f)}`; a.target = '_blank';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) { toast(friendlyError(e), true); }
+      };
+      try {
+        const data = await load();
+        const src = f.mime.startsWith('image/') ? `data:${f.mime};base64,${data}` : await pdfThumb(`co_${f.id}`, data);
+        b.innerHTML = `<img src="${src}" alt="" style="width:100%;height:100%;object-fit:cover;object-position:top">${f.mime.startsWith('image/') ? '' : '<span class="pdf-badge">PDF</span>'}`;
+      } catch { /* keep label */ }
+    });
+  };
+  const offs = [watchCompanyDocs((l) => { docs = l || []; draw(); }), watchCompanyFiles((l) => { files = l || []; draw(); })];
+  const root = document.getElementById('modal-root');
+  const mo = new MutationObserver(() => { if (!root.contains(el)) { offs.forEach((f) => f()); mo.disconnect(); } });
+  mo.observe(root, { childList: true });
+}
+
 function drawMe(main) {
   const i = S.idInfo || {};
   const miss = missingProfile();
@@ -1310,6 +1362,7 @@ function drawMe(main) {
         <button class="st-btn sm" id="me-ct">${S.me.phone && S.me.contactEmail ? 'Edit' : 'Add'}</button></div>
     </div>
     <h3 class="st-h">My ID documents <span class="small muted" style="font-weight:500">· photo or PDF, max 2 MB</span></h3>
+    <button class="st-btn block" id="me-co" style="margin:4px 0 10px">${icon('folder', 16)} Company documents</button>
     <button class="st-big" id="me-scan" style="height:58px;margin:6px 0 12px;background:#D98A1A;color:#fff;font-size:16px">📷 SCAN MY DOCUMENTS</button>
     <div class="small muted" style="margin:-6px 2px 10px">or upload each one below</div>
     ${slotListHtml(docCtx())}
@@ -1321,6 +1374,7 @@ function drawMe(main) {
       <div class="small muted" style="text-align:center;margin-top:8px">LLCT Attendance · web app</div></div>`;
   main.querySelector('#me-ct').onclick = editContact;
   main.querySelector('#me-scan').onclick = openScan;
+  main.querySelector('#me-co').onclick = openCompanyDocs;
   main.querySelector('#me-save').onclick = async (ev) => {
     const data = {};
     main.querySelectorAll('[data-f]').forEach((x) => { data[x.dataset.f] = x.value.trim(); });

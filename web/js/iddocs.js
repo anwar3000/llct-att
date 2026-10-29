@@ -176,8 +176,11 @@ export function wireSlotList(el, ctx) {
   const find = (id) => all().find((f) => f.id === id);
   el.querySelectorAll('.slot-th[data-view]').forEach(async (t) => {
     const f = find(t.dataset.view);
-    if (!f || !isImg(f)) return;
-    try { const b64 = await fileData(f); t.innerHTML = `<img src="${dataUrl(f, b64)}" alt="">`; } catch { /* ignore */ }
+    if (!f) return;
+    try {
+      const b64 = await fileData(f);
+      t.innerHTML = isImg(f) ? `<img src="${dataUrl(f, b64)}" alt="">` : `<img src="${await pdfThumb(f.id, b64)}" alt="" style="object-position:top"><span class="pdf-badge">PDF</span>`;
+    } catch { /* keep the PDF label */ }
   });
   el.querySelectorAll('[data-view]').forEach((t) => { t.onclick = () => { const f = find(t.dataset.view); if (f) viewFile(f); }; });
   const doUpload = async (file, meta, old) => {
@@ -570,6 +573,26 @@ export function pdfjs() {
   return pdfjsPromise;
 }
 /** A PDF copy → its first pages as JPEG images (page 1 = front, page 2 = back). */
+const thumbCache = new Map();
+/** First page of a PDF as a small JPEG data URL (cached by id). */
+export function pdfThumb(id, b64) {
+  if (!thumbCache.has(id)) {
+    thumbCache.set(id, (async () => {
+      const lib = await pdfjs();
+      const pdf = await lib.getDocument({ data: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) }).promise;
+      const page = await pdf.getPage(1);
+      const vp0 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: Math.min(1, 260 / vp0.width) });
+      const c = document.createElement('canvas');
+      c.width = vp.width; c.height = vp.height;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      return c.toDataURL('image/jpeg', 0.8);
+    })().catch((e) => { thumbCache.delete(id); throw e; }));
+  }
+  return thumbCache.get(id);
+}
 export async function pdfToImages(b64, max = 2) {
   const lib = await pdfjs();
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));

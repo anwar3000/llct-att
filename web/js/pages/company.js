@@ -5,7 +5,7 @@ import {
   deleteCompanyFile, deleteCompanyDoc, companyDueState, daysUntil,
 } from '../fb.js';
 import { esc, icon, pill, toast, modal, confirmBox, friendlyError, fmtDate, parseKey, dateKey } from '../util.js';
-import { prepareFile, chooseFile, askHeading, b64ToBlob } from '../iddocs.js';
+import { prepareFile, chooseFile, askHeading, b64ToBlob, pdfThumb } from '../iddocs.js';
 import { saveBlob } from '../report-lib.js';
 import { readDocInfo } from '../docread.js';
 
@@ -241,9 +241,15 @@ export function mount(el, _p, { setHeader }) {
       const f = files.find((x) => x.id === t.dataset.view);
       const e = find(f.docId);
       t.onclick = (ev) => { if (!ev.target.closest('[data-delf]')) viewFile(f, e?.title || f.name); };
-      if (isImg(f)) {
-        try { const b64 = await bytes(f); t.insertAdjacentHTML('afterbegin', `<img src="data:${f.mime};base64,${b64}" alt="">`); } catch { /* ignore */ }
-      }
+      try {
+        const b64 = await bytes(f);
+        if (isImg(f)) t.insertAdjacentHTML('afterbegin', `<img src="data:${f.mime};base64,${b64}" alt="">`);
+        else {
+          const src = await pdfThumb(`co_${f.id}`, b64);
+          t.querySelector('b')?.remove();
+          t.insertAdjacentHTML('afterbegin', `<img src="${src}" alt="" style="object-position:top"><span class="pdf-badge">PDF</span>`);
+        }
+      } catch { /* keep the PDF label */ }
     });
     el.querySelectorAll('[data-delf]').forEach((b) => {
       b.onclick = async () => {

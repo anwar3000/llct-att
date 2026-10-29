@@ -431,3 +431,5 @@ tr.short-day td { background: #fdf1f1; }
 .cd-kv span { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--muted); }
 .cd-kv b { font-size: 13.5px; }
 input.auto-read { background: #fff8e6; border-color: #f0c46b; }
+.slot-th { position: relative; }
+.pdf-badge { position: absolute; right: 3px; bottom: 3px; background: #D64545; color: #fff; font-size: 8.5px; font-weight: 800; padding: 1px 4px; border-radius: 3px; }

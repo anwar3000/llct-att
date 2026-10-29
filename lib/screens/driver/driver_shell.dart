@@ -11,6 +11,7 @@ import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/profile_prompt.dart';
 import '../../widgets/trip_card.dart';
+import '../admin/company_documents_screen.dart';
 import '../admin/id_documents_screen.dart';
 import '../employee/my_documents_screen.dart';
 
@@ -129,6 +130,15 @@ class _DriverShellState extends State<DriverShell> {
               },
               icon: const Icon(Icons.badge_outlined),
               label: const Text('My ID documents'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(c);
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => CompanyDocumentsScreen(me: me)));
+              },
+              icon: const Icon(Icons.business_center_outlined),
+              label: const Text('Company documents'),
             ),
             if (me.canViewIds) ...[
               const SizedBox(height: 8),
