@@ -71,14 +71,24 @@ h3 { font-size: 14px; font-weight: 700; }
 .brand .mark { width: 38px; height: 38px; border-radius: 10px; display: block; }
 .brand b { font-size: 15px; }
 .brand span { display: block; font-size: 11.5px; color: var(--accent); }
+.sidebar { background: linear-gradient(180deg, #2E2E2F 0%, #262627 55%, #222223 100%); border-right: 1px solid rgba(255,255,255,.04); }
 .nav a {
-  display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 10px;
-  color: #d9d9da; font-weight: 500; margin-bottom: 2px;
+  position: relative; display: flex; align-items: center; gap: 11px; padding: 6px 10px 6px 8px; border-radius: 11px;
+  color: #cfcfd1; font-weight: 500; font-size: 13.5px; margin-bottom: 2px; transition: background .15s, color .15s;
 }
-.nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
-.nav a.active { background: rgba(252,176,64,.16); color: var(--accent); font-weight: 600; }
+.nav a .ni {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+  background: rgba(255,255,255,.055); color: #b9b9bc; transition: background .15s, color .15s, box-shadow .15s;
+}
+.nav a .nl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav a:hover { background: rgba(255,255,255,.05); color: #fff; }
+.nav a:hover .ni { background: rgba(252,176,64,.14); color: var(--accent); }
+.nav a.active { background: linear-gradient(90deg, rgba(252,176,64,.17), rgba(252,176,64,.05)); color: #fff; font-weight: 600; }
+.nav a.active::before { content: ''; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.nav a.active .ni { background: linear-gradient(135deg, #FCB040, #E8952B); color: #2B2B2C; box-shadow: 0 3px 10px rgba(252,176,64,.28); }
 .nav a .badge { margin-left: auto; }
-.nav .sep { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8f8f91; padding: 14px 12px 6px; }
+.nav .sep { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: #7f7f82; padding: 16px 10px 7px; }
+.nav .sep::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,.07); }
 .sidebar .me { margin-top: auto; padding: 12px; border-top: 1px solid rgba(255,255,255,.1); display: flex; align-items: center; gap: 10px; }
 .sidebar .me .who { flex: 1; min-width: 0; }
 .sidebar .me .who b { display: block; color: #fff; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

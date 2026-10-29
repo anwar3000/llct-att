@@ -22,28 +22,52 @@ import * as company from './pages/company.js';
 const app = document.getElementById('app');
 window.__appStarted = true;
 
+// Sidebar icons: one outline set, drawn at 24×24 with rounded strokes.
+const NAV_ICONS = {
+  dashboard: '<rect x="3" y="3" width="7.5" height="9" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="1.8"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="1.8"/><rect x="3" y="15" width="7.5" height="6" rx="1.8"/>',
+  working: '<circle cx="9" cy="8" r="3.6"/><path d="M2.6 20.2c.8-3.6 3.3-5.6 6.4-5.6s5.6 2 6.4 5.6"/><path d="m15.6 10.6 2.1 2.1 4.1-4.2"/>',
+  map: '<path d="M9 4 3.5 6.2v13.6L9 17.6l6 2.4 5.5-2.2V4.2L15 6.4z"/><path d="M9 4v13.6M15 6.4V20"/>',
+  projects: '<rect x="3" y="7" width="18" height="13.5" rx="2.2"/><path d="M8.5 7V5.6A1.6 1.6 0 0 1 10.1 4h3.8a1.6 1.6 0 0 1 1.6 1.6V7"/><path d="M3 12.8h18"/><path d="M10.5 12.8v1.6h3v-1.6"/>',
+  sites: '<path d="M3.5 21V8.6l6-4.1V21"/><path d="M9.5 21V10.5h11V21"/><path d="M2 21h20"/><path d="M13.2 14h3.6M13.2 17.5h3.6M6 11.5h.9M6 15h.9"/>',
+  schedule: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.2"/><path d="M3 9.5h18M8 2.8v3.6M16 2.8v3.6"/><path d="M7.5 13.5h2M11 13.5h2M14.5 13.5h2M7.5 17h2M11 17h2"/>',
+  updates: '<path d="M4.2 7.6h2.9l1.5-2.2a1.4 1.4 0 0 1 1.2-.6h4.4a1.4 1.4 0 0 1 1.2.6l1.5 2.2h2.9A1.2 1.2 0 0 1 21 8.8v10a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 18.8v-10a1.2 1.2 0 0 1 1.2-1.2z"/><circle cx="12" cy="13.4" r="3.6"/>',
+  trips: '<path d="M3.6 16.6v-3.9a2 2 0 0 1 .5-1.3L6 9.2l1.4-3.3A1.5 1.5 0 0 1 8.8 5h6.4a1.5 1.5 0 0 1 1.4.9L18 9.2l1.9 2.2a2 2 0 0 1 .5 1.3v3.9a1 1 0 0 1-1 1H4.6a1 1 0 0 1-1-1z"/><path d="M6 9.2h12M6 17.6v2M18 17.6v2"/><circle cx="7.6" cy="13.4" r="1.1"/><circle cx="16.4" cy="13.4" r="1.1"/>',
+  employees: '<circle cx="9" cy="8" r="3.6"/><path d="M2.6 20.2c.8-3.6 3.3-5.6 6.4-5.6s5.6 2 6.4 5.6"/><path d="M15.8 4.6a3.6 3.6 0 0 1 0 6.9M18.3 14.9c1.7.9 2.7 2.6 3.1 5.3"/>',
+  workers: '<path d="M3 17.2h18"/><path d="M5.2 17.2v-3.4a6.8 6.8 0 0 1 13.6 0v3.4"/><path d="M10 7.3v3.4M14 7.3v3.4"/><path d="M4 17.2v1.6A1.2 1.2 0 0 0 5.2 20h13.6a1.2 1.2 0 0 0 1.2-1.2v-1.6"/>',
+  attendance: '<circle cx="12" cy="12.5" r="8.5"/><path d="M12 7.8v4.7l3.1 1.9"/><path d="M9.5 2.5h5"/>',
+  idcard: '<rect x="2.5" y="4.8" width="19" height="14.4" rx="2.2"/><circle cx="8.5" cy="10.8" r="2.3"/><path d="M5.3 16c.5-1.7 1.7-2.7 3.2-2.7s2.7 1 3.2 2.7"/><path d="M14.5 9.8h4.2M14.5 13.2h3"/>',
+  company: '<path d="M14 2.8H7.2A2.2 2.2 0 0 0 5 5v14a2.2 2.2 0 0 0 2.2 2.2h9.6A2.2 2.2 0 0 0 19 19V7.8z"/><path d="M14 2.8v5h5"/><path d="M8.8 12.5h6.4M8.8 16h4.2"/>',
+  requests: '<path d="M3 13.2h4.8l1.6 2.8h5.2l1.6-2.8H21"/><path d="M5.6 5h12.8L21 13.2v5.4a2.2 2.2 0 0 1-2.2 2.2H5.2A2.2 2.2 0 0 1 3 18.6v-5.4z"/>',
+  petty: '<path d="M18.5 7.2V5.6A1.6 1.6 0 0 0 16.9 4H5.4a2.2 2.2 0 0 0 0 4.4h14.4a1.2 1.2 0 0 1 1.2 1.2v3.2"/><path d="M3.2 6.2v12.2a2.2 2.2 0 0 0 2.2 2.2h14.4a1.2 1.2 0 0 0 1.2-1.2v-3.2"/><path d="M21 12h-3.8a2 2 0 0 0 0 4H21z"/>',
+  accounts: '<path d="M4.5 4.6A1.6 1.6 0 0 1 6.1 3H19.5v15.2H6.1a1.6 1.6 0 0 0-1.6 1.6z"/><path d="M4.5 19.8A1.6 1.6 0 0 0 6.1 21.4h13.4v-3.2"/><path d="M8.5 7.2h7M8.5 10.6h7M8.5 14h4"/>',
+  reports: '<path d="M3 20.5h18"/><rect x="4.8" y="11" width="3.6" height="6.8" rx="1"/><rect x="10.2" y="5.5" width="3.6" height="12.3" rx="1"/><rect x="15.6" y="13.6" width="3.6" height="4.2" rx="1"/>',
+  backup: '<ellipse cx="12" cy="5.6" rx="7.8" ry="2.8"/><path d="M4.2 5.6v6.2c0 1.6 3.5 2.8 7.8 2.8s7.8-1.2 7.8-2.8V5.6"/><path d="M4.2 11.8V18c0 1.6 3.5 2.8 7.8 2.8s7.8-1.2 7.8-2.8v-6.2"/>',
+};
+const navIcon = (k) => `<span class="ni"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ''}</svg></span>`;
+
 const NAV = [
   { path: '', label: 'Dashboard', icon: 'dashboard', page: dashboard },
-  { path: 'working', label: 'Working now', icon: 'people', page: working, badge: () => store.open.length + store.extOnSite.length, badgeColor: 'green' },
+  { path: 'working', label: 'Working now', icon: 'working', page: working, badge: () => store.open.length + store.extOnSite.length, badgeColor: 'green' },
   { path: 'map', label: 'Live map', icon: 'map', page: livemap },
   { sep: 'Work' },
-  { path: 'projects', label: 'Projects', icon: 'project', page: projects },
-  { path: 'sites', label: 'Sites', icon: 'site', page: sites },
-  { path: 'schedule', label: 'Schedule', icon: 'calendar', page: schedule },
+  { path: 'projects', label: 'Projects', icon: 'projects', page: projects },
+  { path: 'sites', label: 'Sites', icon: 'sites', page: sites },
+  { path: 'schedule', label: 'Schedule', icon: 'schedule', page: schedule },
   { path: 'updates', label: 'Site updates', icon: 'updates', page: updates },
-  { path: 'trips', label: 'Trips & rides', icon: 'car', page: trips, badge: () => store.tripsActive.length, badgeColor: 'green' },
+  { path: 'trips', label: 'Trips & rides', icon: 'trips', page: trips, badge: () => store.tripsActive.length, badgeColor: 'green' },
   { sep: 'People' },
-  { path: 'employees', label: 'Employees', icon: 'people', page: employees },
-  { path: 'workers', label: 'External workers', icon: 'worker', page: workers },
-  { path: 'attendance', label: 'Attendance', icon: 'clock', page: attendance },
+  { path: 'employees', label: 'Employees', icon: 'employees', page: employees },
+  { path: 'workers', label: 'External workers', icon: 'workers', page: workers },
+  { path: 'attendance', label: 'Attendance', icon: 'attendance', page: attendance },
   { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
-  { path: 'company', label: 'Company documents', icon: 'folder', page: company },
-  { path: 'requests', label: 'Change requests', icon: 'pending', page: requests, badge: () => store.requests.length },
-  { path: 'petty', label: 'Petty cash', icon: 'wallet', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
-  { path: 'accounts', label: 'Accounts', icon: 'bank', page: accounts, adminOnly: true },
+  { path: 'company', label: 'Company documents', icon: 'company', page: company },
+  { path: 'requests', label: 'Change requests', icon: 'requests', page: requests, badge: () => store.requests.length },
+  { sep: 'Finance', adminOnly: true },
+  { path: 'petty', label: 'Petty cash', icon: 'petty', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
+  { path: 'accounts', label: 'Accounts', icon: 'accounts', page: accounts, adminOnly: true },
   { sep: 'Output' },
-  { path: 'reports', label: 'Reports', icon: 'report', page: reports },
-  { path: 'backup', label: 'Backup & storage', icon: 'download', page: backup, adminOnly: true },
+  { path: 'reports', label: 'Reports', icon: 'reports', page: reports },
+  { path: 'backup', label: 'Backup & storage', icon: 'backup', page: backup, adminOnly: true },
 ];
 
 let cleanup = null;
@@ -174,7 +198,7 @@ function renderNav() {
   nav.innerHTML = NAV.filter((n) => !n.adminOnly || isAdmin()).map((n) => {
     if (n.sep) return `<div class="sep">${n.sep}</div>`;
     const b = n.badge ? n.badge() : 0;
-    return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}">${icon(n.icon)}<span>${n.label}</span>${b ? `<span class="badge${n.badgeColor ? ` ${n.badgeColor}` : ''}">${b}</span>` : ''}</a>`;
+    return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}" title="${n.label}">${navIcon(n.icon)}<span class="nl">${n.label}</span>${b ? `<span class="badge${n.badgeColor ? ` ${n.badgeColor}` : ''}">${b}</span>` : ''}</a>`;
   }).join('');
 }
 

@@ -10,14 +10,13 @@ import '../../services/photo_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/trip_card.dart' show kDialogButton;
 import 'admin_live.dart';
-import 'petty_admin_tab.dart';
 
 const _green = Color(0xFF2E9E6A);
 const _red = Color(0xFFD64545);
 double _r2(double v) => (v * 100).round() / 100;
 String _money(double v) => '${v < 0 ? '−' : ''}${fmtMoney(_r2(v.abs()))}';
 
-/// Admin "Accounts" tab: company income & expenses, and petty cash.
+/// Admin "Accounts" tab: company income & expenses (petty cash has its own tab).
 class AccountsTab extends StatefulWidget {
   final AppUser me;
   final AdminLive live;
@@ -27,29 +26,8 @@ class AccountsTab extends StatefulWidget {
 }
 
 class _AccountsTabState extends State<AccountsTab> {
-  String _part = 'acct';
   @override
-  Widget build(BuildContext context) {
-    return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
-        child: SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(value: 'acct', label: Text('Accounts'), icon: Icon(Icons.account_balance_outlined)),
-            ButtonSegment(value: 'petty', label: Text('Petty cash'), icon: Icon(Icons.account_balance_wallet_outlined)),
-          ],
-          selected: {_part},
-          onSelectionChanged: (v) => setState(() => _part = v.first),
-        ),
-      ),
-      Expanded(
-        child: IndexedStack(index: _part == 'acct' ? 0 : 1, children: [
-          _AccountsView(me: widget.me, live: widget.live),
-          PettyAdminTab(me: widget.me, live: widget.live),
-        ]),
-      ),
-    ]);
-  }
+  Widget build(BuildContext context) => _AccountsView(me: widget.me, live: widget.live);
 }
 
 class _AccountsView extends StatefulWidget {
