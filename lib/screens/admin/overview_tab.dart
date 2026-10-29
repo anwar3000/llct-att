@@ -9,6 +9,7 @@ import '../../widgets/site_workforce.dart' show kStaffColor, kExtColor;
 import '../../widgets/tiles.dart';
 import 'admin_live.dart';
 import 'approvals.dart';
+import 'company_documents_screen.dart';
 import 'employee_detail_screen.dart';
 import 'live_map_tab.dart';
 import 'staff_status.dart';
@@ -25,6 +26,7 @@ class OverviewTab extends StatefulWidget {
 
 class _OverviewTabState extends State<OverviewTab> {
   late final Stream<List<SiteUpdate>> _updates = Db.recentUpdates(limit: 6);
+  late final Stream<List<CompanyDoc>> _companyDocs = Db.companyDocsStream();
 
   void _openEmployee(AppUser u) {
     Navigator.of(context).push(MaterialPageRoute(
@@ -142,6 +144,60 @@ class _OverviewTabState extends State<OverviewTab> {
     ];
   }
 
+  /// Company documents expired or expiring within 15 days.
+  Widget _companyReminder() => StreamBuilder<List<CompanyDoc>>(
+        stream: _companyDocs,
+        builder: (context, snap) {
+          final due = companyDocsDue(snap.data ?? const []);
+          if (due.isEmpty) return const SizedBox.shrink();
+          return Card(
+            color: const Color(0xFFFFF1E0),
+            margin: const EdgeInsets.only(bottom: 10),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16), side: BorderSide(color: AppColors.warning.withValues(alpha: 0.5))),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => CompanyDocumentsScreen(me: widget.me))),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.notifications_active_outlined, color: AppColors.warning),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Company documents to renew (${due.length})',
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+                    ),
+                    const Icon(Icons.chevron_right, color: AppColors.muted),
+                  ]),
+                  const SizedBox(height: 6),
+                  for (final d in due.take(6))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Row(children: [
+                        Expanded(
+                          child: Text('${d.title}${d.number.isEmpty ? '' : ' · ${d.number}'}',
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                        ),
+                        Builder(builder: (_) {
+                          final n = daysUntilKey(d.expiry)!;
+                          return Text(
+                              n < 0 ? 'Expired ${-n} d ago' : (n == 0 ? 'Expires today' : 'in $n day${n == 1 ? '' : 's'}'),
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: n < 0 ? AppColors.danger : AppColors.warning));
+                        }),
+                      ]),
+                    ),
+                ]),
+              ),
+            ),
+          );
+        },
+      );
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -195,6 +251,7 @@ class _OverviewTabState extends State<OverviewTab> {
                     ),
                   ),
                 ),
+              _companyReminder(),
               StatGrid(children: [
                 StatTile(
                   label: 'On duty now',

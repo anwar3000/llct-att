@@ -85,6 +85,11 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
       }
       await Db.uploadCompanyFile(docId: e.id, name: p.name, mime: p.mime, bytes: p.bytes, by: widget.me.name);
       if (mounted) showSnack(context, '${e.title} uploaded');
+      // Ask for the document number and expiry date right away if they're not filled in yet.
+      if (mounted && ((e.doc?.number ?? '').isEmpty || (e.doc?.expiry ?? '').isEmpty)) {
+        setState(() => _busy = null);
+        await _editDetails(_Entry(e.id, e.key, e.title, e.doc ?? CompanyDoc(id: e.id, key: e.key, title: e.title, custom: e.custom), e.custom));
+      }
     } catch (err) {
       if (mounted) showSnack(context, '$err'.replaceFirst('Exception: ', ''), error: true);
     } finally {
@@ -255,7 +260,7 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
 
   List<Widget> _expiringBanner() {
     final bad = [..._standard, ..._additional]
-        .where((e) => (IdSheet.daysLeft(e.doc?.expiry ?? '') ?? 999) <= 30)
+        .where((e) => (IdSheet.daysLeft(e.doc?.expiry ?? '') ?? 999) <= kCompanyRenewDays)
         .toList();
     if (bad.isEmpty) return const [];
     return [
@@ -279,7 +284,7 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
     final d = IdSheet.daysLeft(exp);
     if (d == null) return const SizedBox.shrink();
     if (d < 0) return const Pill('Expired', color: AppColors.danger, icon: Icons.error_outline);
-    if (d <= 30) return Pill('Expires in $d d', color: AppColors.warning, icon: Icons.schedule);
+    if (d <= kCompanyRenewDays) return Pill(d == 0 ? 'Expires today' : 'Expires in $d d', color: AppColors.warning, icon: Icons.schedule);
     return const Pill('Valid', color: AppColors.success, icon: Icons.check_circle);
   }
 
@@ -287,11 +292,6 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
     final files = _filesOf(e.id);
     final d = e.doc;
     final busy = _busy == e.id;
-    final details = [
-      if ((d?.number ?? '').isNotEmpty) 'No. ${d!.number}',
-      if ((d?.issueDate ?? '').isNotEmpty) 'Issued ${IdSheet.fmtDay(d!.issueDate)}',
-      if ((d?.expiry ?? '').isNotEmpty) 'Expires ${IdSheet.fmtDay(d!.expiry)}',
-    ].join('  ·  ');
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -321,10 +321,36 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
             else
               const SizedBox(height: 40),
           ]),
-          if (details.isNotEmpty)
+          // Document number & expiry, always visible (tap to edit).
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: _canEdit ? () => _editDetails(e) : null,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 6, top: 2),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('DOC NO.', style: TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700)),
+                    Text((d?.number ?? '').isEmpty ? '—' : d!.number,
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ]),
+                ),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('EXPIRY', style: TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700)),
+                    Text((d?.expiry ?? '').isEmpty ? '—' : IdSheet.fmtDay(d!.expiry),
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+                if (_canEdit && ((d?.number ?? '').isEmpty || (d?.expiry ?? '').isEmpty))
+                  const Text('Add', style: TextStyle(color: AppColors.accentDark, fontWeight: FontWeight.w700, fontSize: 12.5)),
+              ]),
+            ),
+          ),
+          if ((d?.issueDate ?? '').isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: Text(details, style: const TextStyle(fontSize: 12.5, color: AppColors.ink)),
+              child: Text('Issued ${IdSheet.fmtDay(d!.issueDate)}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
             ),
           if ((d?.notes ?? '').isNotEmpty)
             Padding(

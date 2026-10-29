@@ -1015,6 +1015,19 @@ export const COMPANY_DOC_TYPES = [
   { key: 'medical', label: 'Staff medical insurance' },
   { key: 'moa', label: 'Memorandum of association (MOA)' },
 ];
+/** Company documents are flagged this many days before they expire. */
+export const COMPANY_RENEW_DAYS = 15;
+export function daysUntil(v) {
+  if (!v) return null;
+  const d = parseKey(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.round((d - parseKey(dateKey(new Date()))) / 86400000);
+}
+export function companyDueState(v) {
+  const n = daysUntil(v);
+  if (n == null) return '';
+  return n < 0 ? 'expired' : n <= COMPANY_RENEW_DAYS ? 'soon' : 'ok';
+}
 export function mapCompanyDoc(d) {
   const m = d.data() || {};
   return { id: d.id, key: m.key || '', title: m.title || 'Document', number: m.number || '', issueDate: m.issueDate || '',

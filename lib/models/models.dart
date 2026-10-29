@@ -1300,3 +1300,24 @@ class IdOwner {
   factory IdOwner.fromUser(AppUser u) =>
       IdOwner(id: u.id, type: 'staff', name: u.name, org: u.designation, phone: u.phone, code: u.loginId);
 }
+
+
+/// Company documents are flagged this many days before they expire.
+const kCompanyRenewDays = 15;
+
+/// Days until a 'yyyy-MM-dd' date (negative = past), or null.
+int? daysUntilKey(String v) {
+  final p = v.split('-');
+  if (p.length != 3) return null;
+  final y = int.tryParse(p[0]), m = int.tryParse(p[1]), d = int.tryParse(p[2]);
+  if (y == null || m == null || d == null) return null;
+  final n = DateTime.now();
+  return DateTime(y, m, d).difference(DateTime(n.year, n.month, n.day)).inDays;
+}
+
+/// Company documents that are expired or expire within [kCompanyRenewDays] days, soonest first.
+List<CompanyDoc> companyDocsDue(List<CompanyDoc> docs) {
+  final l = docs.where((d) => (daysUntilKey(d.expiry) ?? 9999) <= kCompanyRenewDays).toList()
+    ..sort((a, b) => a.expiry.compareTo(b.expiry));
+  return l;
+}

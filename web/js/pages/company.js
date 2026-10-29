@@ -2,10 +2,10 @@
 // plus additional documents with their own heading. Numbers, issue / expiry dates and copies (photo or PDF, max 2 MB).
 import {
   COMPANY_DOC_TYPES, watchCompanyDocs, watchCompanyFiles, saveCompanyDoc, uploadCompanyFile, readCompanyFile,
-  deleteCompanyFile, deleteCompanyDoc,
+  deleteCompanyFile, deleteCompanyDoc, companyDueState, daysUntil,
 } from '../fb.js';
 import { esc, icon, pill, toast, modal, confirmBox, friendlyError, fmtDate, parseKey, dateKey } from '../util.js';
-import { prepareFile, chooseFile, askHeading, expiryState, b64ToBlob } from '../iddocs.js';
+import { prepareFile, chooseFile, askHeading, b64ToBlob } from '../iddocs.js';
 import { saveBlob } from '../report-lib.js';
 
 const cache = new Map();
@@ -18,10 +18,13 @@ const safe = (s) => String(s || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/
 const ext = (f) => (f.mime === 'application/pdf' ? 'pdf' : f.mime === 'image/png' ? 'png' : 'jpg');
 const fmtD = (v) => (v ? fmtDate(parseKey(v)) : '');
 
+/** Company documents: reminder 15 days before expiry. */
+const dueState = (exp) => companyDueState(exp);
 function statusPill(exp) {
-  const s = expiryState(exp);
+  const s = dueState(exp);
   if (!s) return '';
-  return s === 'expired' ? pill(`Expired ${fmtD(exp)}`, 'red') : s === 'soon' ? pill(`Expires ${fmtD(exp)}`, 'amber') : pill(`Valid to ${fmtD(exp)}`, 'green');
+  const n = daysUntil(exp);
+  return s === 'expired' ? pill(`Expired ${fmtD(exp)}`, 'red') : s === 'soon' ? pill(n === 0 ? 'Expires today' : `Expires in ${n} d`, 'amber') : pill(`Valid to ${fmtD(exp)}`, 'green');
 }
 
 async function viewFile(f, title) {
@@ -65,6 +68,8 @@ export function mount(el, _p, { setHeader }) {
       if (!e.doc) await saveCompanyDoc({ id: e.id, key: e.key, title: e.title, custom: e.custom });
       await uploadCompanyFile({ docId: e.id, name: `${safe(e.title)}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 });
       toast(`${e.title} uploaded`);
+      // Ask for the document number and expiry date right away if they're missing.
+      if (!e.doc?.number || !e.doc?.expiry) edit({ ...e, doc: e.doc || null });
     } catch (x) { toast(friendlyError(x), true); }
   }
 
@@ -114,7 +119,7 @@ export function mount(el, _p, { setHeader }) {
         const fl = filesOf(e.id);
         for (let i = 0; i < fl.length; i++) zip.file(`${safe(e.title)}${fl.length > 1 ? ` ${i + 1}` : ''}.${ext(fl[i])}`, await bytes(fl[i]), { base64: true });
         const d = e.doc || {};
-        const st = expiryState(d.expiry);
+        const st = dueState(d.expiry);
         rows.push([e.title, d.number || '', d.issueDate || '', d.expiry || '', { expired: 'Expired', soon: 'Expiring', ok: 'Valid' }[st] || '', fl.length, d.notes || '']);
       }
       if (window.XLSX) {
@@ -131,12 +136,14 @@ export function mount(el, _p, { setHeader }) {
   const card = (e) => {
     const fl = filesOf(e.id);
     const d = e.doc || {};
-    const info = [d.number ? `No. <b class="mono">${esc(d.number)}</b>` : '', d.issueDate ? `Issued ${esc(fmtD(d.issueDate))}` : '', d.expiry ? `Expires ${esc(fmtD(d.expiry))}` : '']
-      .filter(Boolean).join(' · ');
+    const info = `<span class="cd-kv"><span>DOC NO.</span><b class="mono">${esc(d.number || '—')}</b></span>
+      <span class="cd-kv"><span>EXPIRY</span><b>${esc(d.expiry ? fmtD(d.expiry) : '—')}</b></span>
+      ${d.issueDate ? `<span class="cd-kv"><span>ISSUED</span><b>${esc(fmtD(d.issueDate))}</b></span>` : ''}
+      ${!d.number || !d.expiry ? `<a href="javascript:void 0" class="small" data-ed="${esc(e.id)}">+ Add number & expiry</a>` : ''}`;
     return `<div class="slot ${fl.length ? 'has' : ''}" data-e="${esc(e.id)}" style="grid-template-columns:1fr auto">
       <div class="slot-main">
         <div class="row" style="gap:8px"><span class="slot-t">${esc(e.title.toUpperCase())}</span>${statusPill(d.expiry)}</div>
-        <div class="small" style="margin-top:3px">${info || '<span class="muted">No number / dates yet</span>'}${d.notes ? ` <span class="muted">· ${esc(d.notes)}</span>` : ''}</div>
+        <div class="cd-info">${info}</div>${d.notes ? `<div class="small muted">${esc(d.notes)}</div>` : ''}
         <div class="row" style="gap:8px;margin-top:8px">${fl.map((f, i) => `<div class="slot-th cd-th" data-view="${f.id}" title="${esc(e.title)} ${i + 1} — click to view">${isImg(f) ? '' : '<b>PDF</b>'}
             <button class="x" data-delf="${f.id}" title="Delete file">${icon('close', 11)}</button></div>`).join('')}
           ${fl.length ? '' : '<span class="small red-t">Not uploaded</span>'}</div>
@@ -153,7 +160,7 @@ export function mount(el, _p, { setHeader }) {
     if (!docs || !files) { el.innerHTML = '<div class="card empty">Loading…</div>'; return; }
     const { std, add } = entries();
     const all = [...std, ...add];
-    const bad = all.filter((e) => ['expired', 'soon'].includes(expiryState(e.doc?.expiry)));
+    const bad = all.filter((e) => ['expired', 'soon'].includes(dueState(e.doc?.expiry)));
     el.innerHTML = `
       ${bad.length ? `<div class="card" style="background:#fff4e2;border-color:#f3d7a6"><b>${icon('warn', 16, '#D98A1A')} Renew soon:</b>
         ${bad.map((e) => `${esc(e.title)} ${statusPill(e.doc.expiry)}`).join(' &nbsp; ')}</div>` : ''}

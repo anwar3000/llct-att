@@ -1,4 +1,4 @@
-import { store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
+import { watchCompanyDocs, companyDueState, daysUntil, store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
 import {
   esc, fromTz, STAFF_COLOR, EXT_COLOR, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
@@ -18,6 +18,20 @@ export function mount(el, _params, { setHeader }) {
   let chart = null;
   let trend = null; // last 14 days minutes
   let updates = [];
+  let companyDocs = [];
+  // Company documents expired or expiring within 15 days.
+  const companyDue = () => companyDocs.filter((d) => ['expired', 'soon'].includes(companyDueState(d.expiry)))
+    .sort((a, b) => a.expiry.localeCompare(b.expiry));
+  const companyCard = () => {
+    const due = companyDue();
+    if (!due.length) return '';
+    return `<div class="card mt" style="background:#fff4e2;border-color:#f3d7a6">
+      <div class="card-head">${icon('warn', 18, '#D98A1A')}<h2>Company documents to renew (${due.length})</h2><a class="small" href="#/company">Open →</a></div>
+      ${due.map((d) => { const n = daysUntil(d.expiry); return `<a class="list-item" style="color:inherit" href="#/company">
+        <div class="grow"><b>${esc(d.title)}</b>${d.number ? ` <span class="small muted mono">${esc(d.number)}</span>` : ''}</div>
+        ${n < 0 ? pill(`Expired ${-n} d ago`, 'red') : pill(n === 0 ? 'Expires today' : `Expires in ${n} d`, 'amber')}</a>`; }).join('')}
+    </div>`;
+  };
 
   el.innerHTML = `<div id="d-body"></div>`;
   const body = el.querySelector('#d-body');
@@ -103,6 +117,7 @@ export function mount(el, _params, { setHeader }) {
         : kpi('Pending approvals', store.pendingOff.length + store.pendingSites.length + store.requests.length, `off days, new sites & ${store.requests.length} document changes`, 'pending', '#E08E2B', store.requests.length ? 'requests' : '')}
     </div>
 
+    ${companyCard()}
     ${forgot.length || flagged.length || store.alerts.length ? `
     <div class="card mt">
       <div class="card-head">${icon('warn', 18, '#D64545')}<h2>Needs attention</h2></div>
@@ -267,7 +282,8 @@ export function mount(el, _params, { setHeader }) {
 
   draw();
   const off = store.on(draw);
-  return () => { off(); if (chart) chart.destroy(); };
+  const offCo = watchCompanyDocs((l) => { companyDocs = l || []; draw(); });
+  return () => { off(); offCo(); if (chart) chart.destroy(); };
 }
 
 function kpi(label, value, sub, ico, color, nav) {

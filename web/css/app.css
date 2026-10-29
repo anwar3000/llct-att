@@ -426,3 +426,7 @@ tr.short-day td { background: #fdf1f1; }
 .cd-th .x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: 0; background: #b23535; color: #fff; display: none; place-items: center; cursor: pointer; padding: 0; }
 .cd-th:hover .x { display: grid; }
 @media (hover: none) { .cd-th .x { display: grid; } }
+.cd-info { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; margin-top: 6px; }
+.cd-kv { display: flex; flex-direction: column; }
+.cd-kv span { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--muted); }
+.cd-kv b { font-size: 13.5px; }
