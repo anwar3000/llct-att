@@ -342,7 +342,7 @@ function payDialog(u, balance) {
       <div class="grid cols-2" style="gap:10px">
         <label class="f"><span>Amount (AED)</span><input id="pd-amt" type="number" min="0" step="0.01" value="${balance > 0 ? balance : ''}"></label>
         <label class="f"><span>Date</span><input id="pd-date" type="date" value="${dateKey(new Date())}"></label>
-        <label class="f"><span>Method</span><select id="pd-m"><option>Cash</option><option>Bank transfer</option><option>Cheque</option><option>Other</option></select></label>
+        <label class="f"><span>Method</span><select id="pd-m"><option selected>Bank transfer</option><option>Cash</option><option>Cheque</option><option>Other</option></select></label>
         <label class="f"><span>Note / reference</span><input id="pd-note"></label>
       </div><div class="error" id="pd-err"></div>`,
     foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Save payment</button>',

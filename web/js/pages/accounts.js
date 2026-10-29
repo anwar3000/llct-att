@@ -3,7 +3,7 @@
 import {
   store, isAdmin, watchAcct, saveAcct, deleteAcct, removeAcctFile, readAcctFile, autoAcctLines,
   getAcctOpening, saveAcctOpening, acctBroughtForward, getAcctParties, saveAcctParty,
-  ACCT_INCOME, ACCT_EXPENSE, ACCT_METHODS, isBankMethod,
+  ACCT_INCOME, ACCT_EXPENSE, ACCT_METHODS, isBankMethod, convertCashToBank,
 } from '../fb.js';
 import { downloadReport, saveBlob } from '../report-lib.js';
 import { esc, icon, pill, fmtMoney, fmtDate, parseKey, dateKey, toast, modal, confirmBox, friendlyError, b64img, photoViewer } from '../util.js';
@@ -71,6 +71,7 @@ export function mount(el, _p, { setHeader }) {
       l.forEach((e) => m.set(e.category || 'Uncategorised', (m.get(e.category || 'Uncategorised') || 0) + e.amount));
       return [...m.entries()].sort((a, b) => b[1] - a[1]);
     };
+    const cashCount = list.filter((e) => e.method === 'Cash' && e.source !== 'petty').length;
     const allCats = [...new Set([...ACCT_INCOME, ...ACCT_EXPENSE, 'Petty cash given', 'Driver payment', ...(manual || []).map((e) => e.category)])].filter(Boolean);
     const quick = [['month', 'This month'], ['last', 'Last month'], ['year', 'This year'], ['all', 'All time']];
 
@@ -85,6 +86,10 @@ export function mount(el, _p, { setHeader }) {
       <input id="ac-q" placeholder="Search party, note, cheque no…" value="${esc(q)}" style="max-width:220px">
       <label class="row small" style="gap:6px"><input type="checkbox" id="ac-auto" ${showAuto ? 'checked' : ''}> Include petty cash & driver payments</label>
     </div>
+    ${cashCount ? `<div class="card pad" style="background:#fff4e2;border-color:#f3d7a6;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="grow"><b>${cashCount} ${cashCount === 1 ? 'entry is' : 'entries are'} marked as paid in Cash</b> in this period.
+        <span class="small muted">Change every Cash entry and driver payment (all dates) to Bank transfer?</span></div>
+      <button class="btn" id="ac-tobank">Change all Cash to Bank transfer</button></div>` : ''}
     ${err ? `<div class="card pad" style="background:#fbe6e6;color:#8f2a2a;margin-bottom:12px">Could not load accounts: ${esc(err.code || err.message)}. Publish the latest Firestore rules (combined file).</div>` : ''}
     <div class="card" style="margin-bottom:12px;padding:14px 18px;display:flex;flex-wrap:wrap;gap:18px;align-items:center">
       <div><div class="small muted">Balance brought forward (${esc(from)})</div><b style="font-size:20px">${bf ? money(bfT) : '…'}</b>
@@ -143,6 +148,11 @@ export function mount(el, _p, { setHeader }) {
         if (b.dataset.quick === 'all') { from = '2000-01-01'; to = dateKey(n); }
         load();
       };
+    });
+    el.querySelector('#ac-tobank')?.addEventListener('click', async (ev) => {
+      if (!await confirmBox('Change Cash to Bank transfer?', 'Every accounts entry and driver payment marked Cash (all dates) will be changed to Bank transfer.', { ok: 'Change all' })) return;
+      ev.target.disabled = true;
+      try { const n = await convertCashToBank(); toast(`${n} ${n === 1 ? 'entry' : 'entries'} changed to Bank transfer`); load(); } catch (e) { toast(friendlyError(e), true); ev.target.disabled = false; }
     });
     el.querySelector('#ac-from').onchange = (e) => { if (e.target.value) { from = e.target.value; if (to < from) to = from; load(); } };
     el.querySelector('#ac-to').onchange = (e) => { if (e.target.value) { to = e.target.value; if (to < from) from = to; load(); } };
@@ -263,7 +273,7 @@ function entryDialog(e, kind = e?.type || 'expense') {
       <label class="f"><span>Amount (AED) *</span><input id="ae-amt" type="number" min="0" step="0.01" value="${e ? e.amount : ''}" style="font-weight:800;color:${color}"></label>
       <label class="f"><span>Category *</span><input id="ae-cat" list="ae-cats" value="${esc(e?.category || cats[0])}"><datalist id="ae-cats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
       <label class="f"><span>${income ? 'Received from (client / bank / owner)' : 'Paid to (supplier / party)'}</span><input id="ae-party" list="ae-parties" autocomplete="off" value="${esc(e?.party || '')}" placeholder="Type or pick a saved name"><datalist id="ae-parties"></datalist></label>
-      <label class="f"><span>Method</span><select id="ae-m">${ACCT_METHODS.map((m) => `<option ${m === (e?.method || (income ? 'Cheque' : 'Cash')) ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+      <label class="f"><span>Method</span><select id="ae-m">${ACCT_METHODS.map((m) => `<option ${m === (e?.method || 'Bank transfer') ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       <label class="f"><span id="ae-ref-l">Reference</span><input id="ae-ref" value="${esc(e?.reference || '')}"></label>
       <label class="f ae-chq"><span>Bank</span><input id="ae-bank" value="${esc(e?.bank || '')}" placeholder="e.g. Emirates NBD"></label>
       <label class="f ae-chq"><span>Cheque date</span><input id="ae-cdate" type="date" value="${esc(e?.chequeDate || '')}"></label>

@@ -612,7 +612,7 @@ class _AccountsState extends State<_Accounts> {
   Future<void> _pay(AppUser d, double balance) async {
     final amt = TextEditingController(text: balance > 0 ? balance.toStringAsFixed(2) : '');
     final note = TextEditingController();
-    String method = 'Cash';
+    String method = 'Bank transfer';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -628,7 +628,7 @@ class _AccountsState extends State<_Accounts> {
               value: method,
               decoration: const InputDecoration(labelText: 'Method'),
               items: const ['Cash', 'Bank transfer', 'Cheque', 'Other'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-              onChanged: (v) => set(() => method = v ?? 'Cash'),
+              onChanged: (v) => set(() => method = v ?? 'Bank transfer'),
             ),
             const SizedBox(height: 10),
             TextField(controller: note, decoration: const InputDecoration(labelText: 'Note / reference')),

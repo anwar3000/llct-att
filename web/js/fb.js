@@ -313,11 +313,27 @@ export const ACCT_INCOME = ['Cheque deposit', 'Cash deposit', 'Bank transfer rec
 export const ACCT_EXPENSE = ['Purchase', 'Supplier payment', 'Salaries & wages', 'Labour supply', 'Rent', 'Utilities', 'Fuel', 'Vehicle & maintenance', 'Transport', 'Tools & equipment', 'Materials', 'Visa & PRO', 'Office expenses', 'Bank charges', 'Other expense'];
 export const ACCT_METHODS = ['Cash', 'Cheque', 'Bank transfer', 'Card', 'Online / app'];
 export const isBankMethod = (m) => m && m !== 'Cash';
+export const DEFAULT_METHOD = 'Bank transfer';
+/** Changes every accounts entry and driver payment paid in Cash to Bank transfer. Returns how many changed. */
+export async function convertCashToBank() {
+  let n = 0;
+  for (const col of ['acctEntries', 'driverPayments']) {
+    const snap = await getDocs(C(col));
+    const todo = snap.docs.filter((d) => { const m = d.data().method; return !m || m === 'Cash'; });
+    for (let i = 0; i < todo.length; i += 400) {
+      const b = writeBatch(db);
+      todo.slice(i, i + 400).forEach((d) => b.update(d.ref, { method: 'Bank transfer' }));
+      await b.commit();
+    }
+    n += todo.length;
+  }
+  return n;
+}
 export function mapAcct(d) {
   const m = d.data() || {};
   return {
     id: d.id, source: 'manual', type: m.type === 'income' ? 'income' : 'expense', date: m.date || '', amount: num(m.amount),
-    category: m.category || '', method: m.method || 'Cash', reference: m.reference || '', bank: m.bank || '', chequeDate: m.chequeDate || '',
+    category: m.category || '', method: m.method || 'Bank transfer', reference: m.reference || '', bank: m.bank || '', chequeDate: m.chequeDate || '',
     party: m.party || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '', projectId: m.projectId || '', projectName: m.projectName || '',
     hasFile: m.hasFile === true, fileName: m.fileName || '', fileMime: m.fileMime || '',
     createdBy: m.createdBy || '', createdAt: toDate(m.createdAt), editedBy: m.editedBy || '', editedAt: toDate(m.editedAt),
@@ -408,13 +424,13 @@ export async function autoAcctLines(from, to) {
     const t = mapPetty(d);
     if (t.type !== 'credit' || t.status === 'rejected') continue;
     out.push({ id: `petty_${t.id}`, source: 'petty', type: 'expense', date: t.date || dateKey(t.createdLocal || new Date()), amount: t.amount,
-      category: 'Petty cash given', method: 'Cash', reference: '', party: t.employeeName, note: [t.note, t.createdByName ? `given by ${t.createdByName}` : ''].filter(Boolean).join(' · '),
+      category: 'Petty cash given', method: 'Bank transfer', reference: '', party: t.employeeName, note: [t.note, t.createdByName ? `given by ${t.createdByName}` : ''].filter(Boolean).join(' · '),
       siteId: t.siteId, siteName: t.siteName, hasFile: false });
   }
   for (const d of pays.docs) {
     const p = mapPayment(d);
     out.push({ id: `drv_${p.id}`, source: 'driver', type: 'expense', date: p.date, amount: p.amount, category: 'Driver payment',
-      method: p.method || 'Cash', reference: '', party: p.employeeName, note: [p.note, p.createdBy ? `by ${p.createdBy}` : ''].filter(Boolean).join(' · '), siteId: '', siteName: '', hasFile: false });
+      method: p.method || 'Bank transfer', reference: '', party: p.employeeName, note: [p.note, p.createdBy ? `by ${p.createdBy}` : ''].filter(Boolean).join(' · '), siteId: '', siteName: '', hasFile: false });
   }
   return out;
 }

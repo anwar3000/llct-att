@@ -361,7 +361,7 @@ class _AccountsViewState extends State<_AccountsView> {
     final amt = TextEditingController(text: e == null ? '' : e.amount.toString());
     var cat = e?.category ?? cats.first;
     final party = TextEditingController(text: e?.party);
-    var method = e?.method ?? (income ? 'Cheque' : 'Cash');
+    var method = e?.method ?? 'Bank transfer';
     final ref = TextEditingController(text: e?.reference);
     final bankC = TextEditingController(text: e?.bank);
     final note = TextEditingController(text: e?.note);
@@ -464,10 +464,10 @@ class _AccountsViewState extends State<_AccountsView> {
                   ],
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
-                    value: kAcctMethods.contains(method) ? method : 'Cash',
+                    value: kAcctMethods.contains(method) ? method : 'Bank transfer',
                     decoration: const InputDecoration(labelText: 'Method'),
                     items: [for (final m in kAcctMethods) DropdownMenuItem(value: m, child: Text(m))],
-                    onChanged: (v) => set(() => method = v ?? 'Cash'),
+                    onChanged: (v) => set(() => method = v ?? 'Bank transfer'),
                   ),
                   const SizedBox(height: 10),
                   TextField(

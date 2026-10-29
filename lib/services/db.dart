@@ -1280,7 +1280,7 @@ class Db {
         date: p.date,
         amount: p.amount,
         category: 'Driver payment',
-        method: p.method.isEmpty ? 'Cash' : p.method,
+        method: p.method.isEmpty ? 'Bank transfer' : p.method,
         party: (d.data()['employeeName'] as String?) ?? '',
         note: p.note,
       ));
