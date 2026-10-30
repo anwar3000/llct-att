@@ -94,6 +94,12 @@ class AppUser {
   final DateTime? violationsClearedAt;
   /// Admin gave this person access to everyone's ID documents in the app.
   final bool canViewIds;
+  /// Accounts permission: view (read-only) / edit (changes wait for admin approval).
+  final bool canViewAccounts;
+  final bool canEditAccounts;
+  bool get seesAccounts => isAdmin || canViewAccounts || canEditAccounts;
+  /// 'admin' | 'editor' | 'viewer'
+  String get acctMode => isAdmin ? 'admin' : (canEditAccounts ? 'editor' : 'viewer');
   /// Drivers get the Trips feature; their own rate per km overrides the company rate.
   final bool isDriver;
   final double? tripRatePerKm;
@@ -116,6 +122,8 @@ class AppUser {
     this.forceLogoutAt,
     this.violationsClearedAt,
     this.canViewIds = false,
+    this.canViewAccounts = false,
+    this.canEditAccounts = false,
     this.isDriver = false,
     this.tripRatePerKm,
     this.vehicle = '',
@@ -153,6 +161,8 @@ class AppUser {
       forceLogoutAt: _ts(m['forceLogoutAt']),
       violationsClearedAt: _ts(m['violationsClearedAt']),
       canViewIds: m['canViewIds'] == true,
+      canViewAccounts: m['canViewAccounts'] == true,
+      canEditAccounts: m['canEditAccounts'] == true,
       isDriver: m['isDriver'] == true,
       tripRatePerKm: _dbl(m['tripRatePerKm']),
       vehicle: _str(m['vehicle']),
@@ -1359,6 +1369,65 @@ class PendingPay {
       status: m['status'] == 'done' ? 'done' : 'open',
       amount: n(m['amount']),
       paid: n(m['paid']),
+    );
+  }
+}
+
+
+/// A change to the accounts asked for by someone with "Edit accounts"; applied when an admin approves.
+class AcctRequest {
+  final String id, action, target, targetId, status, note, requestedBy, requestedById;
+  final Map<String, dynamic> data;
+  final Map<String, dynamic>? before;
+  final Map<String, dynamic>? file;
+  final DateTime? createdAt;
+  const AcctRequest({
+    required this.id,
+    required this.action,
+    required this.target,
+    this.targetId = '',
+    this.status = 'pending',
+    this.note = '',
+    this.requestedBy = '',
+    this.requestedById = '',
+    this.data = const {},
+    this.before,
+    this.file,
+    this.createdAt,
+  });
+  bool get isPending => status == 'pending';
+
+  /// Short description: "Add Expense", "Pay pending"…
+  String get title {
+    final t = data['type'] ?? before?['type'];
+    final what = target == 'pending' ? (action == 'pay' ? 'Pay pending' : 'Pending payment') : (t == 'income' ? 'Income' : 'Expense');
+    final verb = {'create': 'Add', 'update': 'Change', 'delete': 'Delete', 'pay': ''}[action] ?? action;
+    return '$verb $what'.trim();
+  }
+
+  String get line {
+    final b = before ?? const {};
+    String g(String k) => '${data[k] ?? b[k] ?? ''}';
+    final amt = data['amount'] ?? b['amount'];
+    return [g('date'), g('category'), g('party'), if (amt is num) fmtMoney(amt.toDouble())].where((x) => x.isNotEmpty).join(' · ');
+  }
+
+  factory AcctRequest.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    Map<String, dynamic>? mp(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : null;
+    return AcctRequest(
+      id: d.id,
+      action: _str(m['action'], 'create'),
+      target: _str(m['target'], 'entry'),
+      targetId: _str(m['targetId']),
+      status: _str(m['status'], 'pending'),
+      note: _str(m['note']),
+      requestedBy: _str(m['requestedBy']),
+      requestedById: _str(m['requestedById']),
+      data: mp(m['data']) ?? const {},
+      before: mp(m['before']),
+      file: mp(m['file']),
+      createdAt: _ts(m['createdAt']),
     );
   }
 }

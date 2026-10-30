@@ -19,8 +19,9 @@ String _money(double v) => '${v < 0 ? '−' : ''}${fmtMoney(_r2(v.abs()))}';
 /// Admin "Accounts" tab: company income & expenses (petty cash has its own tab).
 class AccountsTab extends StatefulWidget {
   final AppUser me;
-  final AdminLive live;
-  const AccountsTab({super.key, required this.me, required this.live});
+  /// Null for staff who open Accounts from their own app (permission "View / edit accounts").
+  final AdminLive? live;
+  const AccountsTab({super.key, required this.me, this.live});
   @override
   State<AccountsTab> createState() => _AccountsTabState();
 }
@@ -32,7 +33,7 @@ class _AccountsTabState extends State<AccountsTab> {
 
 class _AccountsView extends StatefulWidget {
   final AppUser me;
-  final AdminLive live;
+  final AdminLive? live;
   const _AccountsView({required this.me, required this.live});
   @override
   State<_AccountsView> createState() => _AccountsViewState();
@@ -49,6 +50,12 @@ class _AccountsViewState extends State<_AccountsView> {
   int _token = 0;
   Map<String, String> _projNames = {};
   ({double inc, double exp, int nIn, int nOut, double cash, double bank})? _pos;
+  List<AcctRequest>? _reqs;
+  StreamSubscription? _reqSub;
+  String get _mode => widget.me.acctMode;
+  bool get _ask => _mode == 'editor';
+  bool get _canWrite => _mode != 'viewer';
+  void _sent() => showSnack(context, 'Sent to admin for approval — it shows in the accounts once approved.');
   List<PendingPay>? _pending;
   StreamSubscription? _pendSub;
 
@@ -56,6 +63,11 @@ class _AccountsViewState extends State<_AccountsView> {
   void initState() {
     super.initState();
     _load();
+    if (_mode != 'viewer') {
+      _reqSub = Db.acctRequestsStream().listen((l) {
+        if (mounted) setState(() => _reqs = l);
+      }, onError: (_) {});
+    }
     _pendSub = Db.pendingStream().listen((l) {
       if (mounted) setState(() => _pending = l);
     }, onError: (_) {
@@ -67,13 +79,14 @@ class _AccountsViewState extends State<_AccountsView> {
   }
 
   /// The entry's project — or, for entries saved with only a site, the project that site belongs to.
-  String _projectIdOf(AcctEntry e) => e.projectId.isNotEmpty ? e.projectId : (widget.live.siteById(e.siteId)?.projectId ?? '');
+  String _projectIdOf(AcctEntry e) => e.projectId.isNotEmpty ? e.projectId : (widget.live?.siteById(e.siteId)?.projectId ?? '');
   String _projectOf(AcctEntry e) => e.projectName.isNotEmpty ? e.projectName : (_projNames[_projectIdOf(e)] ?? '');
 
   @override
   void dispose() {
     _sub?.cancel();
     _pendSub?.cancel();
+    _reqSub?.cancel();
     super.dispose();
   }
 
@@ -151,7 +164,7 @@ class _AccountsViewState extends State<_AccountsView> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
+      floatingActionButton: !_canWrite ? null : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
         FloatingActionButton.extended(
           heroTag: 'acctIn',
           backgroundColor: _green,
@@ -173,7 +186,16 @@ class _AccountsViewState extends State<_AccountsView> {
       body: RefreshIndicator(
         onRefresh: () async => _load(),
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 6, 16, 140), children: [
+          if (_mode == 'viewer')
+            const Card(
+              color: Color(0xFFEEF3FB),
+              child: Padding(
+                padding: EdgeInsets.all(10),
+                child: Text('View only — only admin can change the accounts.', style: TextStyle(fontSize: 12.5)),
+              ),
+            ),
           _positionCard(),
+          ..._requestsCard(),
           const SizedBox(height: 10),
           _pendingCard(),
           const Padding(
@@ -211,7 +233,7 @@ class _AccountsViewState extends State<_AccountsView> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Expanded(child: Text('${r.from} → ${r.to}', style: const TextStyle(color: AppColors.muted, fontSize: 12.5))),
-                  TextButton(onPressed: _openingDialog, child: const Text('Opening balance')),
+                  if (_mode == 'admin') TextButton(onPressed: _openingDialog, child: const Text('Opening balance')),
                 ]),
                 _line('Balance brought forward', bf == null ? null : bf.cash + bf.bank,
                     bf == null ? '' : 'cash ${_money(bf.cash)} · bank ${_money(bf.bank)}'),
@@ -319,6 +341,74 @@ class _AccountsViewState extends State<_AccountsView> {
     ]);
   }
 
+  // ---------------------------------------------------------------- approval requests
+  List<Widget> _requestsCard() {
+    final all = _reqs;
+    if (all == null || _mode == 'viewer') return const [];
+    final admin = _mode == 'admin';
+    final list = admin ? all.where((r) => r.isPending).toList() : all.where((r) => r.requestedById == widget.me.id).take(10).toList();
+    if (list.isEmpty) return const [];
+    return [
+      const SizedBox(height: 10),
+      Card(
+        margin: EdgeInsets.zero,
+        color: admin ? const Color(0xFFFFF4E2) : null,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 8, 6),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(admin ? 'Waiting for your approval (${list.length})' : 'Your requests',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            for (final r in list)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(r.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text([if (admin) 'by ${r.requestedBy}', r.line, if (r.status == 'rejected' && r.note.isNotEmpty) 'Admin: ${r.note}'].join(' · '),
+                    style: const TextStyle(fontSize: 12)),
+                trailing: admin
+                    ? Row(mainAxisSize: MainAxisSize.min, children: [
+                        IconButton(
+                          tooltip: 'Reject',
+                          icon: const Icon(Icons.close, color: _red),
+                          onPressed: () async {
+                            try {
+                              await Db.rejectAcctRequest(r, widget.me);
+                            } catch (er) {
+                              if (mounted) showSnack(context, 'Could not reject: $er', error: true);
+                            }
+                          },
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: _green, minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                          onPressed: () async {
+                            try {
+                              await Db.approveAcctRequest(r, widget.me);
+                              if (mounted) showSnack(context, 'Approved and applied');
+                              _reloadSide();
+                            } catch (er) {
+                              if (mounted) showSnack(context, '$er'.replaceFirst('Exception: ', ''), error: true);
+                            }
+                          },
+                          child: const Text('Approve'),
+                        ),
+                      ])
+                    : r.isPending
+                        ? TextButton(
+                            onPressed: () async {
+                              try {
+                                await Db.cancelAcctRequest(r);
+                              } catch (_) {}
+                            },
+                            child: const Text('Cancel'))
+                        : Text(r.status == 'approved' ? 'Approved' : 'Rejected',
+                            style: TextStyle(color: r.status == 'approved' ? _green : _red, fontWeight: FontWeight.w700)),
+              ),
+          ]),
+        ),
+      ),
+    ];
+  }
+
   // ---------------------------------------------------------------- pending payments
   Widget _pendingCard() {
     final open = (_pending ?? const <PendingPay>[]).where((x) => x.isOpen).toList();
@@ -330,8 +420,10 @@ class _AccountsViewState extends State<_AccountsView> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             const Expanded(child: Text('Pending payments', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            TextButton.icon(onPressed: () => _editPending(null, 'pay'), icon: const Icon(Icons.add, size: 18), label: const Text('To pay')),
-            TextButton.icon(onPressed: () => _editPending(null, 'receive'), icon: const Icon(Icons.add, size: 18), label: const Text('To receive')),
+            if (_canWrite) ...[
+              TextButton.icon(onPressed: () => _editPending(null, 'pay'), icon: const Icon(Icons.add, size: 18), label: const Text('To pay')),
+              TextButton.icon(onPressed: () => _editPending(null, 'receive'), icon: const Icon(Icons.add, size: 18), label: const Text('To receive')),
+            ],
           ]),
           if (_pending == null)
             const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator()))
@@ -346,7 +438,7 @@ class _AccountsViewState extends State<_AccountsView> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
-                onTap: () => _editPending(x, x.type),
+                onTap: _canWrite ? () => _editPending(x, x.type) : null,
                 title: Text(x.party.isEmpty ? x.category : x.party, style: const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: Text(
                     [
@@ -360,13 +452,15 @@ class _AccountsViewState extends State<_AccountsView> {
                     style: TextStyle(fontSize: 12, color: x.dueDate.isNotEmpty && x.dueDate.compareTo(today) < 0 ? _red : AppColors.muted)),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text(fmtMoney(x.remaining), style: TextStyle(fontWeight: FontWeight.w800, color: x.isReceive ? _green : _red)),
-                  const SizedBox(width: 6),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 10), backgroundColor: x.isReceive ? _green : _red),
-                    onPressed: () => _payPending(x),
-                    child: Text(x.isReceive ? 'Got it' : 'Pay'),
-                  ),
+                  if (_canWrite) ...[
+                    const SizedBox(width: 6),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 10), backgroundColor: x.isReceive ? _green : _red),
+                      onPressed: () => _payPending(x),
+                      child: Text(x.isReceive ? 'Got it' : 'Pay'),
+                    ),
+                  ],
                 ]),
               ),
         ]),
@@ -440,11 +534,18 @@ class _AccountsViewState extends State<_AccountsView> {
     try {
       if (res == 'delete' && x != null) {
         if (await confirm(context, 'Delete pending payment?', 'Entries already recorded stay in the accounts.', danger: true, ok: 'Delete')) {
-          await Db.deletePending(x.id);
+          if (_ask) {
+            await Db.requestAcctChange(
+                action: 'delete', target: 'pending', targetId: x.id, by: widget.me,
+                before: {'party': x.party, 'category': x.category, 'amount': x.amount, 'date': x.dueDate});
+            _sent();
+          } else {
+            await Db.deletePending(x.id);
+          }
         }
       } else if (res == 'save') {
         final v = _r2(double.parse(amt.text.trim()));
-        await Db.savePending(id: x?.id, by: widget.me, data: {
+        final data = <String, dynamic>{
           'type': pay ? 'pay' : 'receive',
           'party': party.text.trim(),
           'category': cat.text.trim(),
@@ -453,7 +554,15 @@ class _AccountsViewState extends State<_AccountsView> {
           'note': note.text.trim(),
           'method': x?.method ?? 'Bank transfer',
           if (x != null) 'status': v - x.paid > 0.005 ? 'open' : 'done',
-        });
+        };
+        if (_ask) {
+          await Db.requestAcctChange(
+              action: x == null ? 'create' : 'update', target: 'pending', targetId: x?.id ?? '', data: data, by: widget.me,
+              before: x == null ? null : {'type': x.type, 'party': x.party, 'category': x.category, 'amount': x.amount, 'dueDate': x.dueDate, 'note': x.note});
+          _sent();
+        } else {
+          await Db.savePending(id: x?.id, by: widget.me, data: data);
+        }
       }
     } catch (er) {
       if (mounted) showSnack(context, 'Could not save: $er', error: true);
@@ -513,6 +622,18 @@ class _AccountsViewState extends State<_AccountsView> {
     );
     if (ok != true) return;
     try {
+      if (_ask) {
+        await Db.requestAcctChange(action: 'pay', target: 'pending', targetId: x.id, by: widget.me, data: {
+          'amount': _r2(double.parse(amt.text.trim())),
+          'date': dateKey(date),
+          'method': method,
+          'party': x.party,
+          'category': x.category,
+          'type': x.isReceive ? 'income' : 'expense',
+        });
+        _sent();
+        return;
+      }
       await Db.payPending(x, amount: double.parse(amt.text.trim()), date: dateKey(date), method: method, by: widget.me);
       if (mounted) showSnack(context, 'Recorded in the accounts');
       _reloadSide();
@@ -541,8 +662,8 @@ class _AccountsViewState extends State<_AccountsView> {
   Widget _tile(AcctEntry e) {
     final auto = e.source != 'manual';
     return ListTile(
-      onTap: auto ? null : () => _edit(e, e.type),
-      onLongPress: auto ? null : () => _delete(e),
+      onTap: auto || !_canWrite ? null : () => _edit(e, e.type),
+      onLongPress: auto || !_canWrite ? null : () => _delete(e),
       leading: CircleAvatar(
         backgroundColor: (e.isIncome ? _green : _red).withValues(alpha: 0.1),
         child: Icon(e.isIncome ? Icons.south_west : Icons.north_east, color: e.isIncome ? _green : _red, size: 20),
@@ -592,6 +713,13 @@ class _AccountsViewState extends State<_AccountsView> {
   Future<void> _delete(AcctEntry e) async {
     if (!await confirm(context, 'Delete entry', 'Delete ${e.type} of ${fmtMoney(e.amount)} (${e.category}) on ${e.date}?', ok: 'Delete', danger: true)) return;
     try {
+      if (_ask) {
+        await Db.requestAcctChange(action: 'delete', target: 'entry', targetId: e.id, by: widget.me, before: {
+          'type': e.type, 'date': e.date, 'amount': e.amount, 'category': e.category, 'party': e.party, 'method': e.method, 'note': e.note,
+        });
+        _sent();
+        return;
+      }
       await Db.deleteAcct(e);
       if (mounted) showSnack(context, 'Deleted');
     } catch (er) {
@@ -661,7 +789,7 @@ class _AccountsViewState extends State<_AccountsView> {
     String projectId = e == null ? '' : _projectIdOf(e);
     String? photo;
     String? err;
-    final sites = widget.live.sites.where((s) => s.approved).toList();
+    final sites = (widget.live?.sites ?? const <Site>[]).where((s) => s.approved).toList();
     // Saved suppliers / payers and projects (shared with the invoicing app).
     var saved = <String>[];
     var projects = <({String id, String label})>[];
@@ -679,15 +807,11 @@ class _AccountsViewState extends State<_AccountsView> {
     Future<String?> doSave() async {
       final v = double.tryParse(amt.text.trim());
       if (v == null || v <= 0) return 'Enter the amount';
-      final site = widget.live.siteById(siteId);
+      final site = widget.live?.siteById(siteId);
       final proj = projects.where((p) => p.id == projectId).firstOrNull;
       final who = party.text.trim();
       try {
-        await Db.saveAcct(
-          id: e?.id,
-          by: widget.me,
-          photoBase64: photo,
-          data: {
+        final data = <String, dynamic>{
             'type': kind,
             'date': dateKey(date),
             'amount': _r2(v),
@@ -701,9 +825,17 @@ class _AccountsViewState extends State<_AccountsView> {
             'projectId': proj?.id ?? '',
             'projectName': proj?.label ?? '',
             'note': note.text.trim(),
-          },
-        );
-        if (who.isNotEmpty && !saved.any((n) => n.toLowerCase() == who.toLowerCase())) {
+        };
+        if (_ask) {
+          await Db.requestAcctChange(
+              action: e == null ? 'create' : 'update', target: 'entry', targetId: e?.id ?? '', data: data, by: widget.me, photoBase64: photo,
+              before: e == null
+                  ? null
+                  : {'type': e.type, 'date': e.date, 'amount': e.amount, 'category': e.category, 'party': e.party, 'method': e.method, 'note': e.note});
+        } else {
+          await Db.saveAcct(id: e?.id, by: widget.me, photoBase64: photo, data: data);
+        }
+        if (!_ask && who.isNotEmpty && !saved.any((n) => n.toLowerCase() == who.toLowerCase())) {
           saved.add(who);
           Db.saveAcctParty(partyKey, who).catchError((_) {});
         }
@@ -838,7 +970,7 @@ class _AccountsViewState extends State<_AccountsView> {
                     ],
                     onChanged: (v) => set(() {
                       siteId = v ?? '';
-                      final sp = widget.live.siteById(siteId)?.projectId ?? '';
+                      final sp = widget.live?.siteById(siteId)?.projectId ?? '';
                       if (projectId.isEmpty && sp.isNotEmpty) projectId = sp;
                     }),
                   ),
@@ -932,7 +1064,13 @@ class _AccountsViewState extends State<_AccountsView> {
       }),
     );
     if (ok != true && added == 0) return;
-    if (mounted) showSnack(context, e != null ? 'Saved' : '${income ? 'Income' : 'Expense'}${added > 1 ? ' entries' : ''} added${added > 1 ? ' ($added)' : ''}');
+    if (mounted) {
+      if (_ask) {
+        _sent();
+      } else {
+        showSnack(context, e != null ? 'Saved' : '${income ? 'Income' : 'Expense'}${added > 1 ? ' entries' : ''} added${added > 1 ? ' ($added)' : ''}');
+      }
+    }
     _reloadSide();
   }
 }

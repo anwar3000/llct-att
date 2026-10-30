@@ -499,3 +499,24 @@ table.ac-buckets td, table.ac-buckets th { padding: 7px 16px; font-size: 12.5px;
 .combo-i:hover, .combo-i.hi { background: #FFF4E2; }
 .combo-i.cur { font-weight: 700; }
 @media (max-width: 900px) { .ac-op { display: none; } }
+/* Dashboard: current cash position */
+.dash-cash { display: grid; grid-template-columns: minmax(240px, 1.6fr) repeat(3, minmax(0, 1fr)); align-items: stretch; overflow: hidden; color: inherit; text-decoration: none; }
+.dash-cash:hover { border-color: #f3d7a6; }
+.dash-cash .dc-main { background: linear-gradient(140deg, #2E2E2F, #232324); color: #fff; padding: 16px 20px; }
+.dash-cash .dc-main .dc-cap { color: #FCB040; }
+.dash-cash .dc-big { font-size: 28px; font-weight: 800; margin: 4px 0 6px; letter-spacing: -.02em; }
+.dash-cash .dc-big.neg { color: #ff8a8a; }
+.dash-cash .dc-split { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: #d8d8da; }
+.dash-cash .dc-split i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.dash-cash .dc-hint { font-size: 11.5px; color: #c9c9cb; margin-top: 6px; }
+.dash-cash .dc-cell { padding: 16px 18px; border-left: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.dash-cash .dc-cell b { font-size: 19px; font-weight: 800; white-space: nowrap; }
+.dc-cap { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+@media (max-width: 800px) { .dash-cash { grid-template-columns: 1fr 1fr; } .dash-cash .dc-main { grid-column: 1 / -1; } }
+/* Driver statement */
+.ds-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.ds-tile { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; }
+.ds-tile b { display: block; font-size: 18px; font-weight: 800; margin: 3px 0 1px; white-space: nowrap; }
+.ds-tile span { font-size: 11.5px; color: var(--muted); }
+table.ac-t tfoot td { font-weight: 800; border-top: 2px solid var(--line); background: #fbfaf7; }
+table.ac-t tr.ds-avg td { color: #a8640f; }

@@ -1,7 +1,7 @@
 // Driver trips — live trips in progress, daily list with km and cost, route map, admin corrections.
 import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
-import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError } from '../util.js';
+import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError, parseKey } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
 
 const TRIP_COLOR = '#7B4FC9';
@@ -373,25 +373,65 @@ function statementRows(trips, pays) {
 }
 function statementDialog(u, trips, pays) {
   const rows = statementRows(trips, pays);
+  const r2 = (n) => Math.round(n * 100) / 100;
+  // Daily costing: trips, km and cost per day, then the average.
+  const dayMap = new Map();
+  rows.filter((r) => r.type !== 'Payment').forEach((r) => {
+    const d = dayMap.get(r.date) || { date: r.date, trips: 0, km: 0, cost: 0 };
+    d.trips++; d.km = Math.round((d.km + (Number(r.km) || 0)) * 10) / 10; d.cost = r2(d.cost + r.plus);
+    dayMap.set(r.date, d);
+  });
+  const days = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const earned = r2(rows.reduce((a, r) => a + r.plus, 0)), paid = r2(rows.reduce((a, r) => a + r.minus, 0));
+  const nTrips = days.reduce((a, d) => a + d.trips, 0), km = Math.round(days.reduce((a, d) => a + d.km, 0) * 10) / 10;
+  const avgDay = days.length ? r2(earned / days.length) : 0, avgTrip = nTrips ? r2(earned / nTrips) : 0, avgKm = days.length ? Math.round((km / days.length) * 10) / 10 : 0;
+  const bal = rows.length ? rows[rows.length - 1].bal : 0;
+  const fd = (k) => { const d = parseKey(k); return Number.isNaN(d.getTime()) ? k : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); };
+  const wd = (k) => { const d = parseKey(k); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { weekday: 'short' }); };
   const rep = {
     title: `Driver statement — ${u.name}`,
-    subtitle: `${u.vehicle ? `${u.vehicle} · ` : ''}generated ${dateKey(new Date())} · balance ${rows.length ? rows[rows.length - 1].bal : 0} AED`,
+    subtitle: `${u.vehicle ? `${u.vehicle} · ` : ''}generated ${dateKey(new Date())} · ${days.length} days · ${nTrips} trips · ${km} km · earned ${earned} · paid ${paid} · balance ${bal} AED · average ${avgDay} AED / day`,
     filename: `driver-statement-${u.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
     orientation: 'portrait',
-    sheets: [{ name: 'Statement', columns: ['Date', 'Type', 'Details', 'Km', 'Earned (AED)', 'Paid (AED)', 'Balance (AED)', 'Note'], widths: [11, 9, 36, 7, 12, 12, 13, 22],
-      rows: rows.map((r) => [r.date, r.type, r.desc, r.km, r.plus || '', r.minus || '', r.bal, r.flag]),
-      totals: ['TOTAL', '', '', '', Math.round(rows.reduce((a, r) => a + r.plus, 0) * 100) / 100, Math.round(rows.reduce((a, r) => a + r.minus, 0) * 100) / 100, rows.length ? rows[rows.length - 1].bal : 0, ''] }],
+    sheets: [
+      { name: 'Statement', columns: ['Date', 'Type', 'Details', 'Km', 'Earned (AED)', 'Paid (AED)', 'Balance (AED)', 'Note'], widths: [12, 9, 36, 7, 12, 12, 13, 22],
+        rows: rows.map((r) => [r.date, r.type, r.desc, r.km, r.plus || '', r.minus || '', r.bal, r.flag]),
+        totals: ['TOTAL', '', '', km, earned, paid, bal, ''] },
+      { name: 'Daily costing', columns: ['Date', 'Day', 'Trips', 'Km', 'Cost (AED)'], widths: [12, 7, 8, 9, 13],
+        rows: [...days.map((d) => [d.date, wd(d.date), d.trips, d.km, d.cost]), ['AVERAGE / DAY', '', days.length ? r2(nTrips / days.length) : 0, avgKm, avgDay]],
+        totals: [`TOTAL (${days.length} days)`, '', nTrips, km, earned] },
+    ],
   };
+  const tile = (l, v, sub = '') => `<div class="ds-tile"><div class="ac-cap">${l}</div><b>${v}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
   modal({
     title: rep.title, wide: true,
-    body: `<div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="t tr-t"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="num">Earned</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead><tbody>
-      ${rows.map((r) => `<tr><td>${esc(r.date)}</td><td>${r.type === 'Payment' ? pill('Payment', 'green') : pill('Trip', 'purple')}</td>
+    body: `<div class="ds-tiles">
+        ${tile('Earned', fmtMoney(earned), `${nTrips} trips · ${km} km`)}
+        ${tile('Paid', fmtMoney(paid))}
+        ${tile('Balance due', fmtMoney(bal), bal > 0 ? 'still to pay the driver' : 'nothing due').replace('<b>', `<b style="color:${bal > 0 ? '#D64545' : '#2E9E6A'}">`)}
+        ${tile('Average / day', fmtMoney(avgDay), `${days.length} working days · ${avgKm} km/day`)}
+        ${tile('Average / trip', fmtMoney(avgTrip))}
+      </div>
+      <div class="seg" style="margin:12px 0 8px"><button class="btn sm" data-v="day">Daily costing</button><button class="btn sm ghost" data-v="all">All trips & payments</button></div>
+      <div id="ds-day" class="table-wrap" style="max-height:52vh;overflow:auto"><table class="t ac-t"><thead><tr><th>Date</th><th class="num">Trips</th><th class="num">Km</th><th class="num">Cost</th></tr></thead><tbody>
+        ${days.map((d) => `<tr><td class="nowrap"><b>${esc(fd(d.date))}</b> <span class="small muted">${wd(d.date)}</span></td><td class="num">${d.trips}</td><td class="num">${d.km}</td><td class="num"><b>${fmtMoney(d.cost)}</b></td></tr>`).join('') || '<tr><td colspan="4"><div class="empty">No trips</div></td></tr>'}
+        </tbody>${days.length ? `<tfoot><tr class="ds-avg"><td>Average / day</td><td class="num">${r2(nTrips / days.length)}</td><td class="num">${avgKm}</td><td class="num">${fmtMoney(avgDay)}</td></tr>
+          <tr class="ds-tot"><td>Total · ${days.length} days</td><td class="num">${nTrips}</td><td class="num">${km}</td><td class="num">${fmtMoney(earned)}</td></tr></tfoot>` : ''}</table></div>
+      <div id="ds-all" class="table-wrap" style="max-height:52vh;overflow:auto;display:none"><table class="t ac-t"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="num">Earned</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead><tbody>
+      ${rows.map((r, i) => `${i && rows[i - 1].date !== r.date ? '' : ''}<tr><td class="nowrap">${esc(fd(r.date))}</td><td>${r.type === 'Payment' ? pill('Payment', 'green') : pill(r.type === 'Staff ride' ? 'Ride' : 'Trip', 'purple')}</td>
         <td class="small">${esc(r.desc)}${r.km !== '' ? ` · ${r.km} km` : ''}${r.flag ? `<div class="muted">${esc(r.flag)}</div>` : ''}</td>
         <td class="num">${r.plus ? fmtMoney(r.plus) : ''}</td><td class="num" style="color:#1f7a50">${r.minus ? fmtMoney(r.minus) : ''}</td><td class="num"><b>${fmtMoney(r.bal)}</b></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">Nothing yet</div></td></tr>'}
       </tbody></table></div>`,
     foot: '<button class="btn ghost" data-x2>Close</button><button class="btn ghost" data-f="pdf">PDF</button><button class="btn" data-f="xlsx">Excel</button>',
     onMount: (el, close) => {
       el.querySelector('[data-x2]').onclick = close;
+      el.querySelectorAll('[data-v]').forEach((b) => {
+        b.onclick = () => {
+          el.querySelectorAll('[data-v]').forEach((x) => x.classList.toggle('ghost', x !== b));
+          el.querySelector('#ds-day').style.display = b.dataset.v === 'day' ? '' : 'none';
+          el.querySelector('#ds-all').style.display = b.dataset.v === 'all' ? '' : 'none';
+        };
+      });
       el.querySelectorAll('[data-f]').forEach((b) => { b.onclick = async () => { try { await downloadReport(rep, b.dataset.f); } catch (e) { toast(friendlyError(e), true); } }; });
     },
   });

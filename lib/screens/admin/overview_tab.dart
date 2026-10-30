@@ -27,6 +27,8 @@ class OverviewTab extends StatefulWidget {
 class _OverviewTabState extends State<OverviewTab> {
   late final Stream<List<SiteUpdate>> _updates = Db.recentUpdates(limit: 6);
   late final Stream<List<CompanyDoc>> _companyDocs = Db.companyDocsStream();
+  late Future<({double inc, double exp, int nIn, int nOut, double cash, double bank})> _cashPos = Db.acctPosition();
+  late final Stream<List<PendingPay>> _pendingPays = Db.pendingStream();
 
   void _openEmployee(AppUser u) {
     Navigator.of(context).push(MaterialPageRoute(
@@ -144,6 +146,67 @@ class _OverviewTabState extends State<OverviewTab> {
     ];
   }
 
+  String _m(double v) => '${v < 0 ? '−' : ''}${fmtMoney((v.abs() * 100).round() / 100)}';
+
+  /// Current cash position (all dates) + pending to pay / receive. Tap → Accounts.
+  Widget _cashCard() => FutureBuilder<({double inc, double exp, int nIn, int nOut, double cash, double bank})>(
+        future: _cashPos,
+        builder: (context, snap) {
+          final p = snap.data;
+          if (p == null) return const SizedBox.shrink();
+          return StreamBuilder<List<PendingPay>>(
+            stream: _pendingPays,
+            builder: (context, ps) {
+              final open = (ps.data ?? const <PendingPay>[]).where((x) => x.isOpen);
+              final toPay = open.where((x) => !x.isReceive).fold<double>(0, (a, x) => a + x.remaining);
+              final toGet = open.where((x) => x.isReceive).fold<double>(0, (a, x) => a + x.remaining);
+              final bal = p.cash + p.bank;
+              final proj = bal - toPay + toGet;
+              Widget cell(String l, String v, Color c) => Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(l, style: const TextStyle(color: Color(0xFFB9B9BC), fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: .5)),
+                      FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(v, style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 14))),
+                    ]),
+                  );
+              return GestureDetector(
+                onTap: () {
+                  setState(() => _cashPos = Db.acctPosition());
+                  final i = widget.me.isAdmin ? 6 : 5;
+                  widget.onNavigate(i);
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [Color(0xFF2E2E2F), Color(0xFF232324)]),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      const Text('CURRENT BALANCE', style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: .8)),
+                      const Spacer(),
+                      const Icon(Icons.chevron_right, color: Colors.white54, size: 18),
+                    ]),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(_m(bal), style: TextStyle(color: bal < 0 ? const Color(0xFFFF8A8A) : Colors.white, fontSize: 26, fontWeight: FontWeight.w800)),
+                    ),
+                    Text('Cash ${_m(p.cash)}  ·  Bank ${_m(p.bank)}', style: const TextStyle(color: Color(0xFFD8D8DA), fontSize: 12.5)),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      cell('TO PAY', fmtMoney((toPay * 100).round() / 100), const Color(0xFFFF9EB8)),
+                      cell('TO RECEIVE', fmtMoney((toGet * 100).round() / 100), const Color(0xFF9CC3FF)),
+                      cell('PROJECTED', _m(proj), proj < 0 ? const Color(0xFFFF8A8A) : Colors.white),
+                    ]),
+                  ]),
+                ),
+              );
+            },
+          );
+        },
+      );
+
   /// Company documents expired or expiring within 15 days.
   Widget _companyReminder() => StreamBuilder<List<CompanyDoc>>(
         stream: _companyDocs,
@@ -251,6 +314,7 @@ class _OverviewTabState extends State<OverviewTab> {
                     ),
                   ),
                 ),
+              if (widget.me.seesAccounts) _cashCard(),
               _companyReminder(),
               StatGrid(children: [
                 StatTile(

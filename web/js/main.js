@@ -1,4 +1,4 @@
-import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, ROLE_LABEL } from './fb.js';
+import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, ROLE_LABEL } from './fb.js';
 import { esc, icon, avatar, friendlyError } from './util.js';
 import * as dashboard from './pages/dashboard.js';
 import * as livemap from './pages/livemap.js';
@@ -62,9 +62,9 @@ const NAV = [
   { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
   { path: 'company', label: 'Company documents', icon: 'company', page: company },
   { path: 'requests', label: 'Change requests', icon: 'requests', page: requests, badge: () => store.requests.length },
-  { sep: 'Finance', adminOnly: true },
+  { sep: 'Finance', adminOnly: true, accounts: true },
   { path: 'petty', label: 'Petty cash', icon: 'petty', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
-  { path: 'accounts', label: 'Accounts', icon: 'accounts', page: accounts, adminOnly: true },
+  { path: 'accounts', label: 'Accounts', icon: 'accounts', page: accounts, adminOnly: true, accounts: true },
   { sep: 'Output' },
   { path: 'reports', label: 'Reports', icon: 'reports', page: reports },
   { path: 'backup', label: 'Backup & storage', icon: 'backup', page: backup, adminOnly: true },
@@ -190,12 +190,19 @@ function renderWarn() {
     ${errs.some((e) => /permission/i.test(e)) ? '<br>This usually means the latest <b>Firestore rules are not published</b>. Copy them from <a href="https://raw.githubusercontent.com/anwar3000/llct-att/main/firestore.rules" target="_blank" rel="noopener">firestore.rules</a> → Firebase → Firestore Database → Rules → Publish, then reload.' : ''}</div></div>` : '';
 }
 
+/** Which menu items this person sees: managers everything but admin pages; Accounts also for people allowed to view it. */
+function navAllowed(n) {
+  if (isLimited()) return !!n.accounts && canSeeAccounts();
+  if (n.accounts) return canSeeAccounts();
+  return !n.adminOnly || isAdmin();
+}
+
 function renderNav() {
   renderWarn();
   const nav = document.getElementById('nav');
   if (!nav) return;
   const { base } = currentPath();
-  nav.innerHTML = NAV.filter((n) => !n.adminOnly || isAdmin()).map((n) => {
+  nav.innerHTML = NAV.filter(navAllowed).map((n) => {
     if (n.sep) return `<div class="sep">${n.sep}</div>`;
     const b = n.badge ? n.badge() : 0;
     return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}" title="${n.label}">${navIcon(n.icon)}<span class="nl">${n.label}</span>${b ? `<span class="badge${n.badgeColor ? ` ${n.badgeColor}` : ''}">${b}</span>` : ''}</a>`;
@@ -215,7 +222,7 @@ function route() {
   if (cleanup) { try { cleanup(); } catch (e) { console.error(e); } cleanup = null; }
   document.getElementById('sidebar')?.classList.remove('open');
   const { base, params } = currentPath();
-  const entry = NAV.find((n) => !n.sep && n.path === base && (!n.adminOnly || isAdmin())) || NAV[0];
+  const entry = NAV.find((n) => !n.sep && n.path === base && navAllowed(n)) || NAV.find((n) => !n.sep && navAllowed(n)) || NAV[0];
   renderNav();
   content.innerHTML = '';
   setHeader(entry.label);
@@ -240,13 +247,16 @@ onAuthStateChanged(auth, async (user) => {
       await logout();
       return;
     }
-    if (!['admin', 'manager'].includes(me.role) || !me.active) {
+    const viewer = me.active && (me.canViewAccounts === true || me.canEditAccounts === true);
+    if ((!['admin', 'manager'].includes(me.role) || !me.active) && !viewer) {
       loginError = me.role === 'docs' ? 'Document clerks use the Documents Portal: open portal.html on this site.' : 'This dashboard is for managers only. Staff should use the mobile app.';
       await logout();
       return;
     }
     store.me = me;
-    store.start();
+    // Staff with only the Accounts permission get just that page (no other dashboard data).
+    if (['admin', 'manager'].includes(me.role)) store.start();
+    else if (!location.hash.startsWith('#/accounts')) location.hash = '#/accounts';
     renderShell();
   } catch (e) {
     loginError = friendlyError(e);

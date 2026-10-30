@@ -1,4 +1,4 @@
-import { watchCompanyDocs, companyDueState, daysUntil, store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
+import { acctPositionNow, canSeeAccounts, watchCompanyDocs, companyDueState, daysUntil, store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
 import {
   esc, fromTz, STAFF_COLOR, EXT_COLOR, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
@@ -19,6 +19,22 @@ export function mount(el, _params, { setHeader }) {
   let trend = null; // last 14 days minutes
   let updates = [];
   let companyDocs = [];
+  // Current cash position (admin / people allowed to see Accounts).
+  let cashPos = null;
+  if (canSeeAccounts()) acctPositionNow().then((p) => { cashPos = p; draw(); }).catch((e) => console.warn('cash position', e));
+  const m2 = (v) => `${v < 0 ? '−' : ''}${fmtMoney(Math.abs(v))}`;
+  const cashCard = () => {
+    if (!cashPos) return '';
+    const P = cashPos;
+    return `<a class="card mt dash-cash" href="#/accounts">
+      <div class="dc-main"><div class="dc-cap">Current balance</div><div class="dc-big ${P.bal < 0 ? 'neg' : ''}">${m2(P.bal)}</div>
+        <div class="dc-split"><span><i style="background:#D98A1A"></i>Cash ${m2(P.cash)}</span><span><i style="background:#6FA8FF"></i>Bank ${m2(P.bank)}</span></div>
+        ${P.hasOpening ? '' : '<div class="dc-hint">Set the opening balance on the Accounts page for a true figure.</div>'}</div>
+      <div class="dc-cell"><div class="dc-cap">To pay</div><b style="color:#C2557A">${fmtMoney(P.toPay)}</b>${P.overdue ? `<span class="small" style="color:#D64545">${P.overdue} overdue</span>` : '<span class="small muted">pending</span>'}</div>
+      <div class="dc-cell"><div class="dc-cap">To receive</div><b style="color:#3A7BD5">${fmtMoney(P.toGet)}</b><span class="small muted">pending</span></div>
+      <div class="dc-cell"><div class="dc-cap">Projected</div><b style="color:${P.projected < 0 ? '#D64545' : '#2B2B2C'}">${m2(P.projected)}</b><span class="small muted">after pending</span></div>
+    </a>`;
+  };
   // Company documents expired or expiring within 15 days.
   const companyDue = () => companyDocs.filter((d) => ['expired', 'soon'].includes(companyDueState(d.expiry)))
     .sort((a, b) => a.expiry.localeCompare(b.expiry));
@@ -117,6 +133,7 @@ export function mount(el, _params, { setHeader }) {
         : kpi('Pending approvals', store.pendingOff.length + store.pendingSites.length + store.requests.length, `off days, new sites & ${store.requests.length} document changes`, 'pending', '#E08E2B', store.requests.length ? 'requests' : '')}
     </div>
 
+    ${cashCard()}
     ${companyCard()}
     ${forgot.length || flagged.length || store.alerts.length ? `
     <div class="card mt">

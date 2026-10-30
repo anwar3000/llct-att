@@ -1471,6 +1471,87 @@ class Db {
     await b.commit();
   }
 
+  // ---------------------------------------------------------------- accounts change requests (approval)
+  static CollectionReference<Map<String, dynamic>> get acctRequests => _fs.collection('acctRequests');
+  static Stream<List<AcctRequest>> acctRequestsStream() => acctRequests.snapshots().map((q) => q.docs.map(AcctRequest.fromDoc).toList()
+    ..sort((a, b) => (b.createdAt ?? DateTime(2100)).compareTo(a.createdAt ?? DateTime(2100))));
+
+  static Future<void> requestAcctChange({
+    required String action,
+    required String target,
+    String targetId = '',
+    Map<String, dynamic> data = const {},
+    Map<String, dynamic>? before,
+    String? photoBase64,
+    required AppUser by,
+  }) =>
+      acctRequests.add({
+        'action': action,
+        'target': target,
+        'targetId': targetId,
+        'data': data,
+        'before': before,
+        if (photoBase64 != null) 'file': {'name': 'receipt.jpg', 'mime': 'image/jpeg', 'base64': photoBase64},
+        'status': 'pending',
+        'requestedBy': by.name,
+        'requestedById': by.id,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+  static Future<void> cancelAcctRequest(AcctRequest r) => acctRequests.doc(r.id).delete();
+
+  static Future<void> rejectAcctRequest(AcctRequest r, AppUser by, [String note = '']) => acctRequests.doc(r.id).update({
+        'status': 'rejected',
+        'note': note,
+        'decidedBy': by.name,
+        'decidedAt': FieldValue.serverTimestamp(),
+        'file': null,
+      });
+
+  /// Admin: applies the requested change, then marks the request approved.
+  static Future<void> approveAcctRequest(AcctRequest r, AppUser by) async {
+    final d = Map<String, dynamic>.from(r.data);
+    if (r.target == 'entry') {
+      if (r.action == 'delete') {
+        final snap = await acct.doc(r.targetId).get();
+        if (snap.exists) await deleteAcct(AcctEntry.fromDoc(snap));
+      } else {
+        final f = r.file;
+        final ref = r.action == 'update' ? acct.doc(r.targetId) : acct.doc();
+        final b = _fs.batch();
+        b.set(ref, {
+          ...d,
+          'month': '${d['date'] ?? ''}'.length >= 7 ? '${d['date']}'.substring(0, 7) : '',
+          'requestedBy': r.requestedBy,
+          if (f != null) 'hasFile': true,
+          if (f != null) 'fileName': f['name'] ?? 'receipt.jpg',
+          if (f != null) 'fileMime': f['mime'] ?? 'image/jpeg',
+          if (r.action == 'create') 'createdBy': r.requestedBy,
+          if (r.action == 'create') 'createdById': r.requestedById,
+          if (r.action == 'create') 'createdAt': FieldValue.serverTimestamp(),
+          if (r.action == 'update') 'editedBy': '${r.requestedBy} (approved by ${by.name})',
+          if (r.action == 'update') 'editedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        if (f != null) b.set(_fs.collection('acctFiles').doc(ref.id), {'base64': f['base64'], 'mime': f['mime'] ?? 'image/jpeg', 'name': f['name'] ?? 'receipt.jpg'});
+        await b.commit();
+      }
+    } else if (r.target == 'pending') {
+      if (r.action == 'delete') {
+        await deletePending(r.targetId);
+      } else if (r.action == 'pay') {
+        final snap = await acctPending.doc(r.targetId).get();
+        if (!snap.exists) throw Exception('That pending payment no longer exists.');
+        final p = PendingPay.fromDoc(snap);
+        final amt = (d['amount'] as num?)?.toDouble() ?? 0;
+        if (amt > p.remaining + 0.005) throw Exception('Only ${fmtMoney(p.remaining)} is still pending — reject this request.');
+        await payPending(p, amount: amt, date: '${d['date']}', method: '${d['method'] ?? 'Bank transfer'}', reference: '${d['reference'] ?? ''}', by: by);
+      } else {
+        await savePending(id: r.action == 'update' ? r.targetId : null, data: d, by: by);
+      }
+    }
+    await acctRequests.doc(r.id).update({'status': 'approved', 'decidedBy': by.name, 'decidedAt': FieldValue.serverTimestamp(), 'file': null});
+  }
+
   static Future<({String base64, String mime})?> acctFile(String id) async {
     final d = await _fs.collection('acctFiles').doc(id).get();
     final m = d.data();

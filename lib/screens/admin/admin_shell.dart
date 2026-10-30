@@ -49,9 +49,10 @@ class _AdminShellState extends State<AdminShell> {
     (icon: Icons.menu_book_outlined, active: Icons.menu_book_rounded, label: 'Accounts'),
   ];
 
-  /// Managers don't see petty cash and accounts.
-  List<({IconData icon, IconData active, String label})> get _items =>
-      widget.me.isAdmin ? _allItems : _allItems.sublist(0, 5);
+  /// Managers don't see petty cash; they see Accounts only when admin gave them the Accounts permission.
+  List<({IconData icon, IconData active, String label})> get _items => widget.me.isAdmin
+      ? _allItems
+      : [..._allItems.sublist(0, 5), if (widget.me.seesAccounts) _allItems[6]];
 
   void go(int i) => setState(() => _index = i.clamp(0, _items.length - 1));
 
@@ -74,7 +75,7 @@ class _AdminShellState extends State<AdminShell> {
       SitesTab(me: widget.me, live: _live),
       TripsTab(me: widget.me, live: _live),
       if (widget.me.isAdmin) PettyAdminTab(me: widget.me, live: _live),
-      if (widget.me.isAdmin) AccountsTab(me: widget.me, live: _live),
+      if (widget.me.seesAccounts) AccountsTab(me: widget.me, live: _live),
     ];
     final body = IndexedStack(index: _index, children: pages);
 

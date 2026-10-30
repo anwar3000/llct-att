@@ -29,6 +29,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
   late bool _active = widget.existing?.active ?? true;
   late bool _driver = widget.existing?.isDriver ?? false;
   late bool _ids = widget.existing?.canViewIds ?? false;
+  late String _acc = (widget.existing?.canEditAccounts ?? false) ? 'edit' : ((widget.existing?.canViewAccounts ?? false) ? 'view' : 'none');
   late final _vehicle = TextEditingController(text: widget.existing?.vehicle);
   late final _rate = TextEditingController(
       text: widget.existing?.tripRatePerKm == null ? '' : widget.existing!.tripRatePerKm!.toString());
@@ -61,6 +62,8 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           'active': _active,
           'isDriver': _role == 'employee' && _driver,
           'canViewIds': _role != 'admin' && _ids,
+          'canViewAccounts': _role != 'admin' && _acc != 'none',
+          'canEditAccounts': _role != 'admin' && _acc == 'edit',
           'vehicle': _vehicle.text.trim(),
           'tripRatePerKm': double.tryParse(_rate.text.trim()),
         });
@@ -77,6 +80,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
         );
         if (_email.text.trim().isNotEmpty) await Db.updateUser(uid, {'contactEmail': _email.text.trim()});
         if (_role != 'admin' && _ids) await Db.updateUser(uid, {'canViewIds': true});
+        if (_role != 'admin' && _acc != 'none') await Db.updateUser(uid, {'canViewAccounts': true, 'canEditAccounts': _acc == 'edit'});
         if (_role == 'employee' && _driver) {
           await Db.updateUser(uid, {
             'isDriver': true,
@@ -290,6 +294,38 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
                       'Sees everyone\'s passport, Emirates ID, visa, SIRA and MCC copies in the app and can share / download them and the ID sheet PDF.'),
                   value: _ids,
                   onChanged: (v) => setState(() => _ids = v),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Row(children: [
+                      Icon(Icons.menu_book_outlined, color: AppColors.muted),
+                      SizedBox(width: 12),
+                      Text('Accounts', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                    ]),
+                    const SizedBox(height: 10),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'none', label: Text('No access')),
+                        ButtonSegment(value: 'view', label: Text('View')),
+                        ButtonSegment(value: 'edit', label: Text('Edit*')),
+                      ],
+                      selected: {_acc},
+                      onSelectionChanged: (v) => setState(() => _acc = v.first),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _acc == 'edit'
+                          ? '*Can add / change / delete income, expenses and pending payments — every change waits for admin approval.'
+                          : _acc == 'view'
+                              ? 'Sees the Accounts page (balance, income, expenses, pending payments) — read only.'
+                              : 'No access to Accounts.',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+                    ),
+                  ]),
                 ),
               ),
             ],

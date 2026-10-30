@@ -1,7 +1,7 @@
 // Accounts (admin only): income & expenditure. Manual entries plus automatic lines for
 // petty cash given to staff and payments to drivers.
 import {
-  store, isAdmin, watchAcct, saveAcct, deleteAcct, removeAcctFile, readAcctFile, autoAcctLines,
+  store, isAdmin, canSeeAccounts, acctMode, watchAcctRequests, requestAcctChange, cancelAcctRequest, approveAcctRequest, rejectAcctRequest, watchAcct, saveAcct, deleteAcct, removeAcctFile, readAcctFile, autoAcctLines,
   watchAcctAll, watchPending, savePending, deletePending, payPending,
   getAcctOpening, saveAcctOpening, acctBroughtForward, getAcctParties, saveAcctParty,
   ACCT_INCOME, ACCT_EXPENSE, ACCT_METHODS, isBankMethod, convertCashToBank,
@@ -20,14 +20,21 @@ function withProject(e) {
   return p ? { ...e, projectId: p.id, projectName: projLabel(p) } : e;
 }
 const r2 = (n) => Math.round((n || 0) * 100) / 100;
+// 'admin' = full, 'editor' = changes wait for admin approval, 'viewer' = read-only. Set when the page opens.
+let MODE = 'admin';
+const ASK = () => MODE === 'editor';
+const sentForApproval = () => toast('Sent to admin for approval — it will show in the accounts once approved.');
 
 export function mount(el, _p, { setHeader }) {
-  if (!isAdmin()) { el.innerHTML = '<div class="card empty"><b>Admins only</b>Accounts are visible to admins.</div>'; return () => {}; }
-  setHeader('Accounts', 'Company position, money still to pay / receive, and the income & expenditure statement',
-    `<button class="btn" id="ac-inc" style="background:${GREEN};border-color:${GREEN}">${icon('plus', 16)} Income</button>
+  if (!canSeeAccounts()) { el.innerHTML = '<div class="card empty"><b>Admins only</b>Ask admin for the Accounts permission.</div>'; return () => {}; }
+  MODE = acctMode();
+  const canWrite = MODE !== 'viewer';
+  setHeader('Accounts', MODE === 'admin' ? 'Company position, money still to pay / receive, and the income & expenditure statement'
+    : MODE === 'editor' ? 'Your changes are sent to admin and show here once approved' : 'View only',
+    `${canWrite ? `<button class="btn" id="ac-inc" style="background:${GREEN};border-color:${GREEN}">${icon('plus', 16)} Income</button>
      <button class="btn" id="ac-exp" style="background:${RED};border-color:${RED}">${icon('plus', 16)} Expense</button>
-     <button class="btn ghost" id="ac-pend">${icon('pending', 16)} Pending payment</button>
-     <button class="btn ghost" id="ac-open">Opening balance</button>
+     <button class="btn ghost" id="ac-pend">${icon('pending', 16)} Pending payment</button>` : ''}
+     ${MODE === 'admin' ? '<button class="btn ghost" id="ac-open">Opening balance</button>' : ''}
      <button class="btn ghost" id="ac-xlsx">${icon('download', 16)} Excel</button><button class="btn ghost" id="ac-pdf">PDF</button>`);
 
   const now = new Date();
@@ -36,6 +43,7 @@ export function mount(el, _p, { setHeader }) {
   let manual = null, auto = [], unsub = null, err = null;
   let all = null, allAuto = null, pending = null, pendErr = null;
   let type = '', cat = '', method = '', q = '', showAuto = true, pendTab = 'open';
+  let reqs = null;
   let opening = { date: '', cash: 0, bank: 0 }, bf = null;
 
   function load() {
@@ -96,6 +104,38 @@ export function mount(el, _p, { setHeader }) {
     </div>`;
   }
 
+  // ---------------------------------------------------------------- approval requests
+  function reqText(r) {
+    const d = r.data || {}, b = r.before || {};
+    const what = r.target === 'pending' ? (r.action === 'pay' ? 'Pay pending' : 'Pending payment') : (d.type || b.type) === 'income' ? 'Income' : 'Expense';
+    const verb = { create: 'Add', update: 'Change', delete: 'Delete', pay: '' }[r.action] || r.action;
+    const amt = d.amount != null ? fmtMoney(d.amount) : b.amount != null ? fmtMoney(b.amount) : '';
+    const who = d.party || b.party || '';
+    const cat2 = d.category || b.category || '';
+    const changed = r.action === 'update' && r.before ? Object.keys(d).filter((k) => !['projectName'].includes(k) && String(d[k] ?? '') !== String(b[k] ?? ''))
+      .map((k) => `${k}: ${b[k] ?? '—'} → ${d[k] ?? '—'}`).join(' · ') : '';
+    return { title: `${verb} ${what}`.trim(), line: [d.date || b.date, cat2, who, amt].filter(Boolean).join(' · '), changed, note: d.note || '' };
+  }
+  function requestsHtml() {
+    if (MODE === 'viewer' || !reqs) return '';
+    const open = reqs.filter((r) => r.status === 'pending');
+    if (MODE === 'admin') {
+      if (!open.length) return '';
+      return `<div class="card mt ac-req"><div class="card-head">${icon('pending', 18, '#D98A1A')}<h2>Waiting for your approval (${open.length})</h2></div>
+        ${open.map((r) => { const t = reqText(r); return `<div class="list-item">
+          <div class="grow"><b>${esc(t.title)}</b> <span class="small muted">by ${esc(r.requestedBy)} · ${r.createdAt ? esc(fmtDate(r.createdAt)) : ''}</span>
+            <div class="small">${esc(t.line)}</div>${t.changed ? `<div class="small muted">${esc(t.changed)}</div>` : ''}${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ''}${r.file ? '<div class="small muted">📎 copy attached</div>' : ''}</div>
+          <button class="btn sm" data-rok="${r.id}" style="background:${GREEN};border-color:${GREEN}">Approve</button>
+          <button class="btn sm ghost" data-rno="${r.id}">Reject</button></div>`; }).join('')}</div>`;
+    }
+    const mine = reqs.filter((r) => r.requestedById === store.me?.id).slice(0, 12);
+    if (!mine.length) return '';
+    return `<div class="card mt ac-req"><div class="card-head"><h2>Your requests</h2><span class="small muted">${open.filter((r) => r.requestedById === store.me?.id).length} waiting for admin</span></div>
+      ${mine.map((r) => { const t = reqText(r); return `<div class="list-item"><div class="grow"><b>${esc(t.title)}</b> <span class="small muted">${r.createdAt ? esc(fmtDate(r.createdAt)) : ''}</span><div class="small">${esc(t.line)}</div>
+        ${r.status === 'rejected' && r.note ? `<div class="small" style="color:${RED}">Admin: ${esc(r.note)}</div>` : ''}</div>
+        ${r.status === 'pending' ? `${pill('Waiting for approval', 'amber')} <button class="btn sm ghost" data-rcancel="${r.id}">Cancel</button>` : r.status === 'approved' ? pill(`Approved${r.decidedBy ? ` by ${r.decidedBy}` : ''}`, 'green') : pill('Rejected', 'red')}</div>`; }).join('')}</div>`;
+  }
+
   // ---------------------------------------------------------------- pending payments & projection
   function pendingHtml(P) {
     if (pendErr) return `<div class="card mt pad" style="background:#fbe6e6;color:#8f2a2a">Pending payments can't load: ${esc(pendErr.code || pendErr.message)}. Publish the latest Firestore rules.</div>`;
@@ -117,7 +157,7 @@ export function mount(el, _p, { setHeader }) {
     return `<div class="grid cols-2-1 mt ac-pend">
       <div class="card"><div class="card-head"><h2>Pending payments</h2>
         <div class="seg">${[['open', 'All open'], ['pay', 'To pay'], ['receive', 'To receive'], ['done', 'Settled']].map(([k, l]) => `<button class="btn sm ${pendTab === k ? '' : 'ghost'}" data-ptab="${k}">${l}</button>`).join('')}</div>
-        <span class="spacer"></span><button class="btn sm" data-padd="pay" style="background:${RED};border-color:${RED}">${icon('plus', 14)} Add to pay</button><button class="btn sm" data-padd="receive" style="background:${GREEN};border-color:${GREEN}">${icon('plus', 14)} Add to receive</button></div>
+        <span class="spacer"></span>${MODE === 'viewer' ? '' : `<button class="btn sm" data-padd="pay" style="background:${RED};border-color:${RED}">${icon('plus', 14)} Add to pay</button><button class="btn sm" data-padd="receive" style="background:${GREEN};border-color:${GREEN}">${icon('plus', 14)} Add to receive</button>`}</div>
         ${pending == null ? '<div class="empty">Loading…</div>' : shown.length ? `<div class="table-wrap"><table class="t ac-t"><thead><tr><th>Due</th><th>Party</th><th>For</th><th class="num">Amount</th><th class="num">Paid</th><th class="num">Remaining</th><th></th></tr></thead><tbody>
           ${shown.map((p) => `<tr>
             <td class="nowrap">${p.dueDate ? esc(fmtDate(parseKey(p.dueDate))) : '—'}<div>${due(p)}</div></td>
@@ -126,8 +166,8 @@ export function mount(el, _p, { setHeader }) {
             <td class="num">${fmtMoney(p.amount)}</td>
             <td class="num small muted">${p.paid ? fmtMoney(p.paid) : '—'}</td>
             <td class="num"><b style="color:${p.type === 'pay' ? RED : GREEN}">${fmtMoney(p.remaining)}</b></td>
-            <td class="nowrap">${p.status === 'open' ? `<button class="btn sm" data-ppay="${p.id}" style="background:${p.type === 'pay' ? RED : GREEN};border-color:${p.type === 'pay' ? RED : GREEN}">${p.type === 'pay' ? 'Pay' : 'Received'}</button>` : ''}
-              <button class="btn sm ghost icon" data-pedit="${p.id}" title="Edit">${icon('edit', 14)}</button><button class="btn sm ghost icon" data-pdel="${p.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')}
+            <td class="nowrap">${MODE === 'viewer' ? '' : `${p.status === 'open' ? `<button class="btn sm" data-ppay="${p.id}" style="background:${p.type === 'pay' ? RED : GREEN};border-color:${p.type === 'pay' ? RED : GREEN}">${p.type === 'pay' ? 'Pay' : 'Received'}</button>` : ''}
+              <button class="btn sm ghost icon" data-pedit="${p.id}" title="Edit">${icon('edit', 14)}</button><button class="btn sm ghost icon" data-pdel="${p.id}" title="Delete">${icon('trash', 14)}</button>`}</td></tr>`).join('')}
           </tbody></table></div>`
           : `<div class="empty"><b>${pendTab === 'done' ? 'Nothing settled yet' : 'No pending payments'}</b>Add salaries still to pay, supplier invoices, or client payments you expect — with a due date — to see the projection.</div>`}
       </div>
@@ -167,7 +207,9 @@ export function mount(el, _p, { setHeader }) {
     const P = position();
 
     el.innerHTML = `
+    ${MODE === 'viewer' ? '<div class="card pad" style="margin-bottom:12px;background:#eef3fb;border-color:#d6e2f5">👁 <b>View only</b> — you can see and download the accounts; only admin can change them.</div>' : ''}
     ${positionHtml(P)}
+    ${requestsHtml()}
     ${pendingHtml(P)}
 
     <div class="ac-sec"><h2>Statement for the period</h2><span class="small muted">${esc(fmtDate(parseKey(from)))} – ${esc(fmtDate(parseKey(to)))}</span></div>
@@ -181,7 +223,7 @@ export function mount(el, _p, { setHeader }) {
       <input id="ac-q" placeholder="Search party, note, cheque no…" value="${esc(q)}" style="max-width:220px">
       <label class="row small" style="gap:6px"><input type="checkbox" id="ac-auto" ${showAuto ? 'checked' : ''}> Include petty cash & driver payments</label>
     </div>
-    ${cashCount ? `<div class="card pad" style="background:#fff4e2;border-color:#f3d7a6;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    ${cashCount && MODE === 'admin' ? `<div class="card pad" style="background:#fff4e2;border-color:#f3d7a6;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <div class="grow"><b>${cashCount} ${cashCount === 1 ? 'entry is' : 'entries are'} marked as paid in Cash</b> in this period.
         <span class="small muted">Change every Cash entry and driver payment (all dates) to Bank transfer?</span></div>
       <button class="btn" id="ac-tobank">Change all Cash to Bank transfer</button></div>` : ''}
@@ -205,7 +247,7 @@ export function mount(el, _p, { setHeader }) {
           <td class="small"><b>${esc(e.party || '')}</b>${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}${e.projectName ? `<div class="muted">Project: ${esc(e.projectName)}</div>` : ''}${e.siteName ? `<div class="muted">Site: ${esc(e.siteName)}</div>` : ''}</td>
           <td class="small">${esc(e.method)}${e.reference ? `<div class="muted">${e.method === 'Cheque' ? 'Chq ' : 'Ref '}${esc(e.reference)}${e.bank ? ` · ${esc(e.bank)}` : ''}</div>` : ''}${e.chequeDate ? `<div class="muted">Chq date ${esc(e.chequeDate)}</div>` : ''}</td>
           <td class="num"><b style="color:${e.type === 'income' ? GREEN : RED}">${e.type === 'income' ? '+' : '−'}${fmtMoney(e.amount)}</b></td>
-          <td style="white-space:nowrap">${e.hasFile ? `<button class="btn sm ghost icon" data-file="${e.id}" title="Receipt / copy">${icon('idcard', 15)}</button>` : ''}${e.source === 'manual'
+          <td style="white-space:nowrap">${e.hasFile ? `<button class="btn sm ghost icon" data-file="${e.id}" title="Receipt / copy">${icon('idcard', 15)}</button>` : ''}${MODE === 'viewer' ? '' : e.source === 'manual'
             ? `<button class="btn sm ghost icon" data-edit="${e.id}" title="Edit">${icon('edit', 15)}</button><button class="btn sm ghost icon" data-del="${e.id}" title="Delete">${icon('trash', 15)}</button>`
             : `<a class="btn sm ghost" href="#/${e.source === 'petty' ? 'petty' : 'trips'}" title="Change it on the ${SRC[e.source]} page">Open</a>`}</td>
         </tr>`).join('')}</tbody></table></div>`
@@ -225,6 +267,25 @@ export function mount(el, _p, { setHeader }) {
   function wire(list) {
     const find = (id) => list.find((e) => e.id === id);
     const findP = (id) => (pending || []).find((p) => p.id === id);
+    const findR = (id) => (reqs || []).find((r) => r.id === id);
+    el.querySelectorAll('[data-rok]').forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await approveAcctRequest(findR(b.dataset.rok)); toast('Approved and applied'); loadAllAuto(); loadBf(); } catch (er) { toast(friendlyError(er), true); b.disabled = false; }
+      };
+    });
+    el.querySelectorAll('[data-rno]').forEach((b) => {
+      b.onclick = () => {
+        const r = findR(b.dataset.rno);
+        modal({ title: 'Reject request', body: `<label class="f"><span>Reason (shown to ${esc(r.requestedBy)})</span><input id="rj-n" placeholder="optional"></label>`,
+          foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn danger" data-yes>Reject</button>',
+          onMount: (m, close) => {
+            m.querySelector('[data-no]').onclick = close;
+            m.querySelector('[data-yes]').onclick = async () => { try { await rejectAcctRequest(r, m.querySelector('#rj-n').value.trim()); toast('Rejected'); close(); } catch (er) { toast(friendlyError(er), true); } };
+          } });
+      };
+    });
+    el.querySelectorAll('[data-rcancel]').forEach((b) => { b.onclick = async () => { try { await cancelAcctRequest(findR(b.dataset.rcancel)); toast('Request cancelled'); } catch (er) { toast(friendlyError(er), true); } }; });
     el.querySelectorAll('[data-ptab]').forEach((b) => { b.onclick = () => { pendTab = b.dataset.ptab; draw(); }; });
     el.querySelectorAll('[data-padd]').forEach((b) => { b.onclick = () => pendingDialog(null, b.dataset.padd); });
     el.querySelectorAll('[data-pedit]').forEach((b) => { b.onclick = () => pendingDialog(findP(b.dataset.pedit)); });
@@ -233,7 +294,10 @@ export function mount(el, _p, { setHeader }) {
       b.onclick = async () => {
         const p = findP(b.dataset.pdel);
         if (!p || !await confirmBox('Delete pending payment', `Delete ${p.type === 'pay' ? 'payment to' : 'receipt from'} ${p.party || p.category} (${fmtMoney(p.remaining)} remaining)? Entries already recorded stay in the accounts.`, { ok: 'Delete', danger: true })) return;
-        try { await deletePending(p.id); toast('Deleted'); } catch (er) { toast(friendlyError(er), true); }
+        try {
+          if (ASK()) { await requestAcctChange({ action: 'delete', target: 'pending', targetId: p.id, before: { party: p.party, category: p.category, amount: p.amount, date: p.dueDate } }); sentForApproval(); }
+          else { await deletePending(p.id); toast('Deleted'); }
+        } catch (er) { toast(friendlyError(er), true); }
       };
     });
     el.querySelectorAll('[data-quick]').forEach((b) => {
@@ -261,23 +325,26 @@ export function mount(el, _p, { setHeader }) {
     qi.oninput = () => { q = qi.value; draw(); const n = el.querySelector('#ac-q'); n.focus(); n.setSelectionRange(q.length, q.length); };
     el.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = (ev) => { ev.stopPropagation(); entryDialog(find(b.dataset.edit), undefined, all || []); }; });
     el.querySelectorAll('[data-row]').forEach((r) => {
-      r.onclick = (ev) => { if (ev.target.closest('button, a')) return; const e = find(r.dataset.row); if (e && e.source === 'manual') entryDialog(e, undefined, all || []); };
+      r.onclick = (ev) => { if (ev.target.closest('button, a')) return; const e = find(r.dataset.row); if (e && e.source === 'manual' && MODE !== 'viewer') entryDialog(e, undefined, all || []); };
     });
     el.querySelectorAll('[data-del]').forEach((b) => {
       b.onclick = async (ev) => {
         ev.stopPropagation();
         const e = find(b.dataset.del);
         if (!e || !await confirmBox('Delete entry', `Delete ${e.type} of ${fmtMoney(e.amount)} (${e.category}${e.party ? `, ${e.party}` : ''}) on ${e.date}?`, { ok: 'Delete', danger: true })) return;
-        try { await deleteAcct(e); toast('Deleted'); } catch (er) { toast(friendlyError(er), true); }
+        try {
+          if (ASK()) { await requestAcctChange({ action: 'delete', target: 'entry', targetId: e.id, before: { type: e.type, date: e.date, amount: e.amount, category: e.category, party: e.party, method: e.method, note: e.note } }); sentForApproval(); }
+          else { await deleteAcct(e); toast('Deleted'); }
+        } catch (er) { toast(friendlyError(er), true); }
       };
     });
     el.querySelectorAll('[data-file]').forEach((b) => { b.onclick = (ev) => { ev.stopPropagation(); openFile(find(b.dataset.file)); }; });
   }
 
-  document.getElementById('ac-open').onclick = () => openingDialog(opening, () => { loadBf(); });
-  document.getElementById('ac-inc').onclick = () => entryDialog(null, 'income', all || []);
-  document.getElementById('ac-exp').onclick = () => entryDialog(null, 'expense', all || []);
-  document.getElementById('ac-pend').onclick = () => pendingDialog(null, 'pay');
+  document.getElementById('ac-open')?.addEventListener('click', () => openingDialog(opening, () => { loadBf(); }));
+  document.getElementById('ac-inc')?.addEventListener('click', () => entryDialog(null, 'income', all || []));
+  document.getElementById('ac-exp')?.addEventListener('click', () => entryDialog(null, 'expense', all || []));
+  document.getElementById('ac-pend')?.addEventListener('click', () => pendingDialog(null, 'pay'));
   const exp = (fmt) => async () => {
     try { await downloadReport(report(lines(), from, to, bf, position()), fmt); } catch (e) { toast(friendlyError(e), true); }
   };
@@ -288,8 +355,9 @@ export function mount(el, _p, { setHeader }) {
   loadAllAuto();
   const unAll = watchAcctAll((l) => { all = l || []; draw(); });
   const unPend = watchPending((l, e) => { pending = l || []; pendErr = e || null; draw(); });
+  const unReq = MODE === 'viewer' ? () => {} : watchAcctRequests((l) => { reqs = l || []; draw(); });
   const off = store.on(() => {});
-  return () => { off(); if (unsub) unsub(); unAll(); unPend(); };
+  return () => { off(); if (unsub) unsub(); unAll(); unPend(); unReq(); };
 }
 
 function tile(label, value, sub, color, kind) {
@@ -374,7 +442,7 @@ function entryDialog(e, kind = e?.type || 'expense', allEntries = []) {
   const color = income ? GREEN : RED;
   let file = null;
   modal({
-    title: `${e ? 'Edit' : 'Add'} ${income ? 'income' : 'expense'}`,
+    title: `${e ? 'Edit' : 'Add'} ${income ? 'income' : 'expense'}${ASK() ? ' — needs admin approval' : ''}`,
     body: `<div class="grid cols-2" style="gap:10px">
       <label class="f"><span>Date *</span><input id="ae-date" type="date" value="${esc(e?.date || dateKey(new Date()))}"></label>
       <label class="f"><span>Amount (AED) *</span><input id="ae-amt" type="number" min="0" step="0.01" value="${e ? e.amount : ''}" style="font-weight:800;color:${color}"></label>
@@ -387,7 +455,7 @@ function entryDialog(e, kind = e?.type || 'expense', allEntries = []) {
       <label class="f"><span>Project (optional)</span><select id="ae-proj"><option value="">—</option>${[...store.projects].sort((a, b) => (a.status !== 'active') - (b.status !== 'active') || a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}" ${p.id === (e?.projectId || projectOfSite(e?.siteId)?.id) ? 'selected' : ''}>${esc([p.code, p.name].filter(Boolean).join(' · '))}${p.status !== 'active' ? ` (${esc(p.status)})` : ''}</option>`).join('')}</select></label>
       <label class="f"><span>Site (optional)</span><select id="ae-site"><option value="">—</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === e?.siteId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
       <label class="f"><span>Receipt / invoice / cheque copy</span><input id="ae-file" type="file" accept="image/*,application/pdf">
-        ${e?.hasFile ? `<span class="small muted">Attached: ${esc(e.fileName)} <a href="javascript:void 0" id="ae-rmfile" style="color:${RED}">remove</a></span>` : ''}</label>
+        ${e?.hasFile ? `<span class="small muted">Attached: ${esc(e.fileName)}${ASK() ? '' : ` <a href="javascript:void 0" id="ae-rmfile" style="color:${RED}">remove</a>`}</span>` : ''}</label>
     </div>
     <label class="f"><span>Note</span><input id="ae-note" value="${esc(e?.note || '')}" placeholder="${income ? 'e.g. Project ABC — 2nd payment' : 'e.g. Cement 50 bags, invoice 1234'}"></label>
     <div class="error" id="ae-err"></div><div class="ac-added" id="ae-added"></div>`,
@@ -425,23 +493,27 @@ function entryDialog(e, kind = e?.type || 'expense', allEntries = []) {
         const chq = v('#ae-m') === 'Cheque';
         const btns = m.querySelectorAll('[data-yes], [data-next]'); btns.forEach((b) => { b.disabled = true; });
         try {
-          await saveAcct(e?.id || null, {
+          const data = {
             type: kind, date, amount, category, party: v('#ae-party').trim(), method: v('#ae-m'), reference: v('#ae-ref').trim(),
             bank: chq ? v('#ae-bank').trim() : '', chequeDate: chq ? v('#ae-cdate') : '', siteId: v('#ae-site'), note: v('#ae-note').trim(),
             projectId: v('#ae-proj'), projectName: (() => { const p = store.projects.find((x) => x.id === v('#ae-proj')); return p ? [p.code, p.name].filter(Boolean).join(' · ') : ''; })(),
-          }, file);
+          };
+          if (ASK()) {
+            await requestAcctChange({ action: e ? 'update' : 'create', target: 'entry', targetId: e?.id || '', data,
+              before: e ? { type: e.type, date: e.date, amount: e.amount, category: e.category, party: e.party, method: e.method, reference: e.reference, note: e.note, siteId: e.siteId, projectId: e.projectId || '' } : null, file });
+          } else await saveAcct(e?.id || null, data, file);
           const who = v('#ae-party').trim();
-          if (who && !saved.some((n) => n.toLowerCase() === who.toLowerCase())) { saved.push(who); saveAcctParty(partyKey, who).catch(() => {}); }
+          if (!ASK() && who && !saved.some((n) => n.toLowerCase() === who.toLowerCase())) { saved.push(who); saveAcctParty(partyKey, who).catch(() => {}); }
           if (next) {
             // Keep everything except the amount (and the attached copy) for the next entry.
             added++; addedSum = r2(addedSum + amount);
-            m.querySelector('#ae-added').innerHTML = `✓ Saved ${added} ${income ? 'income' : 'expense'}${added === 1 ? '' : 's'} · total ${fmtMoney(addedSum)} — last: ${esc(category)}${who ? `, ${esc(who)}` : ''} ${fmtMoney(amount)}`;
+            m.querySelector('#ae-added').innerHTML = `✓ ${ASK() ? 'Sent for approval' : 'Saved'} ${added} ${income ? 'income' : 'expense'}${added === 1 ? '' : 's'} · total ${fmtMoney(addedSum)} — last: ${esc(category)}${who ? `, ${esc(who)}` : ''} ${fmtMoney(amount)}`;
             m.querySelector('#ae-amt').value = '';
             m.querySelector('#ae-file').value = ''; file = null;
             btns.forEach((b) => { b.disabled = false; });
             m.querySelector('#ae-amt').focus();
           } else {
-            toast(e ? 'Saved' : `${income ? 'Income' : 'Expense'} added${added ? ` (${added + 1} in total)` : ''}`); close();
+            if (ASK()) sentForApproval(); else toast(e ? 'Saved' : `${income ? 'Income' : 'Expense'} added${added ? ` (${added + 1} in total)` : ''}`); close();
           }
         } catch (er) { m.querySelector('#ae-err').textContent = friendlyError(er); btns.forEach((b) => { b.disabled = false; }); }
       };
@@ -516,9 +588,14 @@ function pendingDialog(p, kind = p?.type || 'pay') {
         if (!(amount > 0) || !party) { m.querySelector('#pp-err').textContent = 'Who and how much are required.'; return; }
         if (p && amount < p.paid) { m.querySelector('#pp-err').textContent = `Already ${pay ? 'paid' : 'received'} ${fmtMoney(p.paid)} — the total can't be less.`; return; }
         try {
-          await savePending(p?.id || null, { type: kind, party, category: v('#pp-cat').trim(), amount, dueDate: v('#pp-due'), method: v('#pp-m'), reference: v('#pp-ref').trim(), note: v('#pp-note').trim(),
-            ...(p ? { status: amount - p.paid > 0.005 ? 'open' : 'done' } : {}) });
-          toast(p ? 'Saved' : 'Pending payment added'); close();
+          const data = { type: kind, party, category: v('#pp-cat').trim(), amount, dueDate: v('#pp-due'), method: v('#pp-m'), reference: v('#pp-ref').trim(), note: v('#pp-note').trim(),
+            ...(p ? { status: amount - p.paid > 0.005 ? 'open' : 'done' } : {}) };
+          if (ASK()) {
+            await requestAcctChange({ action: p ? 'update' : 'create', target: 'pending', targetId: p?.id || '', data,
+              before: p ? { type: p.type, party: p.party, category: p.category, amount: p.amount, dueDate: p.dueDate, note: p.note } : null });
+            sentForApproval();
+          } else toast(p ? 'Saved' : 'Pending payment added');
+          close();
         } catch (er) { m.querySelector('#pp-err').textContent = friendlyError(er); }
       };
       setTimeout(() => m.querySelector('#pp-party').focus(), 50);
@@ -550,6 +627,10 @@ function payDialog(p, onDone) {
         if (amount > p.remaining + 0.005) { m.querySelector('#py-err').textContent = `More than the remaining ${fmtMoney(p.remaining)} — edit the pending total first.`; return; }
         ev.currentTarget.disabled = true;
         try {
+          if (ASK()) {
+            await requestAcctChange({ action: 'pay', target: 'pending', targetId: p.id, data: { amount, date: v('#py-date'), method: v('#py-m'), reference: v('#py-ref').trim(), party: p.party, category: p.category, type: p.type === 'pay' ? 'expense' : 'income' } });
+            sentForApproval(); close(); return;
+          }
           await payPending(p, { amount, date: v('#py-date'), method: v('#py-m'), reference: v('#py-ref').trim() });
           toast(amount < p.remaining - 0.005 ? `Part ${pay ? 'payment' : 'receipt'} recorded — ${fmtMoney(r2(p.remaining - amount))} still pending` : `${pay ? 'Paid' : 'Received'} in full`);
           close(); onDone && onDone();

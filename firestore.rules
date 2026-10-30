@@ -25,6 +25,10 @@ service cloud.firestore {
     function isDocs() { return isActive() && role() == 'docs'; }
     // Admin can let a person view & download everyone's ID documents (and see the staff list) in the app.
     function canIds() { return isActive() && me().get('canViewIds', false) == true; }
+    // Admin can let a person (manager or employee) view the Accounts page read-only.
+    function canAccounts() { return isActive() && (me().get('canViewAccounts', false) == true || me().get('canEditAccounts', false) == true); }
+    // …and to make changes, which wait in acctRequests until an admin approves them.
+    function canAccountsEdit() { return isActive() && me().get('canEditAccounts', false) == true; }
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
     function owns() { return isActive() && resource.data.employeeId == request.auth.uid; }
     function createsOwn() { return isActive() && request.resource.data.employeeId == request.auth.uid; }
@@ -103,23 +107,36 @@ service cloud.firestore {
 
     // Payments made to drivers (accounts → admin). Each driver sees their own, so the balance tallies.
     match /driverPayments/{id} {
-      allow read: if isAdmin() || owns();
+      allow read: if isAdmin() || owns() || canAccounts();
       allow write: if isAdmin();
     }
 
     // Company accounts: income & expense entries and their receipt copies (admin only).
     match /acctEntries/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || canAccounts();
+      allow write: if isAdmin();
     }
     match /acctFiles/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || canAccounts();
+      allow write: if isAdmin();
     }
     match /acctSettings/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || canAccounts();
+      allow write: if isAdmin();
+    }
+    // Changes asked for by people with "Edit accounts" — applied only when an admin approves.
+    match /acctRequests/{id} {
+      allow read: if isAdmin() || canAccountsEdit();
+      allow create: if canAccountsEdit() && request.resource.data.status == 'pending'
+                    && request.resource.data.requestedById == request.auth.uid;
+      // the person who asked can cancel it while it is still waiting
+      allow delete: if isAdmin() || (canAccountsEdit() && resource.data.requestedById == request.auth.uid && resource.data.status == 'pending');
+      allow update: if isAdmin();
     }
     // Pending payments: money still to pay / to receive, with due dates (projection on the Accounts page).
     match /acctPending/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || canAccounts();
+      allow write: if isAdmin();
     }
 
     // Claims on a place / site name so the same new site can't be added twice (first one wins).
@@ -168,7 +185,7 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------- petty (accounts: admin only)
     match /petty/{id} {
-      allow read: if isAdmin() || owns();
+      allow read: if isAdmin() || owns() || canAccounts();
       // Staff entries always start as pending.
       allow create: if isAdmin() || (createsOwn() && request.resource.data.status == 'pending');
       allow update: if isAdmin();

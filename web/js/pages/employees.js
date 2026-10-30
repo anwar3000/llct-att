@@ -123,6 +123,15 @@ export function editPerson(u) {
       <label class="f row full" id="ef-ids" style="gap:8px;align-items:flex-start;background:#fff4e2;border-radius:10px;padding:10px 12px">
         <input type="checkbox" name="canIds" ${u?.canViewIds ? 'checked' : ''} style="margin-top:3px">
         <span><b>Can view &amp; download ID documents</b><br><span class="small muted">Sees everyone's passport, Emirates ID, visa, SIRA and MCC copies in the phone app and can share / download them and the ID sheet PDF. Admins always can.</span></span></label>
+      <div class="full" id="ef-acc" style="background:#eef3fb;border-radius:10px;padding:10px 12px">
+        <b>Accounts</b> <span class="small muted">— admins always have full access</span>
+        <div class="row" style="gap:16px;margin-top:6px;flex-wrap:wrap">
+          <label class="row" style="gap:6px"><input type="radio" name="accPerm" value="none" ${!u?.canViewAccounts && !u?.canEditAccounts ? 'checked' : ''}> No access</label>
+          <label class="row" style="gap:6px"><input type="radio" name="accPerm" value="view" ${u?.canViewAccounts && !u?.canEditAccounts ? 'checked' : ''}> View only</label>
+          <label class="row" style="gap:6px"><input type="radio" name="accPerm" value="edit" ${u?.canEditAccounts ? 'checked' : ''}> View &amp; edit — changes need admin approval</label>
+        </div>
+        <div class="small muted" style="margin-top:4px">They see the Accounts page (balance, income, expenses, pending payments) on this dashboard and in the phone app. Edits, deletions and payments wait in “Waiting for your approval” until an admin approves.</div>
+      </div>
     </div><div class="error" id="ef-err"></div></form>`,
     foot: `${editing && isAdmin() && u.id !== store.me.id ? `<button class="btn danger" data-delp style="margin-right:auto">${icon('trash', 16)} Delete person</button>` : ''}
       <button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>${editing ? 'Save changes' : 'Create login'}</button>`,
@@ -134,6 +143,7 @@ export function editPerson(u) {
         m.querySelector('#ef-drv').style.display = drv ? 'grid' : 'none';
         m.querySelector('#ef-off').style.display = drv ? 'none' : '';
         m.querySelector('#ef-ids').style.display = f.role.value === 'admin' ? 'none' : '';
+        m.querySelector('#ef-acc').style.display = f.role.value === 'admin' ? 'none' : '';
       };
       f.role.addEventListener('change', syncProfile);
       f.profile.addEventListener('change', syncProfile);
@@ -154,6 +164,8 @@ export function editPerson(u) {
           isDriver: f.role.value === 'employee' && f.profile.value === 'driver', vehicle: f.vehicle.value.trim(),
           tripRatePerKm: f.tripRate.value === '' ? null : Number(f.tripRate.value),
           canViewIds: f.role.value !== 'admin' && f.canIds.checked,
+          canViewAccounts: f.role.value !== 'admin' && ['view', 'edit'].includes(f.accPerm.value),
+          canEditAccounts: f.role.value !== 'admin' && f.accPerm.value === 'edit',
         };
         btn.disabled = true;
         try {

@@ -35,6 +35,12 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Permissions, approvals, cash on the dashboard, driver daily costing (v1.9.6):**
+  - **Accounts permission** per person (employee or manager), on the employee form (app & web): *No access* · *View only* · *View & edit — changes need admin approval*. Staff with it can log in to the web dashboard (they see only Accounts) and get an Accounts button in the phone app; managers get the Accounts tab.
+  - **Approvals:** edits, deletions, new entries, pending payments and payments made by editors wait under *Waiting for your approval* on the admin's Accounts page (web & app) — Approve applies them, Reject sends a reason back. Editors see *Your requests* with the status.
+  - **Current balance on the dashboard** (web) and admin overview (app): cash, bank, to pay, to receive, projected — tap to open Accounts.
+  - **Driver statement:** daily costing (trips, km, cost per day), average per day / trip / km-per-day, totals; dates no longer wrap; Excel has a *Daily costing* sheet.
+  - **Rules:** `canAccounts()` / `canAccountsEdit()` and the new `acctRequests` — publish `firestore.rules`.
 - **Accounts: overall position, pending payments & projection (v1.9.5):**
   - **Top of the page (any period):** current balance (cash / bank, all dates since the opening balance), total income, total expenses, money to pay, money to receive, and the projected balance after pending.
   - **Pending payments:** salaries still owed, supplier invoices, client payments expected — with due dates. *Pay* / *Received* records it in the accounts (part payments keep the rest pending). Overdue / due-soon tags, projection by due date with a warning if the balance would go below zero, and 7 / 30 / 90-day totals.

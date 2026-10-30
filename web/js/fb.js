@@ -54,6 +54,8 @@ export function mapUser(d) {
     violationsClearedAt: toDate(m.violationsClearedAt),
     isDriver: m.isDriver === true,
     canViewIds: m.canViewIds === true,
+    canViewAccounts: m.canViewAccounts === true,
+    canEditAccounts: m.canEditAccounts === true,
     vehicle: m.vehicle || '',
     tripRatePerKm: typeof m.tripRatePerKm === 'number' ? m.tripRatePerKm : null,
     lastLocation: ll && typeof ll.lat === 'number' && typeof ll.lng === 'number'
@@ -388,6 +390,71 @@ export async function payPending(p, { amount, date, method, reference = '', note
   return eref.id;
 }
 
+// ------------------------------------------------------------------ account change requests (approval)
+export function mapAcctReq(d) {
+  const m = d.data() || {};
+  return { id: d.id, action: m.action || 'create', target: m.target || 'entry', targetId: m.targetId || '', data: m.data || {}, before: m.before || null,
+    file: m.file || null, status: m.status || 'pending', note: m.note || '', requestedBy: m.requestedBy || '', requestedById: m.requestedById || '',
+    createdAt: toDate(m.createdAt), decidedBy: m.decidedBy || '', decidedAt: toDate(m.decidedAt) };
+}
+export const watchAcctRequests = (cb) => onSnapshot(C('acctRequests'),
+  (s) => cb(s.docs.map(mapAcctReq).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))), (e) => { console.error(e); cb(null, e); });
+/** Asks for a change (entry / pending payment: create, update, delete, pay). An admin applies it later. */
+export async function requestAcctChange({ action, target, targetId = '', data = {}, before = null, file = null }) {
+  const clean = JSON.parse(JSON.stringify({ data, before }));
+  await addDoc(C('acctRequests'), {
+    action, target, targetId, data: clean.data, before: clean.before, ...(file ? { file } : {}), status: 'pending',
+    requestedBy: store.me?.name || '', requestedById: store.me?.id || '', createdAt: serverTimestamp(),
+  });
+}
+export const cancelAcctRequest = (r) => deleteDoc(doc(db, 'acctRequests', r.id));
+export const rejectAcctRequest = (r, note = '') => updateDoc(doc(db, 'acctRequests', r.id), {
+  status: 'rejected', note, decidedBy: store.me?.name || '', decidedAt: serverTimestamp(), file: null });
+/** Admin: applies the requested change, then marks the request approved. */
+export async function approveAcctRequest(r) {
+  const d = { ...r.data };
+  if (r.target === 'entry') {
+    if (r.action === 'delete') {
+      const snap = await getDoc(doc(db, 'acctEntries', r.targetId));
+      if (snap.exists()) await deleteAcct(mapAcct(snap));
+    } else {
+      await saveAcct(r.action === 'update' ? r.targetId : null, { ...d, requestedBy: r.requestedBy }, r.file || null);
+    }
+  } else if (r.target === 'pending') {
+    if (r.action === 'delete') await deletePending(r.targetId);
+    else if (r.action === 'pay') {
+      const snap = await getDoc(doc(db, 'acctPending', r.targetId));
+      if (!snap.exists()) throw new Error('That pending payment no longer exists.');
+      const p = mapPending(snap);
+      if (d.amount > p.remaining + 0.005) throw new Error(`Only ${p.remaining} is still pending — reject this request.`);
+      await payPending(p, d);
+    } else await savePending(r.action === 'update' ? r.targetId : null, d);
+  }
+  await updateDoc(doc(db, 'acctRequests', r.id), { status: 'approved', decidedBy: store.me?.name || '', decidedAt: serverTimestamp(), file: null });
+}
+
+/** Current cash position (all dates since the opening balance) + pending to pay / receive — for the dashboard card. */
+export async function acctPositionNow() {
+  const [entries, auto, opening, pend] = await Promise.all([
+    getDocs(C('acctEntries')), autoAcctLines('2000-01-01', '2100-12-31'), getAcctOpening(), getDocs(C('acctPending')),
+  ]);
+  const start = opening.date || '';
+  let cash = start ? opening.cash : 0, bank = start ? opening.bank : 0, inc = 0, exp = 0;
+  for (const e of [...entries.docs.map(mapAcct), ...auto]) {
+    if (start && e.date < start) continue;
+    const s = e.type === 'income' ? e.amount : -e.amount;
+    if (e.type === 'income') inc += e.amount; else exp += e.amount;
+    if (isBankMethod(e.method)) bank += s; else cash += s;
+  }
+  const open = pend.docs.map(mapPending).filter((p) => p.status === 'open' && p.remaining > 0);
+  const today = dateKey(new Date());
+  const r = (v) => Math.round(v * 100) / 100;
+  const toPay = r(open.filter((p) => p.type === 'pay').reduce((a, p) => a + p.remaining, 0));
+  const toGet = r(open.filter((p) => p.type === 'receive').reduce((a, p) => a + p.remaining, 0));
+  return { cash: r(cash), bank: r(bank), bal: r(cash + bank), inc: r(inc), exp: r(exp), toPay, toGet, projected: r(cash + bank - toPay + toGet),
+    overdue: open.filter((p) => p.dueDate && p.dueDate < today).length, hasOpening: !!start };
+}
+
 export async function saveAcct(id, data, file = null) {
   const ref = id ? doc(db, 'acctEntries', id) : doc(C('acctEntries'));
   const site = data.siteId ? store.site(data.siteId) : null;
@@ -507,6 +574,12 @@ export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked || 
 // admin   = full access incl. accounts (petty cash, budgets) and staff logins
 // manager = everything operational, but no accounts and no staff-login admin
 export const isAdmin = () => store.me?.role === 'admin';
+/** Admin, or someone admin allowed to view Accounts (read-only). */
+export const canSeeAccounts = () => isAdmin() || store.me?.canViewAccounts === true || store.me?.canEditAccounts === true;
+/** 'admin' (full), 'editor' (changes wait for admin approval) or 'viewer' (read-only). */
+export const acctMode = () => (isAdmin() ? 'admin' : store.me?.canEditAccounts ? 'editor' : 'viewer');
+/** An employee who only has the Accounts permission (no other dashboard pages). */
+export const isLimited = () => !['admin', 'manager'].includes(store.me?.role);
 export const isManagerOrAdmin = () => ['admin', 'manager'].includes(store.me?.role);
 export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Employee', docs: 'Document clerk' };
 

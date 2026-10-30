@@ -11,6 +11,7 @@ import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/profile_prompt.dart';
 import '../../widgets/trip_card.dart';
+import '../admin/accounts_tab.dart';
 import '../admin/company_documents_screen.dart';
 import '../admin/id_documents_screen.dart';
 import '../employee/my_documents_screen.dart';
@@ -131,6 +132,22 @@ class _DriverShellState extends State<DriverShell> {
               icon: const Icon(Icons.badge_outlined),
               label: const Text('My ID documents'),
             ),
+            if (me.seesAccounts) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+                onPressed: () {
+                  Navigator.pop(c);
+                  Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => Scaffold(
+                            appBar: AppBar(title: Text(me.canEditAccounts ? 'Accounts' : 'Accounts · view only')),
+                            body: AccountsTab(me: me),
+                          )));
+                },
+                icon: const Icon(Icons.menu_book_outlined),
+                label: Text(me.canEditAccounts ? 'Accounts' : 'Accounts (view)'),
+              ),
+            ],
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () {
