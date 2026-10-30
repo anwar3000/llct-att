@@ -1321,3 +1321,44 @@ List<CompanyDoc> companyDocsDue(List<CompanyDoc> docs) {
     ..sort((a, b) => a.expiry.compareTo(b.expiry));
   return l;
 }
+
+
+/// Money still to pay (salaries, supplier invoices…) or to receive (client payments), with a due date.
+class PendingPay {
+  final String id, type, party, category, dueDate, note, method, reference, status;
+  final double amount, paid;
+  const PendingPay({
+    required this.id,
+    required this.type,
+    this.party = '',
+    this.category = '',
+    this.dueDate = '',
+    this.note = '',
+    this.method = 'Bank transfer',
+    this.reference = '',
+    this.status = 'open',
+    this.amount = 0,
+    this.paid = 0,
+  });
+  bool get isReceive => type == 'receive';
+  bool get isOpen => status == 'open' && remaining > 0.005;
+  double get remaining => ((amount - paid) * 100).round() / 100 < 0 ? 0 : ((amount - paid) * 100).round() / 100;
+
+  factory PendingPay.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    double n(dynamic v) => v is num ? v.toDouble() : 0;
+    return PendingPay(
+      id: d.id,
+      type: m['type'] == 'receive' ? 'receive' : 'pay',
+      party: _str(m['party']),
+      category: _str(m['category']),
+      dueDate: _str(m['dueDate']),
+      note: _str(m['note']),
+      method: _str(m['method'], 'Bank transfer'),
+      reference: _str(m['reference']),
+      status: m['status'] == 'done' ? 'done' : 'open',
+      amount: n(m['amount']),
+      paid: n(m['paid']),
+    );
+  }
+}

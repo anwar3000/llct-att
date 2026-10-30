@@ -117,6 +117,10 @@ service cloud.firestore {
     match /acctSettings/{id} {
       allow read, write: if isAdmin();
     }
+    // Pending payments: money still to pay / to receive, with due dates (projection on the Accounts page).
+    match /acctPending/{id} {
+      allow read, write: if isAdmin();
+    }
 
     // Claims on a place / site name so the same new site can't be added twice (first one wins).
     match /siteKeys/{key} {

@@ -48,11 +48,19 @@ class _AccountsViewState extends State<_AccountsView> {
   Object? _error;
   int _token = 0;
   Map<String, String> _projNames = {};
+  ({double inc, double exp, int nIn, int nOut, double cash, double bank})? _pos;
+  List<PendingPay>? _pending;
+  StreamSubscription? _pendSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _pendSub = Db.pendingStream().listen((l) {
+      if (mounted) setState(() => _pending = l);
+    }, onError: (_) {
+      if (mounted) setState(() => _pending = const []);
+    });
     Db.acctProjects().then((l) {
       if (mounted) setState(() => _projNames = {for (final p in l) p.id: p.label});
     }).catchError((_) {});
@@ -65,6 +73,7 @@ class _AccountsViewState extends State<_AccountsView> {
   @override
   void dispose() {
     _sub?.cancel();
+    _pendSub?.cancel();
     super.dispose();
   }
 
@@ -99,9 +108,17 @@ class _AccountsViewState extends State<_AccountsView> {
     _reloadSide(t);
   }
 
+  Future<void> _reloadPos() async {
+    try {
+      final p = await Db.acctPosition();
+      if (mounted) setState(() => _pos = p);
+    } catch (_) {}
+  }
+
   Future<void> _reloadSide([int? t]) async {
     final tok = t ?? _token;
     final r = _range;
+    _reloadPos();
     try {
       final a = await Db.acctAuto(r.from, r.to);
       final bf = await Db.acctBroughtForward(r.from);
@@ -156,6 +173,14 @@ class _AccountsViewState extends State<_AccountsView> {
       body: RefreshIndicator(
         onRefresh: () async => _load(),
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 6, 16, 140), children: [
+          _positionCard(),
+          const SizedBox(height: 10),
+          _pendingCard(),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(4, 18, 4, 8),
+            child: Text('STATEMENT FOR THE PERIOD',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: .8, color: AppColors.muted)),
+          ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: [
@@ -227,6 +252,273 @@ class _AccountsViewState extends State<_AccountsView> {
         ]),
       ),
     );
+  }
+
+  // ---------------------------------------------------------------- overall position (all dates)
+  Widget _positionCard() {
+    final p = _pos;
+    final open = (_pending ?? const <PendingPay>[]).where((x) => x.isOpen).toList();
+    final toPay = open.where((x) => !x.isReceive).fold<double>(0, (a, x) => a + x.remaining);
+    final toGet = open.where((x) => x.isReceive).fold<double>(0, (a, x) => a + x.remaining);
+    final bal = p == null ? null : p.cash + p.bank;
+    final proj = bal == null ? null : bal - toPay + toGet;
+    Widget mini(String l, String v, Color c, String sub) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFEBE8E3))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(l, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: .5, color: AppColors.muted)),
+              const SizedBox(height: 3),
+              FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(v, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c))),
+              Text(sub, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+            ]),
+          ),
+        );
+    return Column(children: [
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF2E2E2F), Color(0xFF232324)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('CURRENT BALANCE · ALL DATES',
+              style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: .8)),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(bal == null ? '…' : _money(bal),
+                style: TextStyle(color: bal != null && bal < 0 ? const Color(0xFFFF8A8A) : Colors.white, fontSize: 30, fontWeight: FontWeight.w800)),
+          ),
+          if (p != null)
+            Text('Cash ${_money(p.cash)}   ·   Bank ${_money(p.bank)}', style: const TextStyle(color: Color(0xFFD8D8DA), fontSize: 12.5)),
+          const SizedBox(height: 10),
+          Container(height: 1, color: Colors.white12),
+          const SizedBox(height: 8),
+          Row(children: [
+            const Expanded(child: Text('Projected after pending', style: TextStyle(color: Color(0xFFD8D8DA), fontSize: 12.5))),
+            Text(proj == null ? '…' : _money(proj),
+                style: TextStyle(color: proj != null && proj < 0 ? const Color(0xFFFF8A8A) : Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+          ]),
+        ]),
+      ),
+      const SizedBox(height: 8),
+      Row(children: [
+        mini('TOTAL INCOME', p == null ? '…' : fmtMoney(p.inc), _green, p == null ? '' : '${p.nIn} entries'),
+        const SizedBox(width: 8),
+        mini('TOTAL EXPENSES', p == null ? '…' : fmtMoney(p.exp), _red, p == null ? '' : '${p.nOut} entries'),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [
+        mini('TO PAY', fmtMoney(_r2(toPay)), const Color(0xFFC2557A), '${open.where((x) => !x.isReceive).length} pending'),
+        const SizedBox(width: 8),
+        mini('TO RECEIVE', fmtMoney(_r2(toGet)), const Color(0xFF3A7BD5), '${open.where((x) => x.isReceive).length} pending'),
+      ]),
+    ]);
+  }
+
+  // ---------------------------------------------------------------- pending payments
+  Widget _pendingCard() {
+    final open = (_pending ?? const <PendingPay>[]).where((x) => x.isOpen).toList();
+    final today = dateKey(DateTime.now());
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            const Expanded(child: Text('Pending payments', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            TextButton.icon(onPressed: () => _editPending(null, 'pay'), icon: const Icon(Icons.add, size: 18), label: const Text('To pay')),
+            TextButton.icon(onPressed: () => _editPending(null, 'receive'), icon: const Icon(Icons.add, size: 18), label: const Text('To receive')),
+          ]),
+          if (_pending == null)
+            const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator()))
+          else if (open.isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(0, 4, 8, 8),
+              child: Text('Nothing pending. Add salaries still to pay, supplier invoices or client payments you expect, with a due date.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+            )
+          else
+            for (final x in open)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                onTap: () => _editPending(x, x.type),
+                title: Text(x.party.isEmpty ? x.category : x.party, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(
+                    [
+                      x.isReceive ? 'We receive' : 'We pay',
+                      if (x.category.isNotEmpty) x.category,
+                      x.dueDate.isEmpty
+                          ? 'no due date'
+                          : (x.dueDate.compareTo(today) < 0 ? 'OVERDUE ${fmtDateShort(parseDateKey(x.dueDate))}' : 'due ${fmtDateShort(parseDateKey(x.dueDate))}'),
+                      if (x.paid > 0) 'paid ${fmtMoney(x.paid)}',
+                    ].join(' · '),
+                    style: TextStyle(fontSize: 12, color: x.dueDate.isNotEmpty && x.dueDate.compareTo(today) < 0 ? _red : AppColors.muted)),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(fmtMoney(x.remaining), style: TextStyle(fontWeight: FontWeight.w800, color: x.isReceive ? _green : _red)),
+                  const SizedBox(width: 6),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 10), backgroundColor: x.isReceive ? _green : _red),
+                    onPressed: () => _payPending(x),
+                    child: Text(x.isReceive ? 'Got it' : 'Pay'),
+                  ),
+                ]),
+              ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _editPending(PendingPay? x, String kind) async {
+    final pay = kind != 'receive';
+    final party = TextEditingController(text: x?.party ?? '');
+    final cat = TextEditingController(text: x?.category ?? (pay ? 'Supplier payment' : 'Client payment'));
+    final amt = TextEditingController(text: x == null ? '' : x.amount.toString());
+    final note = TextEditingController(text: x?.note ?? '');
+    var due = x?.dueDate ?? '';
+    String? err;
+    final res = await showDialog<String>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: Text('${x == null ? 'Add' : 'Edit'} ${pay ? 'payment to make' : 'payment to receive'}'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: party, textCapitalization: TextCapitalization.words, decoration: InputDecoration(labelText: pay ? 'Pay to' : 'Receive from')),
+              TextField(controller: cat, decoration: const InputDecoration(labelText: 'For (category)')),
+              TextField(
+                  controller: amt,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Total amount ($kCurrency)', errorText: err)),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.event),
+                title: Text(due.isEmpty ? 'Due date — tap to set' : 'Due ${fmtDate(parseDateKey(due))}'),
+                onTap: () async {
+                  final d = await showDatePicker(
+                      context: c, initialDate: due.isEmpty ? DateTime.now() : parseDateKey(due), firstDate: DateTime(2015), lastDate: DateTime(2100));
+                  if (d != null) set(() => due = dateKey(d));
+                },
+              ),
+              TextField(controller: note, decoration: const InputDecoration(labelText: 'Note')),
+              if (x != null && x.paid > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('Already ${pay ? 'paid' : 'received'} ${fmtMoney(x.paid)}', style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                ),
+            ]),
+          ),
+          actions: [
+            if (x != null) TextButton(onPressed: () => Navigator.pop(c, 'delete'), child: const Text('Delete', style: TextStyle(color: _red))),
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            FilledButton(
+              style: kDialogButton,
+              onPressed: () {
+                final v = double.tryParse(amt.text.trim());
+                if (v == null || v <= 0 || party.text.trim().isEmpty) {
+                  set(() => err = 'Enter who and how much');
+                  return;
+                }
+                if (x != null && v < x.paid) {
+                  set(() => err = 'Already paid ${fmtMoney(x.paid)}');
+                  return;
+                }
+                Navigator.pop(c, 'save');
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    try {
+      if (res == 'delete' && x != null) {
+        if (await confirm(context, 'Delete pending payment?', 'Entries already recorded stay in the accounts.', danger: true, ok: 'Delete')) {
+          await Db.deletePending(x.id);
+        }
+      } else if (res == 'save') {
+        final v = _r2(double.parse(amt.text.trim()));
+        await Db.savePending(id: x?.id, by: widget.me, data: {
+          'type': pay ? 'pay' : 'receive',
+          'party': party.text.trim(),
+          'category': cat.text.trim(),
+          'amount': v,
+          'dueDate': due,
+          'note': note.text.trim(),
+          'method': x?.method ?? 'Bank transfer',
+          if (x != null) 'status': v - x.paid > 0.005 ? 'open' : 'done',
+        });
+      }
+    } catch (er) {
+      if (mounted) showSnack(context, 'Could not save: $er', error: true);
+    }
+  }
+
+  Future<void> _payPending(PendingPay x) async {
+    final amt = TextEditingController(text: x.remaining.toString());
+    var date = DateTime.now();
+    var method = x.method;
+    String? err;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: Text('${x.isReceive ? 'Receive from' : 'Pay'} ${x.party}'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Remaining ${fmtMoney(x.remaining)} of ${fmtMoney(x.amount)}. A part payment keeps the rest pending.',
+                style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+            TextField(
+                controller: amt,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(labelText: 'Amount ($kCurrency)', errorText: err)),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.event),
+              title: Text(fmtDate(date)),
+              onTap: () async {
+                final d = await showDatePicker(context: c, initialDate: date, firstDate: DateTime(2015), lastDate: DateTime(2100));
+                if (d != null) set(() => date = d);
+              },
+            ),
+            DropdownButtonFormField<String>(
+              value: kAcctMethods.contains(method) ? method : 'Bank transfer',
+              decoration: const InputDecoration(labelText: 'Method'),
+              items: [for (final m in kAcctMethods) DropdownMenuItem(value: m, child: Text(m))],
+              onChanged: (v) => set(() => method = v ?? 'Bank transfer'),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            FilledButton(
+              style: kDialogButton,
+              onPressed: () {
+                final v = double.tryParse(amt.text.trim());
+                if (v == null || v <= 0 || v > x.remaining + 0.005) {
+                  set(() => err = 'Up to ${fmtMoney(x.remaining)}');
+                  return;
+                }
+                Navigator.pop(c, true);
+              },
+              child: Text(x.isReceive ? 'Received' : 'Paid'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Db.payPending(x, amount: double.parse(amt.text.trim()), date: dateKey(date), method: method, by: widget.me);
+      if (mounted) showSnack(context, 'Recorded in the accounts');
+      _reloadSide();
+    } catch (er) {
+      if (mounted) showSnack(context, 'Could not save: $er', error: true);
+    }
   }
 
   Widget _line(String label, double? v, String sub, {Color? color, bool big = false}) => Padding(
@@ -380,6 +672,51 @@ class _AccountsViewState extends State<_AccountsView> {
     } catch (_) {}
     if (!mounted) return;
     final color = income ? _green : _red;
+    var added = 0;
+    var addedSum = 0.0;
+    var addedNote = '';
+    // Saves the form; returns an error message or null.
+    Future<String?> doSave() async {
+      final v = double.tryParse(amt.text.trim());
+      if (v == null || v <= 0) return 'Enter the amount';
+      final site = widget.live.siteById(siteId);
+      final proj = projects.where((p) => p.id == projectId).firstOrNull;
+      final who = party.text.trim();
+      try {
+        await Db.saveAcct(
+          id: e?.id,
+          by: widget.me,
+          photoBase64: photo,
+          data: {
+            'type': kind,
+            'date': dateKey(date),
+            'amount': _r2(v),
+            'category': cat,
+            'party': who,
+            'method': method,
+            'reference': ref.text.trim(),
+            'bank': method == 'Cheque' ? bankC.text.trim() : '',
+            'siteId': siteId,
+            'siteName': site?.name ?? '',
+            'projectId': proj?.id ?? '',
+            'projectName': proj?.label ?? '',
+            'note': note.text.trim(),
+          },
+        );
+        if (who.isNotEmpty && !saved.any((n) => n.toLowerCase() == who.toLowerCase())) {
+          saved.add(who);
+          Db.saveAcctParty(partyKey, who).catchError((_) {});
+        }
+        added++;
+        addedSum = _r2(addedSum + v);
+        addedNote = '$cat${who.isEmpty ? '' : ', $who'} ${fmtMoney(_r2(v))}';
+        return null;
+      } catch (er) {
+        return 'Could not save: $er';
+      }
+    }
+
+    var busy = false;
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -525,29 +862,66 @@ class _AccountsViewState extends State<_AccountsView> {
               ),
             ),
             const Divider(height: 1),
+            if (added > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Text('✓ Saved $added · total ${fmtMoney(addedSum)} — last: $addedNote',
+                    style: const TextStyle(color: _green, fontWeight: FontWeight.w700, fontSize: 12.5)),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Row(children: [
                 Expanded(
                   child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
-                    onPressed: () => Navigator.pop(c, false),
-                    child: const Text('Cancel'),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 6)),
+                    onPressed: busy ? null : () => Navigator.pop(c, added > 0),
+                    child: Text(added > 0 ? 'Done' : 'Cancel'),
                   ),
                 ),
-                const SizedBox(width: 10),
+                if (e == null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 6), foregroundColor: color),
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              set(() => busy = true);
+                              final er = await doSave();
+                              // Keep everything but the amount (and the photo) for the next entry.
+                              set(() {
+                                busy = false;
+                                err = er;
+                                if (er == null) {
+                                  amt.clear();
+                                  photo = null;
+                                }
+                              });
+                            },
+                      child: const Text('SAVE & NEXT', maxLines: 1),
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 8),
                 Expanded(
                   flex: 2,
                   child: FilledButton(
                     style: FilledButton.styleFrom(backgroundColor: color, minimumSize: const Size(0, 48)),
-                    onPressed: () {
-                      final v = double.tryParse(amt.text.trim());
-                      if (v == null || v <= 0) {
-                        set(() => err = 'Enter the amount');
-                        return;
-                      }
-                      Navigator.pop(c, true);
-                    },
+                    onPressed: busy
+                        ? null
+                        : () async {
+                            set(() => busy = true);
+                            final er = await doSave();
+                            if (er == null) {
+                              if (c.mounted) Navigator.pop(c, true);
+                            } else {
+                              set(() {
+                                busy = false;
+                                err = er;
+                              });
+                            }
+                          },
                     child: const Text('SAVE'),
                   ),
                 ),
@@ -557,38 +931,8 @@ class _AccountsViewState extends State<_AccountsView> {
         );
       }),
     );
-    if (ok != true) return;
-    final site = widget.live.siteById(siteId);
-    final proj = projects.where((p) => p.id == projectId).firstOrNull;
-    final who = party.text.trim();
-    try {
-      await Db.saveAcct(
-        id: e?.id,
-        by: widget.me,
-        photoBase64: photo,
-        data: {
-          'type': kind,
-          'date': dateKey(date),
-          'amount': _r2(double.parse(amt.text.trim())),
-          'category': cat,
-          'party': who,
-          'method': method,
-          'reference': ref.text.trim(),
-          'bank': method == 'Cheque' ? bankC.text.trim() : '',
-          'siteId': siteId,
-          'siteName': site?.name ?? '',
-          'projectId': proj?.id ?? '',
-          'projectName': proj?.label ?? '',
-          'note': note.text.trim(),
-        },
-      );
-      if (who.isNotEmpty && !saved.any((n) => n.toLowerCase() == who.toLowerCase())) {
-        Db.saveAcctParty(partyKey, who).catchError((_) {});
-      }
-      if (mounted) showSnack(context, e == null ? '${income ? 'Income' : 'Expense'} added' : 'Saved');
-      if (e != null || dateKey(date).compareTo(_range.from) < 0) _reloadSide();
-    } catch (er) {
-      if (mounted) showSnack(context, 'Could not save: $er', error: true);
-    }
+    if (ok != true && added == 0) return;
+    if (mounted) showSnack(context, e != null ? 'Saved' : '${income ? 'Income' : 'Expense'}${added > 1 ? ' entries' : ''} added${added > 1 ? ' ($added)' : ''}');
+    _reloadSide();
   }
 }

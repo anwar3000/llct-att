@@ -1386,6 +1386,91 @@ class Db {
     await b.commit();
   }
 
+  /// Overall position (all dates since the opening balance): totals and current cash / bank.
+  static Future<({double inc, double exp, int nIn, int nOut, double cash, double bank})> acctPosition() async {
+    final o = await acctOpening();
+    final start = o.date.isEmpty ? '' : o.date;
+    final manual = await acct.get();
+    final auto = await acctAuto('2000-01-01', '2100-12-31');
+    var inc = 0.0, exp = 0.0, cash = start.isEmpty ? 0.0 : o.cash, bank = start.isEmpty ? 0.0 : o.bank;
+    var nIn = 0, nOut = 0;
+    for (final e in [...manual.docs.map(AcctEntry.fromDoc), ...auto]) {
+      if (start.isNotEmpty && e.date.compareTo(start) < 0) continue;
+      if (e.isIncome) {
+        inc += e.amount;
+        nIn++;
+      } else {
+        exp += e.amount;
+        nOut++;
+      }
+      if (e.isBank) {
+        bank += e.signed;
+      } else {
+        cash += e.signed;
+      }
+    }
+    double r(double v) => (v * 100).round() / 100;
+    return (inc: r(inc), exp: r(exp), nIn: nIn, nOut: nOut, cash: r(cash), bank: r(bank));
+  }
+
+  // ---------------------------------------------------------------- pending payments (to pay / to receive)
+  static CollectionReference<Map<String, dynamic>> get acctPending => _fs.collection('acctPending');
+  static Stream<List<PendingPay>> pendingStream() =>
+      acctPending.snapshots().map((q) => q.docs.map(PendingPay.fromDoc).toList()
+        ..sort((a, b) => (a.dueDate.isEmpty ? '9999' : a.dueDate).compareTo(b.dueDate.isEmpty ? '9999' : b.dueDate)));
+
+  static Future<void> savePending({String? id, required Map<String, dynamic> data, required AppUser by}) {
+    final ref = id == null ? acctPending.doc() : acctPending.doc(id);
+    return ref.set({
+      ...data,
+      if (id == null) 'status': 'open',
+      if (id == null) 'paid': 0,
+      if (id == null) 'history': [],
+      if (id == null) 'createdBy': by.name,
+      if (id == null) 'createdAt': FieldValue.serverTimestamp(),
+      if (id != null) 'editedBy': by.name,
+      if (id != null) 'editedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  static Future<void> deletePending(String id) => acctPending.doc(id).delete();
+
+  /// Pays / receives all or part of a pending item: adds the accounts entry and reduces or closes the item.
+  static Future<void> payPending(PendingPay p, {required double amount, required String date, required String method, String reference = '', required AppUser by}) async {
+    final amt = (amount * 100).round() / 100;
+    final b = _fs.batch();
+    final eref = acct.doc();
+    b.set(eref, {
+      'type': p.isReceive ? 'income' : 'expense',
+      'date': date,
+      'month': date.substring(0, 7),
+      'amount': amt,
+      'category': p.category.isNotEmpty ? p.category : (p.isReceive ? 'Client payment' : 'Supplier payment'),
+      'party': p.party,
+      'method': method,
+      'reference': reference,
+      'bank': '',
+      'chequeDate': '',
+      'siteId': '',
+      'siteName': '',
+      'note': [p.note, if (amt < p.remaining - 0.005) 'part payment ($amt of ${p.remaining})'].where((x) => x.isNotEmpty).join(' · '),
+      'pendingId': p.id,
+      'createdBy': by.name,
+      'createdById': by.id,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    final paid = ((p.paid + amt) * 100).round() / 100;
+    b.update(acctPending.doc(p.id), {
+      'paid': paid,
+      'status': paid >= p.amount - 0.005 ? 'done' : 'open',
+      'lastPaidOn': date,
+      'history': FieldValue.arrayUnion([
+        {'date': date, 'amount': amt, 'entryId': eref.id, 'by': by.name}
+      ]),
+    });
+    await b.commit();
+  }
+
   static Future<({String base64, String mime})?> acctFile(String id) async {
     final d = await _fs.collection('acctFiles').doc(id).get();
     final m = d.data();

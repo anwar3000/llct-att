@@ -35,6 +35,12 @@ A Flutter + Firebase Android app for field staff attendance, with a management d
 LLCT Attendance and LLCT Invoicing share one Firebase project, so they share **one** rules file. `firestore.rules` in this repo is the complete file for both apps. Always copy the **whole** file and publish it (Firebase Console → Firestore Database → Rules → Publish). Publishing only one app's rules switches the other app off.
 
 ## What's new
+- **Accounts: overall position, pending payments & projection (v1.9.5):**
+  - **Top of the page (any period):** current balance (cash / bank, all dates since the opening balance), total income, total expenses, money to pay, money to receive, and the projected balance after pending.
+  - **Pending payments:** salaries still owed, supplier invoices, client payments expected — with due dates. *Pay* / *Received* records it in the accounts (part payments keep the rest pending). Overdue / due-soon tags, projection by due date with a warning if the balance would go below zero, and 7 / 30 / 90-day totals.
+  - **Statement for the period** stays separate (brought forward + income − expenses = closing).
+  - **Faster entry:** *Save & add next* keeps the form open and clears only the amount (Enter saves on the web). Category and party lists open as soon as the box is clicked.
+  - **Rules:** new `acctPending` (admin only) — publish `firestore.rules`.
 - **PDF previews & company documents for everyone (v1.9.2):** PDF copies show their first page as the thumbnail (app, iPhone app, dashboard) and open page by page in the Android app. Every staff member can view and download company documents (Android: profile → Company documents; iPhone: Me → Company documents); only admin and managers can change them. Rules updated — publish `firestore.rules`.
 - **Number & expiry read from the document (v1.9.1):** when a copy is uploaded (ID boxes, scanner, company documents) the document number, expiry and issue date are read from it and filled into empty boxes, highlighted to check. *Read numbers from copies* fills them for documents already uploaded (per person, for everyone on the ID documents page, and for all company documents). Android reads on the phone (Google ML Kit, offline); the web uses the PDF's own text or OCR (Tesseract.js). Typed-in values are never overwritten automatically.
 - **One box per document + company documents (v1.8.3):**

@@ -341,6 +341,53 @@ export function mapAcct(d) {
 }
 export const watchAcct = (from, to, cb) => onSnapshot(query(C('acctEntries'), where('date', '>=', from), where('date', '<=', to)),
   (snap) => cb(snap.docs.map(mapAcct)), (e) => { console.error(e); cb(null, e); });
+/** Every accounts entry (all dates) — for the overall position at the top of the Accounts page. */
+export const watchAcctAll = (cb) => onSnapshot(C('acctEntries'), (snap) => cb(snap.docs.map(mapAcct)), (e) => { console.error(e); cb(null, e); });
+
+// ------------------------------------------------------------------ pending payments (to pay / to receive)
+export function mapPending(d) {
+  const m = d.data() || {};
+  const amount = num(m.amount), paid = num(m.paid);
+  return {
+    id: d.id, type: m.type === 'receive' ? 'receive' : 'pay', party: m.party || '', category: m.category || '', amount, paid,
+    remaining: Math.max(0, Math.round((amount - paid) * 100) / 100), dueDate: m.dueDate || '', note: m.note || '', method: m.method || 'Bank transfer',
+    reference: m.reference || '', status: m.status === 'done' ? 'done' : 'open', history: Array.isArray(m.history) ? m.history : [],
+    createdBy: m.createdBy || '', createdAt: toDate(m.createdAt),
+  };
+}
+export const watchPending = (cb) => onSnapshot(C('acctPending'), (s) => cb(s.docs.map(mapPending)), (e) => { console.error(e); cb(null, e); });
+export async function savePending(id, data) {
+  const ref = id ? doc(db, 'acctPending', id) : doc(C('acctPending'));
+  await setDoc(ref, {
+    ...data, amount: Math.round(Number(data.amount) * 100) / 100,
+    ...(id ? { editedBy: store.me?.name || '', editedAt: serverTimestamp() }
+      : { status: 'open', paid: 0, history: [], createdBy: store.me?.name || '', createdAt: serverTimestamp() }),
+  }, { merge: true });
+  return ref.id;
+}
+export const deletePending = (id) => deleteDoc(doc(db, 'acctPending', id));
+export const reopenPending = (p) => updateDoc(doc(db, 'acctPending', p.id), { status: p.paid >= p.amount - 0.005 ? 'done' : 'open' });
+/** Pays (or receives) all or part of a pending item: adds the accounts entry and reduces / closes the item. */
+export async function payPending(p, { amount, date, method, reference = '', note = '' }) {
+  const amt = Math.round(Number(amount) * 100) / 100;
+  const b = writeBatch(db);
+  const eref = doc(C('acctEntries'));
+  const income = p.type === 'receive';
+  b.set(eref, {
+    type: income ? 'income' : 'expense', date, month: date.slice(0, 7), amount: amt,
+    category: p.category || (income ? 'Client payment' : 'Supplier payment'), party: p.party, method, reference, bank: '', chequeDate: '',
+    siteId: '', siteName: '', note: [note || p.note, amt < p.remaining ? `part payment (${amt} of ${p.remaining})` : ''].filter(Boolean).join(' · '),
+    pendingId: p.id, createdBy: store.me?.name || '', createdById: store.me?.id || '', createdAt: serverTimestamp(),
+  });
+  const paid = Math.round((p.paid + amt) * 100) / 100;
+  b.update(doc(db, 'acctPending', p.id), {
+    paid, status: paid >= p.amount - 0.005 ? 'done' : 'open', lastPaidOn: date,
+    history: arrayUnion({ date, amount: amt, entryId: eref.id, by: store.me?.name || '' }),
+  });
+  await b.commit();
+  return eref.id;
+}
+
 export async function saveAcct(id, data, file = null) {
   const ref = id ? doc(db, 'acctEntries', id) : doc(C('acctEntries'));
   const site = data.siteId ? store.site(data.siteId) : null;
