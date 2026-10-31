@@ -10,6 +10,7 @@ import {
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep,
 } from './sd.js';
+window.__sdStarted = true;
 
 const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(() => {});

@@ -4,6 +4,7 @@ import {
   SERVICE_TYPES, PRIORITIES, SLOTS, typeLabel, prio, st, clientMessage, publicView, COMPANY,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly,
 } from './sd.js';
+window.__sdStarted = true;
 
 const app = $('#app');
 const token = new URLSearchParams(location.search).get('c') || (location.hash.match(/c=([\w-]+)/) || [])[1] || '';

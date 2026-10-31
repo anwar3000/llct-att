@@ -11,6 +11,20 @@
 </head>
 <body>
   <div id="app"><div class="loading">Loading…</div></div>
+  <script>
+    // If the app has not started after 10 s, say why instead of "Loading…" forever.
+    setTimeout(function () {
+      if (window.__sdStarted) return;
+      var el = document.getElementById('app');
+      var file = location.protocol === 'file:';
+      el.innerHTML = '<div style="max-width:560px;margin:30px auto;padding:20px;background:#fff;border:1px solid #ebe8e3;border-radius:14px;font:14px/1.5 system-ui,sans-serif">'
+        + '<b style="font-size:16px">The Service Desk could not start</b><ol style="padding-left:18px">'
+        + (file ? '<li><b>Open it through the web server</b> (http:// or https://), not as a file from the disk.</li>' : '')
+        + '<li>Check that <a href="js/sd.js">js/sd.js</a> opens (if it says 404, the files are in the wrong folder).</li>'
+        + '<li>Check that <a href="https://llct.net/js/config.js" target="_blank">llct.net/js/config.js</a> opens. If not, paste your Firebase web config into <b>js/config.js</b> on this server.</li>'
+        + '<li>Press Ctrl+Shift+J (or F12 → Console) and send the red error lines.</li></ol></div>';
+    }, 10000);
+  </script>
   <script type="module" src="js/desk.js"></script>
 </body>
 </html>
