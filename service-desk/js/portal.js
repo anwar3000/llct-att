@@ -19,8 +19,9 @@ function freshForm() {
 }
 
 function fail(title, msg) {
-  app.innerHTML = `<div class="card pad done-box"><div class="big">🔒</div><h2>${esc(title)}</h2><p class="muted">${esc(msg)}</p>
-    <p class="small">Leaders Line service: <a href="tel:048805577"><b>${COMPANY.phone}</b></a> · ${COMPANY.email}</p></div>`;
+  $('#p-client').textContent = title;
+  $('#p-sub').textContent = msg;
+  app.innerHTML = `<div class="card pad"><p style="margin:0">For help, call <a href="tel:048805577"><b>${COMPANY.phone}</b></a> or email <a href="mailto:${COMPANY.email}">${COMPANY.email}</a>.</p></div>`;
 }
 
 async function start() {
@@ -60,7 +61,7 @@ function render() {
   if (S.sent) body = sentHtml();
   else if (S.tab === 'list') body = listHtml();
   else body = formHtml();
-  app.innerHTML = tabsHtml() + body + `<div class="foot">${esc(COMPANY.name)} · <a href="tel:048805577">${COMPANY.phone}</a> · ${COMPANY.email}</div>`;
+  app.innerHTML = tabsHtml() + body + `<div class="foot"><img src="img/shield-256.png" alt="">${esc(COMPANY.name)}, Airport Road, Dubai. Call <a href="tel:048805577">${COMPANY.phone}</a> or email <a href="mailto:${COMPANY.email}">${COMPANY.email}</a>.</div>`;
   bindTabs();
   if (S.sent) { $('#again').onclick = () => { S.sent = null; S.tab = 'new'; render(); }; $('#see').onclick = () => { S.sent = null; S.tab = 'list'; render(); }; }
   else if (S.tab === 'list') bindList();
@@ -71,46 +72,42 @@ function render() {
 function formHtml() {
   const f = S.form, sites = S.portal.sites || [];
   const other = f.siteId === '_other';
-  return `<form id="f" class="stack" novalidate>
-  <div class="card pad stack">
-    <div class="sec-t">1 · Site</div>
-    <label class="field"><span>Which site needs service? <b>*</b></span>
+  return `<form id="f" novalidate><div class="sheet">
+  <div class="step"><span class="sn">1</span><div class="sb stack"><h2>Site</h2><p class="hint">Which of your sites needs the visit?</p>
+    <label class="field"><span>Choose the site <b>*</b></span>
       <select id="f-site"><option value="">Choose the site…</option>
         ${sites.map((s) => `<option value="${esc(s.id)}" ${f.siteId === s.id ? 'selected' : ''}>${esc(s.name)}${s.address ? ' — ' + esc(String(s.address).split('\n')[0]) : ''}</option>`).join('')}
         <option value="_other" ${other ? 'selected' : ''}>Another location (not in the list)</option></select></label>
     ${other ? `<div class="stack"><label class="field"><span>Location name <b>*</b></span><input id="f-oname" value="${esc(f.otherName)}" placeholder="e.g. Warehouse 3, Al Quoz"></label>
       <label class="field"><span>Address / landmark</span><textarea id="f-oaddr" rows="2" placeholder="Building, street, area">${esc(f.otherAddress)}</textarea></label>
       <div class="row"><button type="button" class="btn sm" id="f-gps">📍 ${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Helps the technician navigate — only if you are at the site.'}</span></div></div>` : ''}
-  </div>
-  <div class="card pad stack">
-    <div class="sec-t">2 · What do you need?</div>
+  </div></div>
+  <div class="step"><span class="sn">2</span><div class="sb stack"><h2>What needs attention</h2><p class="hint">Pick the closest match, then describe what you see.</p>
     <div class="tiles">${SERVICE_TYPES.map((t) => `<button type="button" class="tile ${f.category === t.k ? 'on' : ''}" data-cat="${t.k}"><span class="ti">${t.i}</span><span>${esc(t.t)}</span></button>`).join('')}</div>
     <label class="field"><span>Describe the problem <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. Camera 4 at the main gate shows no picture since yesterday evening.">${esc(f.description)}</textarea></label>
     <label class="field" style="max-width:240px"><span>Cameras / devices affected</span><input id="f-cams" inputmode="numeric" value="${esc(f.cameras)}" placeholder="e.g. 2"></label>
-    <div><div class="field"><span>Photos (optional, up to 3)</span></div>
+    <div><div class="field"><span>Photos, if they help (up to 3)</span></div>
       <div class="photos" id="f-photos">${S.photos.map((p, i) => `<div class="ph"><img src="${p}" alt=""><button type="button" data-rmph="${i}">×</button></div>`).join('')}
       ${S.photos.length < 3 ? '<label class="addph">📷<br>Add photo<input type="file" accept="image/*" id="f-ph" hidden multiple></label>' : ''}</div></div>
-  </div>
-  <div class="card pad stack">
-    <div class="sec-t">3 · Priority</div>
+  </div></div>
+  <div class="step"><span class="sn">3</span><div class="sb stack"><h2>Priority</h2><p class="hint">Choose Critical only when the system is down or there is a security risk.</p>
     <div class="ptiles">${PRIORITIES.map((p) => `<button type="button" class="tile ptile ${f.priority === p.k ? 'on' : ''}" data-prio="${p.k}" style="border-left-color:${p.c}"><span><b style="color:${p.c}">${p.t}</b><small>${esc(p.s)}</small></span></button>`).join('')}</div>
-  </div>
-  <div class="card pad stack">
-    <div class="sec-t">4 · Preferred visit time</div>
+  </div></div>
+  <div class="step"><span class="sn">4</span><div class="sb stack"><h2>Preferred visit</h2><p class="hint">We confirm the exact time when a technician is assigned.</p>
     <div class="row" style="align-items:flex-end">
       <label class="field" style="flex:1;min-width:160px"><span>Date</span><input type="date" id="f-date" min="${dateKey()}" value="${esc(f.preferredDate)}"></label>
       <label class="field" style="flex:2;min-width:200px"><span>Time</span><select id="f-slot">${SLOTS.map((s) => `<option value="${s.k}" ${f.preferredSlot === s.k ? 'selected' : ''}>${esc(s.t)}</option>`).join('')}</select></label>
     </div>
-  </div>
-  <div class="card pad stack">
-    <div class="sec-t">5 · Contact person at site</div>
+  </div></div>
+  <div class="step"><span class="sn">5</span><div class="sb stack"><h2>Contact at site</h2><p class="hint">Who should the technician ask for?</p>
     <div class="row" style="align-items:flex-end">
       <label class="field" style="flex:1;min-width:180px"><span>Name <b>*</b></span><input id="f-cname" autocomplete="name" value="${esc(f.contactName)}"></label>
       <label class="field" style="flex:1;min-width:180px"><span>Mobile <b>*</b></span><input id="f-cphone" type="tel" autocomplete="tel" value="${esc(f.contactPhone)}" placeholder="05X XXX XXXX"></label>
     </div>
     <label class="field"><span>Email (optional)</span><input id="f-cemail" type="email" autocomplete="email" value="${esc(f.contactEmail)}"></label>
+  </div></div>
   </div>
-  <button class="btn primary block" id="f-send" type="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Sending…' : 'Submit service request'}</button>
+  <div class="sendbar"><button class="btn primary block" id="f-send" type="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Sending…' : 'Send service request'}</button></div>
   </form>`;
 }
 
@@ -199,10 +196,9 @@ async function submit() {
 
 function sentHtml() {
   const t = S.sent;
-  return `<div class="card done-box"><div class="big">✅</div><h2>Request received</h2>
+  return `<div class="card done-box"><img src="img/shield-256.png" alt="" style="width:64px"><h2>Request received</h2>
     <div class="tno">${esc(t.number)}</div>
-    <p>Thank you, ${esc(t.contactName)}. Your request for <b>${esc(t.siteName)}</b> has been passed to our <b>technical team</b>.
-    A technician will be assigned and will visit at the scheduled time. You can follow the status here any time.</p>
+    <p>Thank you, ${esc(t.contactName)}. Your request for ${esc(t.siteName)} is with our technical team. We will assign a technician and confirm the visit time here and by phone.</p>
     <div class="row" style="justify-content:center"><button class="btn" id="again">Raise another request</button><button class="btn primary" id="see">Track my requests</button></div></div>`;
 }
 

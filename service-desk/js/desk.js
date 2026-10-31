@@ -55,12 +55,14 @@ onAuthStateChanged(auth, async (u) => {
 });
 
 function loginView(err = '') {
-  root.innerHTML = `<div class="card login"><img src="img/logo.png" alt="LLCT"><h1 style="text-align:center">Service Desk</h1>
-    <p class="muted" style="text-align:center;margin-top:4px">Sign in with your LLCT Attendance login</p>
-    <form id="lf" class="stack" style="margin-top:16px"><label class="field"><span>Login ID</span><input id="lid" autocomplete="username" required></label>
+  root.innerHTML = `<div class="loginwrap"><div class="card login">
+    <div class="band"><div class="ribbon" aria-hidden="true"></div><div class="in"><img class="shield" src="img/shield-256.png" alt="Leaders Line">
+      <div><div class="bt1">SERVICE DESK</div><div class="bt2">Leaders Line technical team</div></div></div></div>
+    <form id="lf" class="lb stack"><label class="field"><span>Login ID</span><input id="lid" autocomplete="username" required></label>
     <label class="field"><span>Password</span><input id="lpw" type="password" autocomplete="current-password" required></label>
-    <div class="small" style="color:var(--danger);min-height:1em" id="lerr">${esc(err)}</div>
-    <button class="btn primary block" id="lgo">Sign in</button></form></div>`;
+    <div class="small" style="color:var(--trim);min-height:1em" id="lerr">${esc(err)}</div>
+    <button class="btn primary block" id="lgo">Sign in</button>
+    <p class="small muted" style="margin:0;text-align:center">Use your LLCT Attendance login.</p></form></div></div>`;
   $('#lf').onsubmit = async (e) => {
     e.preventDefault(); $('#lgo').disabled = true; $('#lerr').textContent = '';
     try { await signInWithEmailAndPassword(auth, loginToEmail($('#lid').value), $('#lpw').value); }
@@ -162,7 +164,7 @@ function nextPop() {
 let titleT = null;
 function flashTitle() {
   if (titleT || !document.hidden) return;
-  const base = 'Service Desk · LLCT'; let on = false;
+  const base = 'Service Desk – Leaders Line'; let on = false;
   titleT = setInterval(() => { document.title = (on = !on) ? '🔴 New service request' : base; if (!document.hidden) { clearInterval(titleT); titleT = null; document.title = base; } }, 1000);
 }
 
@@ -243,7 +245,7 @@ function drawNav() {
 }
 function render() {
   const sy = window.scrollY;
-  root.innerHTML = `<header class="dtop"><div class="in"><img src="img/logo.png" alt=""><span class="ttl">Service Desk</span><nav class="dnav" id="dnav"></nav>
+  root.innerHTML = `<header class="dtop"><div class="in"><img src="img/shield-256.png" alt="Leaders Line"><span class="ttl">Service Desk<small>Leaders Line</small></span><nav class="dnav" id="dnav"></nav>
     <div class="dme">${canAssign() ? '<button class="btn sm primary" id="nt">+ New ticket</button>' : ''}<span>${esc(S.me.name || '')}</span><button class="btn sm" id="so">Sign out</button></div></div></header>
     <main class="dwrap" id="main"></main>`;
   drawNav();
@@ -622,4 +624,4 @@ function settingsView(m) {
   };
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Service Desk · LLCT'; });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Service Desk – Leaders Line'; });
