@@ -11,6 +11,11 @@ const TYPES = {
 };
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let unsub = null;
+let newCount = 0;
+const listeners = new Set();
+/** Number of new (unassigned) service requests, for the menu badge. */
+export const svcNewCount = () => newCount;
+export const onSvcChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 let deskUrl = '';
 
 function beep() {
@@ -64,7 +69,9 @@ export function startServiceAlerts() {
       });
     }
     first = false;
-    fab(q.docs.filter((d) => d.data().status === 'new').length);
+    newCount = q.docs.filter((d) => d.data().status === 'new').length;
+    fab(newCount);
+    listeners.forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
   }, () => { /* rules not published yet: stay quiet */ });
 }
 

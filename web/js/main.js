@@ -1,6 +1,6 @@
 import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, ROLE_LABEL } from './fb.js';
 import { esc, icon, avatar, friendlyError } from './util.js';
-import { startServiceAlerts, stopServiceAlerts } from './svcalert.js';
+import { startServiceAlerts, stopServiceAlerts, svcNewCount, onSvcChange } from './svcalert.js';
 import * as dashboard from './pages/dashboard.js';
 import * as livemap from './pages/livemap.js';
 import * as projects from './pages/projects.js';
@@ -57,6 +57,8 @@ const NAV = [
   { path: 'schedule', label: 'Schedule', icon: 'schedule', page: schedule },
   { path: 'updates', label: 'Site updates', icon: 'updates', page: updates },
   { path: 'trips', label: 'Trips & rides', icon: 'trips', page: trips, badge: () => store.tripsActive.length, badgeColor: 'green' },
+  { sep: 'Service' },
+  { path: 'service', label: 'Service & reports', icon: 'requests', page: svcreports, badge: () => svcNewCount(), badgeColor: 'red' },
   { sep: 'People' },
   { path: 'employees', label: 'Employees', icon: 'employees', page: employees },
   { path: 'workers', label: 'External workers', icon: 'workers', page: workers },
@@ -68,7 +70,6 @@ const NAV = [
   { path: 'petty', label: 'Petty cash', icon: 'petty', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
   { path: 'accounts', label: 'Accounts', icon: 'accounts', page: accounts, adminOnly: true, accounts: true },
   { sep: 'Output' },
-  { path: 'svcreports', label: 'Service & delivery reports', icon: 'company', page: svcreports },
   { path: 'reports', label: 'Reports', icon: 'reports', page: reports },
   { path: 'backup', label: 'Backup & storage', icon: 'backup', page: backup, adminOnly: true },
 ];
@@ -134,6 +135,7 @@ function renderShell() {
   renderNav();
   if (navSub) navSub();
   navSub = store.on(renderNav);
+  if (!window.__svcNav) window.__svcNav = onSvcChange(() => { if (store.me) renderNav(); });
   route();
 }
 
