@@ -5,6 +5,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/common.dart';
+import '../../widgets/service_alerts.dart';
 import 'admin_live.dart';
 import 'live_map_tab.dart';
 import 'overview_tab.dart';
@@ -63,7 +64,9 @@ class _AdminShellState extends State<AdminShell> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ServiceAlerts(me: widget.me, child: _shell(context));
+
+  Widget _shell(BuildContext context) {
     // Side rail on big screens (unfolded Galaxy Fold, tablets); labels beside icons when there is room.
     final width = MediaQuery.of(context).size.width;
     final wide = width >= 600;
@@ -89,6 +92,7 @@ class _AdminShellState extends State<AdminShell> {
         Text(_items[_index].label),
       ]),
       actions: [
+        ServiceJobsButton(me: widget.me),
         Padding(
           padding: const EdgeInsets.only(right: 4),
           child: Center(

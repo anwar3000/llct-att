@@ -1,5 +1,6 @@
 import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, ROLE_LABEL } from './fb.js';
 import { esc, icon, avatar, friendlyError } from './util.js';
+import { startServiceAlerts, stopServiceAlerts } from './svcalert.js';
 import * as dashboard from './pages/dashboard.js';
 import * as livemap from './pages/livemap.js';
 import * as projects from './pages/projects.js';
@@ -239,7 +240,7 @@ window.addEventListener('hashchange', () => { if (store.me) route(); });
 
 // ------------------------------------------------------------------ auth gate
 onAuthStateChanged(auth, async (user) => {
-  if (!user) { store.me = null; renderLogin(loginError); loginError = ''; return; }
+  if (!user) { stopServiceAlerts(); store.me = null; renderLogin(loginError); loginError = ''; return; }
   try {
     const me = await getMe(user.uid);
     if (!me) {
@@ -255,7 +256,7 @@ onAuthStateChanged(auth, async (user) => {
     }
     store.me = me;
     // Staff with only the Accounts permission get just that page (no other dashboard data).
-    if (['admin', 'manager'].includes(me.role)) store.start();
+    if (['admin', 'manager'].includes(me.role)) { store.start(); startServiceAlerts(); }
     else if (!location.hash.startsWith('#/accounts')) location.hash = '#/accounts';
     renderShell();
   } catch (e) {

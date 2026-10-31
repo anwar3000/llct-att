@@ -11,6 +11,7 @@ import '../../services/tracking_service.dart';
 import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/profile_prompt.dart';
+import '../../widgets/service_alerts.dart';
 import '../admin/accounts_tab.dart';
 import '../admin/company_documents_screen.dart';
 import '../admin/id_documents_screen.dart';
@@ -170,7 +171,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
   @override
   Widget build(BuildContext context) {
     final me = widget.me;
-    return Scaffold(
+    return ServiceAlerts(me: me, child: Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
         title: Row(children: [
@@ -193,6 +194,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
               padding: EdgeInsets.only(right: 4),
               child: Pill('ON DUTY', color: AppColors.success, icon: Icons.circle),
             ),
+          ServiceJobsButton(me: me),
           IconButton(
             onPressed: _profile,
             icon: Avatar(me.name, size: 32),
@@ -229,6 +231,6 @@ class _EmployeeShellState extends State<EmployeeShell> {
               label: 'Petty'),
         ],
       ),
-    );
+    ));
   }
 }

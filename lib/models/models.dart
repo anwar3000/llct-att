@@ -97,6 +97,9 @@ class AppUser {
   /// Accounts permission: view (read-only) / edit (changes wait for admin approval).
   final bool canViewAccounts;
   final bool canEditAccounts;
+  /// Service desk: may assign service requests to other staff (admins / managers always can).
+  final bool canAssignService;
+  bool get assignsService => isManagement || canAssignService;
   bool get seesAccounts => isAdmin || canViewAccounts || canEditAccounts;
   /// 'admin' | 'editor' | 'viewer'
   String get acctMode => isAdmin ? 'admin' : (canEditAccounts ? 'editor' : 'viewer');
@@ -124,6 +127,7 @@ class AppUser {
     this.canViewIds = false,
     this.canViewAccounts = false,
     this.canEditAccounts = false,
+    this.canAssignService = false,
     this.isDriver = false,
     this.tripRatePerKm,
     this.vehicle = '',
@@ -163,6 +167,7 @@ class AppUser {
       canViewIds: m['canViewIds'] == true,
       canViewAccounts: m['canViewAccounts'] == true,
       canEditAccounts: m['canEditAccounts'] == true,
+      canAssignService: m['canAssignService'] == true,
       isDriver: m['isDriver'] == true,
       tripRatePerKm: _dbl(m['tripRatePerKm']),
       vehicle: _str(m['vehicle']),
