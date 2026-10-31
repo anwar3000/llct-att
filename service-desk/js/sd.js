@@ -70,7 +70,7 @@ export const SLOTS = [
   { k: 'morning', t: 'Morning (8 am – 12 pm)' },
   { k: 'afternoon', t: 'Afternoon (12 – 4 pm)' },
   { k: 'evening', t: 'Evening (4 – 8 pm)' },
-  { k: 'any', t: 'Any time that day' },
+  { k: 'any', t: 'Any time' },
 ];
 export const slotLabel = (k) => (SLOTS.find((s) => s.k === k) || { t: '' }).t;
 

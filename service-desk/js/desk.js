@@ -10,6 +10,7 @@ import {
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
 } from './sd.js';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -362,6 +363,7 @@ function openTicket(id) {
   if (A && !t.open) acts.push('<button class="btn" data-a="reopen">Re-open</button>');
   if (t.open && (A || mine) && t.assignedTo) acts.push('<button class="btn" data-a="resched">🗓 Change visit time</button>');
   if (t.portal && (A || mine)) acts.push('<label class="btn">📷 Post photo for client<input type="file" accept="image/*" multiple hidden data-postph></label>');
+  acts.push('<button class="btn" data-a="pdf">PDF</button>');
   if (isAdmin()) acts.push('<button class="btn bad" data-a="delete">Delete ticket</button>');
   const nav = mapsLink(t);
   const o = modal(`<div class="grow"><div class="row"><h2 class="mono">${esc(t.number || t.id)}</h2><span class="chip" style="background:${s.c}1f;color:${s.c}"><span class="dot" style="background:${s.c}"></span>${esc(s.staff)}</span><span class="chip" style="background:${p.c};color:#fff">${esc(p.t)}</span>${overdue(t) ? '<span class="chip" style="background:#fde3e3;color:var(--danger)">Over response time</span>' : ''}</div></div>`,
@@ -396,6 +398,17 @@ function openTicket(id) {
     const a = b.dataset.a, cur = getT(t.id) || t;
     if (a === 'assign') { close(o); return assignModal(cur); }
     if (a === 'resched') { close(o); return rescheduleModal(cur); }
+    if (a === 'pdf') {
+      b.disabled = true;
+      let report = null, photos = [];
+      if (cur.portal) {
+        try { const m = await getDoc(doc(db, 'svcPortals', cur.portal, 'tickets', cur.id)); report = (m.exists() && m.data().report) || null; } catch (_) { /* ignore */ }
+        try { photos = (await getDocs(query(collection(db, 'svcPortals', cur.portal, 'tickets', cur.id, 'photos'), orderBy('at', 'asc')))).docs.map((d) => d.data()); } catch (_) { /* ignore */ }
+      }
+      ticketPdf(cur, { report, photos });
+      b.disabled = false;
+      return;
+    }
     if (a === 'delete') {
       if (!confirm(`Delete ticket ${cur.number || cur.id}? This also removes it from the client's page. This cannot be undone.`)) return;
       b.disabled = true;
@@ -640,7 +653,7 @@ function portalMenu(p) {
 }
 async function clientHistory(clientId) {
   const c = S.clients.find((x) => x.id === clientId) || { name: '' };
-  const o = modal(`<h2 class="grow">${esc(c.name)} — ticket history</h2>`, '<div class="loading">Loading…</div>', `<button class="btn sm primary" id="ch-new">+ New ticket</button><button class="btn sm" id="ch-csv">Export CSV</button><button class="btn" data-x>Close</button>`, { wide: true });
+  const o = modal(`<h2 class="grow">${esc(c.name)} — ticket history</h2>`, '<div class="loading">Loading…</div>', `<button class="btn sm primary" id="ch-new">+ New ticket</button><button class="btn sm" id="ch-pdf">PDF</button><button class="btn sm" id="ch-csv">Export CSV</button><button class="btn" data-x>Close</button>`, { wide: true });
   let ts = [];
   try { ts = (await getDocs(query(collection(db, 'svcTickets'), where('clientId', '==', clientId)))).docs.map((d) => ({ id: d.id, ...d.data() })); }
   catch (e) { ts = allTickets().filter((t) => t.clientId === clientId); }
@@ -650,6 +663,7 @@ async function clientHistory(clientId) {
     <div style="overflow:auto"><table class="tbl"><thead><tr><th>Ticket</th><th>Raised</th><th>Site</th><th>Service</th><th>Priority</th><th>Status</th><th>Technician</th><th>Report</th></tr></thead><tbody>
     ${ts.map((t) => `<tr class="click" data-open="${esc(t.id)}"><td class="mono">${esc(t.number || t.id)}</td><td class="small">${esc(fmtDT(t.createdAt))}</td><td>${esc(t.siteName)}</td><td>${esc(typesText(t))}</td><td>${esc(prio(t.priority).t)}</td><td>${esc(st(t.status).t)}</td><td>${esc(t.assignedName || '')}</td><td>${esc(t.reportNo || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No tickets yet.</td></tr>'}</tbody></table></div>`;
   $$('[data-open]', o).forEach((e) => (e.onclick = () => { close(o); openTicket(e.dataset.open); }));
+  $('#ch-pdf', o).onclick = () => clientPdf(c.name || '', ts);
   $('#ch-csv', o).onclick = () => downloadCsv(ts, `tickets-${(c.name || 'client').replace(/\W+/g, '-')}.csv`);
   $('#ch-new', o).onclick = () => { close(o); newTicketModal(clientId); };
 }
@@ -673,7 +687,7 @@ function reportsView(m) {
       <input type="date" id="rf" value="${S.rangeFrom}" style="width:auto"><span>to</span><input type="date" id="rt" value="${S.rangeTo}" style="width:auto">
       <select id="rc" style="width:auto;max-width:220px"><option value="">All clients</option>${clientsIn.map(([id, n]) => `<option value="${esc(id)}" ${S.rClient === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
       <select id="rte" style="width:auto"><option value="">All technicians</option>${techsIn.map(([id, n]) => `<option value="${esc(id)}" ${S.rTech === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
-      <button class="btn sm" id="rcsv">Export CSV</button></div>
+      <button class="btn sm primary" id="rpdf">PDF report</button><button class="btn sm" id="rcsv">Export CSV</button></div>
     <div class="kpis"><div class="card kpi"><div class="v">${ts.length}</div><div class="l">Tickets</div></div>
       <div class="card kpi"><div class="v">${ts.filter((t) => ['completed', 'closed'].includes(t.status)).length}</div><div class="l">Completed</div></div>
       <div class="card kpi"><div class="v">${ts.filter((t) => t.open).length}</div><div class="l">Still open</div></div>
@@ -689,6 +703,11 @@ function reportsView(m) {
   $('#rc', m).onchange = (e) => { S.rClient = e.target.value; render(); };
   $('#rte', m).onchange = (e) => { S.rTech = e.target.value; render(); };
   $('#rcsv', m).onclick = () => downloadCsv(ts, `service-tickets-${S.rangeFrom}-to-${S.rangeTo}.csv`);
+  $('#rpdf', m).onclick = () => periodPdf(ts, {
+    from: S.rangeFrom, to: S.rangeTo,
+    clientName: S.rClient ? (clientsIn.find((x) => x[0] === S.rClient) || [])[1] || '' : '',
+    techName: S.rTech ? (techsIn.find((x) => x[0] === S.rTech) || [])[1] || '' : '',
+  });
   $$('[data-open]', m).forEach((e) => (e.onclick = () => openTicket(e.dataset.open)));
 }
 function downloadCsv(ts, name) {

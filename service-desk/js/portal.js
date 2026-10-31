@@ -104,7 +104,8 @@ function formHtml() {
   const asCards = sites.length <= 8;
   const siteCard = (id, name, sub, gps) => `<button type="button" class="opt ${f.siteId === id ? 'on' : ''}" data-site="${esc(id)}" role="radio" aria-checked="${f.siteId === id}">
       <span class="ot">${esc(name)}</span>${sub ? `<span class="os">${esc(sub)}</span>` : ''}${gps ? '<span class="og" title="Location saved">Location saved</span>' : ''}</button>`;
-  const dateSel = f.preferredDate === dateKey() ? 'today' : f.preferredDate === tomorrow() ? 'tomorrow' : 'pick';
+  const asap = f.preferredSlot === 'asap';
+  const dateSel = asap ? 'asap' : f.preferredDate === dateKey() ? 'today' : f.preferredDate === tomorrow() ? 'tomorrow' : 'pick';
   return `<form id="f" novalidate><div class="sheet">
   <div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">Which of your sites needs the visit?</p>
     ${asCards ? `<div class="opts" role="radiogroup">${sites.map((s) => siteCard(s.id, s.name, String(s.address || '').split('\n')[0], hasGPS(s))).join('')}${siteCard('_other', 'Another location', 'Not in this list', false)}</div>`
@@ -128,13 +129,14 @@ function formHtml() {
     <div class="prios" role="radiogroup">${PRIORITIES.map((p) => `<button type="button" class="prio ${f.priority === p.k ? 'on' : ''}" data-prio="${p.k}" role="radio" aria-checked="${f.priority === p.k}" style="--pc:${p.c}"><span class="pd"></span><b>${p.t}</b><small>${esc(p.s)}</small></button>`).join('')}</div>
   </div></div>
 
-  <div class="step"><span class="sn">4</span><div class="sb"><h2>Preferred visit</h2><p class="hint">We confirm the exact time when a technician is assigned.</p>
-    <div class="chips" role="radiogroup" aria-label="Day">
+  <div class="step"><span class="sn">4</span><div class="sb"><h2>Preferred visit</h2><p class="hint">We confirm the exact time when a technician is assigned. Pick a day only if you need a particular one.</p>
+    <div class="chips" role="radiogroup" aria-label="When">
+      <button type="button" class="pchip ${dateSel === 'asap' ? 'on' : ''}" data-day="asap">As soon as possible</button>
       <button type="button" class="pchip ${dateSel === 'today' ? 'on' : ''}" data-day="today">Today</button>
       <button type="button" class="pchip ${dateSel === 'tomorrow' ? 'on' : ''}" data-day="tomorrow">Tomorrow</button>
       <label class="pchip ${dateSel === 'pick' ? 'on' : ''}">${dateSel === 'pick' ? esc(fmtDate(f.preferredDate)) : 'Pick a date'}<input type="date" id="f-date" min="${dateKey()}" value="${esc(f.preferredDate)}"></label>
     </div>
-    <div class="chips" role="radiogroup" aria-label="Time" style="margin-top:10px">${SLOTS.map((s) => `<button type="button" class="pchip ${f.preferredSlot === s.k ? 'on' : ''}" data-slot="${s.k}">${esc(s.t)}</button>`).join('')}</div>
+    ${asap ? '' : `<div class="chips" role="radiogroup" aria-label="Time" style="margin-top:10px">${SLOTS.filter((s) => s.k !== 'asap').map((s) => `<button type="button" class="pchip ${f.preferredSlot === s.k ? 'on' : ''}" data-slot="${s.k}">${esc(s.t)}</button>`).join('')}</div>`}
   </div></div>
 
   <div class="step"><span class="sn">5</span><div class="sb"><h2>Contact at site</h2><p class="hint">Who should the technician ask for?</p>
@@ -170,8 +172,13 @@ function bindForm() {
   }));
   $$('[data-prio]').forEach((b) => (b.onclick = () => { f.priority = b.dataset.prio; $$('[data-prio]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }); }));
   $$('[data-cam]').forEach((b) => (b.onclick = () => { f.cameras = Math.max(0, Math.min(999, (f.cameras || 0) + Number(b.dataset.cam))); $('#f-cams').textContent = f.cameras || '–'; }));
-  $$('[data-day]').forEach((b) => (b.onclick = () => { f.preferredDate = b.dataset.day === 'today' ? dateKey() : tomorrow(); redraw(); }));
-  const di = $('#f-date'); if (di) di.onchange = () => { if (di.value) { f.preferredDate = di.value; redraw(); } };
+  $$('[data-day]').forEach((b) => (b.onclick = () => {
+    const d = b.dataset.day;
+    if (d === 'asap') { f.preferredDate = dateKey(); f.preferredSlot = 'asap'; }
+    else { f.preferredDate = d === 'today' ? dateKey() : tomorrow(); if (f.preferredSlot === 'asap') f.preferredSlot = 'any'; }
+    redraw();
+  }));
+  const di = $('#f-date'); if (di) di.onchange = () => { if (di.value) { f.preferredDate = di.value; if (f.preferredSlot === 'asap') f.preferredSlot = 'any'; redraw(); } };
   $$('[data-slot]').forEach((b) => (b.onclick = () => { f.preferredSlot = b.dataset.slot; $$('[data-slot]').forEach((x) => x.classList.toggle('on', x === b)); }));
   $$('[data-rmph]').forEach((b) => (b.onclick = () => { S.photos.splice(+b.dataset.rmph, 1); redraw(); }));
   const ph = $('#f-ph');
