@@ -19,6 +19,7 @@ import * as trips from './pages/trips.js';
 import * as accounts from './pages/accounts.js';
 import * as backup from './pages/backup.js';
 import * as company from './pages/company.js';
+import * as svcreports from './pages/svcreports.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -67,6 +68,7 @@ const NAV = [
   { path: 'petty', label: 'Petty cash', icon: 'petty', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
   { path: 'accounts', label: 'Accounts', icon: 'accounts', page: accounts, adminOnly: true, accounts: true },
   { sep: 'Output' },
+  { path: 'svcreports', label: 'Service & delivery reports', icon: 'company', page: svcreports },
   { path: 'reports', label: 'Reports', icon: 'reports', page: reports },
   { path: 'backup', label: 'Backup & storage', icon: 'backup', page: backup, adminOnly: true },
 ];

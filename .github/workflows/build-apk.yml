@@ -129,6 +129,17 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
 
+      - name: Publish as latest APK (fixed download link)
+        if: github.event_name == 'push' && env.PLACEHOLDER != '1'
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk LLCT-Attendance.apk
+          gh release delete apk-latest -y --cleanup-tag 2>/dev/null || true
+          gh release create apk-latest LLCT-Attendance.apk --target "$(git rev-parse HEAD)" \
+            --title "LLCT Attendance — latest" \
+            --notes "Latest build from main: $(git log -1 --pretty=%s | head -c 300)"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Keep this version's APK permanently (Releases)
         if: inputs.version
         run: |
