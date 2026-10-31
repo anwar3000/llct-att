@@ -5,10 +5,10 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   app, db, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
-  serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField,
-  SERVICE_TYPES, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, prio, st, slotLabel, clientMessage, publicView,
+  serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField, deleteDoc,
+  SERVICE_TYPES, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
-  randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep,
+  randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
 } from './sd.js';
 window.__sdStarted = true;
 
@@ -24,7 +24,7 @@ const S = {
   me: null, view: 'tickets', filter: 'open', q: '', fPrio: '', fTech: '',
   open: new Map(), recent: new Map(), users: [], portals: [], clients: [], clientsErr: '',
   unsub: [], loadedOpen: false, popQueue: [], popOn: false, rangeFrom: '', rangeTo: '', rClient: '', rTech: '',
-  sound: lsGet('llct-sd-sound', '1') === '1', synced: false,
+  sound: lsGet('llct-sd-sound', '1') === '1', synced: false, layout: lsGet('llct-sd-layout', 'board'),
 };
 function lsGet(k, d) { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* ignore */ } }
@@ -134,7 +134,7 @@ function queuePop(t, kind) {
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
       const n = new Notification(kind === 'new' ? `New service request · ${prio(t.priority).t}` : 'Job assigned to you', {
-        body: `${t.clientName} – ${t.siteName}\n${typeLabel(t.category)}`, icon: 'img/icon-192.png', tag: t.id,
+        body: `${t.clientName} – ${t.siteName}\n${typesText(t)}`, icon: 'img/icon-192.png', tag: t.id,
       });
       n.onclick = () => { window.focus(); openTicket(t.id); n.close(); };
     }
@@ -151,7 +151,7 @@ function nextPop() {
   const o = modal(`<span class="chip" style="background:${p.c};color:#fff">${esc(p.t)}</span><h2 class="grow">${it.kind === 'new' ? 'New service request' : 'Job assigned to you'}</h2>`,
     `<div class="stack"><div class="mono"><b>${esc(t.number || t.id)}</b> · ${esc(ago(t.createdAt))}</div>
       <div style="font-size:17px"><b>${esc(t.clientName)}</b><br>${esc(t.siteName)}</div>
-      <div><b>${esc(typeLabel(t.category))}</b><div class="muted">${esc(t.description)}</div></div>
+      <div><b>${esc(typesText(t))}</b><div class="muted">${esc(t.description)}</div></div>
       <div class="small">Preferred: ${esc(fmtDate(t.preferredDate))} · ${esc(slotLabel(t.preferredSlot))}</div>
       ${t.scheduledAt ? `<div class="small">Visit scheduled: <b>${esc(fmtDT(t.scheduledAt))}</b></div>` : ''}</div>`,
     `<button class="btn" data-x>Later</button><button class="btn" id="pp-v">View</button>
@@ -277,7 +277,7 @@ function ticketsView(m) {
     : S.filter === 'done' ? allTickets().filter((t) => ['completed', 'closed'].includes(t.status)) : allTickets();
   if (S.fPrio) list = list.filter((t) => t.priority === S.fPrio);
   if (S.fTech) list = list.filter((t) => (S.fTech === '_none' ? !t.assignedTo : t.assignedTo === S.fTech));
-  if (S.q) { const q = S.q.toLowerCase(); list = list.filter((t) => [t.number, t.clientName, t.siteName, t.description, typeLabel(t.category), t.assignedName, t.contactName, t.contactPhone].join(' ').toLowerCase().includes(q)); }
+  if (S.q) { const q = S.q.toLowerCase(); list = list.filter((t) => [t.number, t.clientName, t.siteName, t.description, typesText(t), t.assignedName, t.contactName, t.contactPhone].join(' ').toLowerCase().includes(q)); }
   const po = { critical: 0, high: 1, normal: 2, low: 3 };
   const rank = (t) => (!t.open ? 3 : t.status === 'new' ? 0 : t.status === 'completed' ? 2 : 1);
   list.sort((a, b) => rank(a) - rank(b) || (a.open && b.open ? (po[a.priority] ?? 2) - (po[b.priority] ?? 2) : 0)
@@ -290,8 +290,9 @@ function ticketsView(m) {
       <select id="ft"><option value="">Any technician</option><option value="_none" ${S.fTech === '_none' ? 'selected' : ''}>Not assigned</option>${techs.map(([id, n]) => `<option value="${esc(id)}" ${S.fTech === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
       <input id="fq" placeholder="Search ticket, client, site, phone…" value="${esc(S.q)}" style="flex:1">
       ${'Notification' in window && Notification.permission === 'default' ? '<button class="btn sm" id="nperm">🔔 Enable desktop alerts</button>' : ''}
-      <button class="btn sm" id="snd">${S.sound ? '🔊 Sound on' : '🔇 Sound off'}</button></div>
-    <div class="card tlist">${list.length ? list.map(rowHtml).join('') : `<div class="empty">${S.loadedOpen ? 'No tickets here.' : 'Loading…'}</div>`}</div>`;
+      <div class="seg" role="group" aria-label="Layout"><button class="btn sm ${S.layout === 'board' ? 'on' : ''}" data-lay="board">Board</button><button class="btn sm ${S.layout === 'list' ? 'on' : ''}" data-lay="list">List</button></div>
+      <button class="btn sm" id="snd">${S.sound ? 'Sound on' : 'Sound off'}</button></div>
+    ${S.layout === 'board' ? boardHtml(list) : `<div class="card tlist">${list.length ? list.map(rowHtml).join('') : `<div class="empty">${S.loadedOpen ? 'No tickets here.' : 'Loading…'}</div>`}</div>`}`;
   $$('[data-f]', m).forEach((e) => (e.onclick = () => { S.filter = S.filter === e.dataset.f ? 'open' : e.dataset.f; render(); }));
   $('#ff', m).onchange = (e) => { S.filter = e.target.value; render(); };
   $('#fp', m).onchange = (e) => { S.fPrio = e.target.value; render(); };
@@ -299,14 +300,39 @@ function ticketsView(m) {
   const fq = $('#fq', m); fq.oninput = () => { S.q = fq.value; clearTimeout(fq._t); fq._t = setTimeout(() => { render(); const n = $('#fq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   const np = $('#nperm', m); if (np) np.onclick = () => Notification.requestPermission().then(() => render());
   $('#snd', m).onclick = () => { S.sound = !S.sound; lsSet('llct-sd-sound', S.sound ? '1' : '0'); if (S.sound) beep(1); render(); };
+  $$('[data-lay]', m).forEach((b) => (b.onclick = () => { S.layout = b.dataset.lay; lsSet('llct-sd-layout', S.layout); render(); }));
   $$('[data-open]', m).forEach((e) => (e.onclick = () => openTicket(e.dataset.open)));
+}
+// Board: one column per stage of the job.
+const COLS = [
+  ['new', 'New', (t) => t.status === 'new'],
+  ['assigned', 'Assigned', (t) => ['assigned', 'accepted'].includes(t.status)],
+  ['progress', 'On the way / at site', (t) => ['on_way', 'on_site'].includes(t.status)],
+  ['done', 'Completed', (t) => ['completed', 'closed'].includes(t.status)],
+];
+function boardHtml(list) {
+  const cols = S.filter === 'all' || S.filter === 'done' ? COLS : COLS.filter((c) => c[0] !== 'done' || list.some(c[2]));
+  return `<div class="board">${cols.map(([k, title, f]) => {
+    const items = list.filter(f);
+    return `<section class="bcol bcol-${k}"><header><b>${title}</b><span>${items.length}</span></header>
+      <div class="bitems">${items.map(cardHtml).join('') || `<div class="bempty">${k === 'new' ? 'No new requests' : 'Nothing here'}</div>`}</div></section>`;
+  }).join('')}</div>`;
+}
+function cardHtml(t) {
+  const p = prio(t.priority), od = overdue(t);
+  return `<button class="bcard" data-open="${esc(t.id)}" style="--pc:${p.c}">
+    <div class="bc1"><span class="bprio">${esc(p.t)}</span>${od ? '<span class="bover">Overdue</span>' : ''}<span class="grow"></span><span class="bno">${esc(t.number || t.id)}</span></div>
+    <div class="bc2">${esc(t.clientName)}</div><div class="bc3">${esc(t.siteName)}</div>
+    <div class="bc4">${esc(typesText(t))}</div>
+    <div class="bc5">${t.assignedName ? `${avatar(t.assignedName)}<span>${esc(t.assignedName)}</span>` : '<span class="muted">Not assigned</span>'}<span class="grow"></span>
+      <span class="muted">${t.scheduledAt ? esc(fmtDT(t.scheduledAt)) : esc(ago(t.createdAt))}</span></div></button>`;
 }
 function rowHtml(t) {
   const s = st(t.status), p = prio(t.priority), od = overdue(t);
   const fresh = t.status === 'new' && toDate(t.createdAt) && Date.now() - toDate(t.createdAt).getTime() < 120000;
   return `<div class="trow ${fresh ? 'fresh' : ''}" data-open="${esc(t.id)}"><span class="bar" style="background:${p.c}"></span>
     <div style="min-width:0"><div class="row"><span class="t1">${esc(t.clientName)}</span><span class="muted">·</span><span>${esc(t.siteName)}</span></div>
-      <div class="t2">${esc(typeLabel(t.category))} — ${esc(String(t.description || '').slice(0, 110))}</div>
+      <div class="t2">${esc(typesText(t))} — ${esc(String(t.description || '').slice(0, 110))}</div>
       <div class="t2 mono small">${esc(t.number || t.id)} · ${esc(ago(t.createdAt))}${t.source === 'staff' ? ' · by staff' : ''}${t.reportNo ? ' · ' + esc(t.reportNo) : ''}</div></div>
     <div class="r"><span class="chip" style="background:${s.c}1f;color:${s.c}"><span class="dot" style="background:${s.c}"></span>${esc(s.t)}</span>
       <span class="chip" style="background:${p.c}14;color:${p.c}">${esc(p.t)}</span>
@@ -334,6 +360,9 @@ function openTicket(id) {
   if (A && t.status === 'completed') acts.push('<button class="btn dark" data-a="close">Close ticket</button>');
   if (A && t.open) acts.push('<button class="btn bad" data-a="cancel">Cancel ticket</button>');
   if (A && !t.open) acts.push('<button class="btn" data-a="reopen">Re-open</button>');
+  if (t.open && (A || mine) && t.assignedTo) acts.push('<button class="btn" data-a="resched">🗓 Change visit time</button>');
+  if (t.portal && (A || mine)) acts.push('<label class="btn">📷 Post photo for client<input type="file" accept="image/*" multiple hidden data-postph></label>');
+  if (isAdmin()) acts.push('<button class="btn bad" data-a="delete">Delete ticket</button>');
   const nav = mapsLink(t);
   const o = modal(`<div class="grow"><div class="row"><h2 class="mono">${esc(t.number || t.id)}</h2><span class="chip" style="background:${s.c}1f;color:${s.c}"><span class="dot" style="background:${s.c}"></span>${esc(s.staff)}</span><span class="chip" style="background:${p.c};color:#fff">${esc(p.t)}</span>${overdue(t) ? '<span class="chip" style="background:#fde3e3;color:var(--danger)">Over response time</span>' : ''}</div></div>`,
     `<div class="dgrid"><div class="stack">
@@ -341,7 +370,7 @@ function openTicket(id) {
         <div class="row" style="margin-top:10px">${nav ? `<a class="btn sm primary" href="${nav}" target="_blank" rel="noopener">🧭 Navigate</a>` : '<span class="small muted">No GPS for this site — add it to the client\'s site in Invoicing.</span>'}
         ${hasGPS(t) ? `<span class="small muted mono">${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}</span>` : ''}</div></div>
       <div class="card pad"><div class="kv">
-        <span>Service</span><b>${esc(typeLabel(t.category))}</b>
+        <span>Service</span><b>${esc(typesText(t))}</b>
         <span>Problem</span><span style="white-space:pre-line">${esc(t.description)}</span>
         ${t.cameras ? `<span>Devices</span><span>${esc(t.cameras)}</span>` : ''}
         <span>Preferred</span><span>${esc(fmtDate(t.preferredDate))} · ${esc(slotLabel(t.preferredSlot))}</span>
@@ -360,11 +389,19 @@ function openTicket(id) {
         <div class="row" style="margin-top:8px">${t.contactPhone ? `<a class="btn sm" target="_blank" rel="noopener" href="${waLink(t.contactPhone, waText(t))}">Send update on WhatsApp</a>` : ''}${t.portal ? '<span class="small muted">Also visible live on the client\'s link.</span>' : ''}</div></div>
       <div class="card pad"><h3>Timeline</h3><div class="timeline">${(t.log || []).slice().reverse().map((l) => `<div><b>${esc(l.t)}</b><br><span class="muted small">${esc(fmtDT(l.at))}${l.byName ? ' · ' + esc(l.byName) : ''}</span></div>`).join('')}</div>
         ${A || mine ? '<div class="row" style="margin-top:8px"><input id="tn" placeholder="Add an internal note…" class="grow"><button class="btn sm" id="tnb">Add</button></div>' : ''}</div>
+      ${t.portal ? `<div class="card pad"><h3>Photos for the client</h3><div class="thumbs" id="cph" style="margin-top:8px"><span class="small muted">Loading…</span></div></div>` : ''}
     </div></div>`, '', { wide: true });
   o.dataset.tid = t.id;
   $$('[data-a]', o).forEach((b) => (b.onclick = async () => {
     const a = b.dataset.a, cur = getT(t.id) || t;
     if (a === 'assign') { close(o); return assignModal(cur); }
+    if (a === 'resched') { close(o); return rescheduleModal(cur); }
+    if (a === 'delete') {
+      if (!confirm(`Delete ticket ${cur.number || cur.id}? This also removes it from the client's page. This cannot be undone.`)) return;
+      b.disabled = true;
+      try { await deleteTicket(cur); toast('Ticket deleted'); close(o); } catch (e) { toast(friendly(e), true); b.disabled = false; }
+      return;
+    }
     b.disabled = true;
     if (a === 'accept') await accept(cur);
     else if (['on_way', 'on_site', 'completed'].includes(a)) await setStatus(cur, a);
@@ -379,11 +416,70 @@ function openTicket(id) {
     b.disabled = false; // the live update redraws this ticket
   }));
   $$('[data-ph]', o).forEach((im) => (im.onclick = () => { const w = window.open(); if (w) w.document.write(`<img src="${im.src}" style="max-width:100%">`); }));
+  if (t.portal) {
+    const box = $('#cph', o);
+    getDocs(query(collection(db, 'svcPortals', t.portal, 'tickets', t.id, 'photos'), orderBy('at', 'asc'))).then((q) => {
+      if (!box) return;
+      box.innerHTML = q.docs.length ? q.docs.map((d) => `<img src="${d.data().data}" alt="" title="${esc(d.data().caption || '')}">`).join('') : '<span class="small muted">None yet. Post photos of the finished work; the client sees them on their request.</span>';
+    }).catch(() => { if (box) box.innerHTML = '<span class="small muted">Publish the latest Firestore rules to use client photos.</span>'; });
+  }
+  const pp = $('[data-postph]', o);
+  if (pp) pp.onchange = async () => {
+    const files = [...pp.files].slice(0, 6); if (!files.length) return;
+    toast('Uploading…');
+    try { await postClientPhotos(getT(t.id) || t, files); toast(`${files.length} photo${files.length > 1 ? 's' : ''} posted for the client`); close(o); openTicket(t.id); }
+    catch (e) { toast(friendly(e), true); }
+  };
   const tnb = $('#tnb', o);
   if (tnb) tnb.onclick = async () => { const v = $('#tn', o).value.trim(); if (!v) return; tnb.disabled = true; $('#tn', o).value = ''; await updateTicket(getT(t.id) || t, mine && !A ? { techNote: v } : {}, 'Note: ' + v); };
 }
 function waText(t) {
-  return `Leaders Line Service – ${t.number || t.id}\n${t.clientName} – ${t.siteName}\n${typeLabel(t.category)}\n\n${clientMessage(t)}${t.portal ? `\n\nTrack: ${portalUrl(t.portal)}` : ''}`;
+  return `Leaders Line Service – ${t.number || t.id}\n${t.clientName} – ${t.siteName}\n${typesText(t)}\n\n${clientMessage(t)}${t.portal ? `\n\nTrack: ${portalUrl(t.portal)}` : ''}`;
+}
+
+async function deleteTicket(t) {
+  if (t.portal) {
+    try {
+      const ph = await getDocs(collection(db, 'svcPortals', t.portal, 'tickets', t.id, 'photos'));
+      await Promise.all(ph.docs.map((d) => deleteDoc(d.ref)));
+    } catch (_) { /* no photos / older rules */ }
+    await deleteDoc(doc(db, 'svcPortals', t.portal, 'tickets', t.id)).catch(() => {});
+  }
+  await deleteDoc(doc(db, 'svcTickets', t.id));
+  S.open.delete(t.id); S.recent.delete(t.id); refresh();
+}
+async function postClientPhotos(t, files) {
+  const at = Timestamp.now(); let n = 0;
+  for (const f of files) {
+    const data = await compressImage(f, 1280, 0.7);
+    await setDoc(doc(collection(db, 'svcPortals', t.portal, 'tickets', t.id, 'photos')), { data, caption: '', by: S.me.id, byName: S.me.name || '', at });
+    n++;
+  }
+  await updateTicket(t, { photosPosted: (t.photosPosted || 0) + n }, `${n} photo${n > 1 ? 's' : ''} posted for the client`, `${n} photo${n > 1 ? 's' : ''} of the work added`);
+}
+function preferredDateTime(t) {
+  const d = toDate(t.preferredDate) || new Date(); const h = { morning: 9, afternoon: 13, evening: 17 }[t.preferredSlot];
+  d.setHours(h || 9, 0, 0, 0);
+  const n = new Date(Date.now() + 2 * 3600e3); n.setMinutes(0, 0, 0);
+  return n > d ? n : d; // never in the past
+}
+function rescheduleModal(t) {
+  const cur = t.scheduledAt ? toDate(t.scheduledAt) : preferredDateTime(t);
+  const o = modal(`<h2 class="grow">Visit time for ${esc(t.number || t.id)}</h2>`,
+    `<p class="small muted" style="margin-top:0">Client asked for ${esc(fmtDate(t.preferredDate))}, ${esc((slotLabel(t.preferredSlot) || '').toLowerCase())}.</p>
+     <div class="row"><button class="btn sm" id="rs-pref" type="button">Use the client's preferred time</button></div>
+     <label class="field" style="margin-top:12px"><span>Visit date and time</span><input type="datetime-local" id="rs-when" value="${esc(localInput(cur))}"></label>
+     <label class="field" style="margin-top:10px"><span>Reason (shown to the client, optional)</span><input id="rs-why" placeholder="e.g. Technician availability"></label>`,
+    `<button class="btn" data-x>Cancel</button><button class="btn primary" id="rs-go">Save visit time</button>`);
+  $('#rs-pref', o).onclick = () => { $('#rs-when', o).value = localInput(preferredDateTime(t)); };
+  $('#rs-go', o).onclick = async () => {
+    const v = $('#rs-when', o).value; if (!v) return toast('Choose the date and time', true);
+    const when = Timestamp.fromDate(new Date(v)); const why = $('#rs-why', o).value.trim();
+    $('#rs-go', o).disabled = true;
+    const ok = await updateTicket(t, { scheduledAt: when }, `Visit time set to ${fmtDT(when)}${why ? ` (${why})` : ''}`,
+      `Visit ${t.scheduledAt ? 'rescheduled' : 'scheduled'} for ${fmtDT(when)}${why ? ` — ${why}` : ''}`);
+    if (ok) { toast('Visit time saved'); close(o); openTicket(t.id); } else $('#rs-go', o).disabled = false;
+  };
 }
 
 // ================================================================== assign
@@ -535,7 +631,9 @@ function portalMenu(p) {
     `<div class="linkbox"><input readonly value="${esc(portalUrl(p.id))}"><button class="btn sm" id="pm-c">Copy</button><a class="btn sm" href="${portalUrl(p.id)}" target="_blank" rel="noopener">Open</a></div>
      <p class="small muted">Created ${esc(fmtDT(p.createdAt))}${p.createdByName ? ' by ' + esc(p.createdByName) : ''}. ${(p.sites || []).length} site(s) on the link.</p>
      <div class="small">${(p.sites || []).map((s) => `• ${esc(s.name)} ${hasGPS(s) ? '<span style="color:var(--success)">GPS</span>' : '<span class="muted">no GPS</span>'}`).join('<br>')}</div>`,
-    `<button class="btn bad" id="pm-off">Disable link</button><button class="btn" id="pm-new">Replace with new link</button><button class="btn" data-x>Done</button>`);
+    `${isMgmt() ? '<button class="btn bad" id="pm-del">Delete link</button>' : ''}<button class="btn bad" id="pm-off">Disable link</button><button class="btn" id="pm-new">Replace with new link</button><button class="btn" data-x>Done</button>`);
+  const pd = $('#pm-del', o);
+  if (pd) pd.onclick = async () => { if (!confirm('Delete this link? The client can no longer open it. Their past tickets stay in the desk.')) return; await deleteDoc(doc(db, 'svcPortals', p.id)).then(() => toast('Link deleted'), (e) => toast(friendly(e), true)); close(o); };
   $('#pm-c', o).onclick = () => copy(portalUrl(p.id));
   $('#pm-off', o).onclick = async () => { if (!confirm('Disable this link? The client will no longer be able to open it.')) return; await updateDoc(doc(db, 'svcPortals', p.id), { active: false, updatedAt: serverTimestamp() }).catch((e) => toast(friendly(e), true)); close(o); };
   $('#pm-new', o).onclick = async () => { if (!confirm('Create a new link and disable the old one?')) return; await updateDoc(doc(db, 'svcPortals', p.id), { active: false, updatedAt: serverTimestamp() }).catch(() => {}); close(o); makePortal(S.clients.find((x) => x.id === p.clientId)); };
@@ -550,7 +648,7 @@ async function clientHistory(clientId) {
   const bySite = {}; ts.forEach((t) => { bySite[t.siteName] = (bySite[t.siteName] || 0) + 1; });
   $('.mb', o).innerHTML = `<div class="row small" style="margin-bottom:10px"><b>${ts.length}</b> tickets · ${ts.filter((t) => t.open).length} open · ${Object.entries(bySite).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ')}</div>
     <div style="overflow:auto"><table class="tbl"><thead><tr><th>Ticket</th><th>Raised</th><th>Site</th><th>Service</th><th>Priority</th><th>Status</th><th>Technician</th><th>Report</th></tr></thead><tbody>
-    ${ts.map((t) => `<tr class="click" data-open="${esc(t.id)}"><td class="mono">${esc(t.number || t.id)}</td><td class="small">${esc(fmtDT(t.createdAt))}</td><td>${esc(t.siteName)}</td><td>${esc(typeLabel(t.category))}</td><td>${esc(prio(t.priority).t)}</td><td>${esc(st(t.status).t)}</td><td>${esc(t.assignedName || '')}</td><td>${esc(t.reportNo || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No tickets yet.</td></tr>'}</tbody></table></div>`;
+    ${ts.map((t) => `<tr class="click" data-open="${esc(t.id)}"><td class="mono">${esc(t.number || t.id)}</td><td class="small">${esc(fmtDT(t.createdAt))}</td><td>${esc(t.siteName)}</td><td>${esc(typesText(t))}</td><td>${esc(prio(t.priority).t)}</td><td>${esc(st(t.status).t)}</td><td>${esc(t.assignedName || '')}</td><td>${esc(t.reportNo || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No tickets yet.</td></tr>'}</tbody></table></div>`;
   $$('[data-open]', o).forEach((e) => (e.onclick = () => { close(o); openTicket(e.dataset.open); }));
   $('#ch-csv', o).onclick = () => downloadCsv(ts, `tickets-${(c.name || 'client').replace(/\W+/g, '-')}.csv`);
   $('#ch-new', o).onclick = () => { close(o); newTicketModal(clientId); };
@@ -582,9 +680,9 @@ function reportsView(m) {
       <div class="card kpi"><div class="v">${fmtMins(avg(ts.map((t) => mins(t.createdAt, t.assignedAt))))}</div><div class="l">Avg time to assign</div></div>
       <div class="card kpi"><div class="v">${fmtMins(avg(ts.map((t) => mins(t.createdAt, t.arrivedAt))))}</div><div class="l">Avg time to reach site</div></div>
       <div class="card kpi"><div class="v">${fmtMins(avg(ts.map((t) => mins(t.createdAt, t.completedAt))))}</div><div class="l">Avg time to complete</div></div></div>
-    <div class="dgrid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${box('By client', by((t) => t.clientName).slice(0, 15))}${box('By service type', by((t) => typeLabel(t.category)))}${box('By technician', by((t) => t.assignedName || 'Not assigned'))}${box('By priority', by((t) => prio(t.priority).t))}</div>
+    <div class="dgrid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${box('By client', by((t) => t.clientName).slice(0, 15))}${box('By service type', by((t) => typesText(t)))}${box('By technician', by((t) => t.assignedName || 'Not assigned'))}${box('By priority', by((t) => prio(t.priority).t))}</div>
     <div class="card" style="overflow:auto;margin-top:14px"><table class="tbl"><thead><tr><th>Ticket</th><th>Raised</th><th>Client</th><th>Site</th><th>Service</th><th>Priority</th><th>Status</th><th>Technician</th><th>Assigned in</th><th>Completed in</th><th>Report</th></tr></thead><tbody>
-    ${ts.map((t) => `<tr class="click" data-open="${esc(t.id)}"><td class="mono">${esc(t.number || t.id)}</td><td class="small">${esc(fmtDT(t.createdAt))}</td><td>${esc(t.clientName)}</td><td>${esc(t.siteName)}</td><td>${esc(typeLabel(t.category))}</td><td>${esc(prio(t.priority).t)}</td><td>${esc(st(t.status).t)}</td><td>${esc(t.assignedName || '')}</td><td>${fmtMins(mins(t.createdAt, t.assignedAt))}</td><td>${fmtMins(mins(t.createdAt, t.completedAt))}</td><td>${esc(t.reportNo || '')}</td></tr>`).join('') || '<tr><td colspan="11" class="empty">No tickets in this period.</td></tr>'}
+    ${ts.map((t) => `<tr class="click" data-open="${esc(t.id)}"><td class="mono">${esc(t.number || t.id)}</td><td class="small">${esc(fmtDT(t.createdAt))}</td><td>${esc(t.clientName)}</td><td>${esc(t.siteName)}</td><td>${esc(typesText(t))}</td><td>${esc(prio(t.priority).t)}</td><td>${esc(st(t.status).t)}</td><td>${esc(t.assignedName || '')}</td><td>${fmtMins(mins(t.createdAt, t.assignedAt))}</td><td>${fmtMins(mins(t.createdAt, t.completedAt))}</td><td>${esc(t.reportNo || '')}</td></tr>`).join('') || '<tr><td colspan="11" class="empty">No tickets in this period.</td></tr>'}
     </tbody></table></div><p class="small muted">Covers tickets from the last 4 months (open tickets: all).</p>`;
   $('#rf', m).onchange = (e) => { S.rangeFrom = e.target.value; render(); };
   $('#rt', m).onchange = (e) => { S.rangeTo = e.target.value; render(); };
@@ -595,7 +693,7 @@ function reportsView(m) {
 }
 function downloadCsv(ts, name) {
   const cols = [['Ticket', (t) => t.number || t.id], ['Raised', (t) => fmtDT(t.createdAt)], ['Client', (t) => t.clientName], ['Site', (t) => t.siteName], ['Address', (t) => t.siteAddress],
-    ['Service', (t) => typeLabel(t.category)], ['Problem', (t) => t.description], ['Priority', (t) => prio(t.priority).t], ['Preferred', (t) => `${fmtDate(t.preferredDate)} ${slotLabel(t.preferredSlot)}`],
+    ['Service', (t) => typesText(t)], ['Problem', (t) => t.description], ['Priority', (t) => prio(t.priority).t], ['Preferred', (t) => `${fmtDate(t.preferredDate)} ${slotLabel(t.preferredSlot)}`],
     ['Status', (t) => st(t.status).t], ['Technician', (t) => t.assignedName], ['Visit', (t) => fmtDT(t.scheduledAt)], ['Arrived', (t) => fmtDT(t.arrivedAt)], ['Completed', (t) => fmtDT(t.completedAt)],
     ['Report', (t) => t.reportNo], ['Contact', (t) => t.contactName], ['Mobile', (t) => t.contactPhone], ['Source', (t) => t.source]];
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;

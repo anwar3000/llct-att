@@ -56,6 +56,7 @@ jobs:
             { printf '%s\n' 'subprojects { def f = { p -> if (p.hasProperty("android")) p.android.compileSdkVersion 36 }; if (state.executed) f(it) else afterEvaluate { f(it) } }'; cat android/build.gradle; } > /tmp/root.gradle && mv /tmp/root.gradle android/build.gradle
           fi
           head -12 android/build.gradle* || true
+          python3 tools/patch_android.py
           for f in android/app/build.gradle.kts android/app/build.gradle; do
             if [ -f "$f" ]; then
               sed -i -E 's/minSdk( = |Version )flutter\.minSdkVersion/minSdk\1 24/' "$f"

@@ -50,7 +50,7 @@ function popup(t) {
     <div style="padding:16px 18px"><div style="display:flex;gap:8px;align-items:center"><span style="background:${pc};color:#fff;border-radius:20px;padding:2px 9px;font-size:12px;font-weight:700">${pl}</span>
       <b style="font-size:16px">New service request</b><span style="margin-left:auto;color:#75757a;font-family:monospace;font-size:12px">${esc(t.number || t.id)}</span></div>
       <div style="margin-top:12px;font-size:16px"><b>${esc(t.clientName)}</b><br>${esc(t.siteName)}</div>
-      <div style="margin-top:8px"><b>${esc(TYPES[t.category] || t.category || '')}</b><div style="color:#75757a">${esc(t.description)}</div></div></div>
+      <div style="margin-top:8px"><b>${esc((Array.isArray(t.categories) && t.categories.length ? t.categories : [t.category]).map((k) => TYPES[k] || k || '').join(', '))}</b><div style="color:#75757a">${esc(t.description)}</div></div></div>
     <div style="padding:12px 18px;border-top:1px solid #ebe8e3;display:flex;gap:8px;justify-content:flex-end">
       <button class="btn" data-x>Later</button>${deskUrl ? '<a class="btn primary" data-go target="_blank" rel="noopener">Open service desk</a>' : ''}</div></div>`;
   const go = o.querySelector('[data-go]'); if (go) { go.href = deskUrl; go.onclick = () => o.remove(); }

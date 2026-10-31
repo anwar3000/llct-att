@@ -14,6 +14,7 @@ import '../../services/violation_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
 import '../../widgets/ride_card.dart';
+import '../../widgets/service_calls_card.dart';
 import '../../services/inv_reports.dart';
 import '../reports/report_editor.dart';
 import '../reports/reports_screen.dart';
@@ -760,6 +761,8 @@ class _HomeTabState extends State<HomeTab> {
             _actionButton(open),
             const SizedBox(height: 12),
             RideCard(me: widget.me, sites: _sites),
+            const SizedBox(height: 12),
+            ServiceCallsCard(me: widget.me),
             const SizedBox(height: 12),
             open != null || _myWorkers.isNotEmpty ? _workersCard(open) : _workersHint(),
             const SizedBox(height: 12),

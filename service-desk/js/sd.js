@@ -2,7 +2,7 @@
 // Same Firebase project as LLCT Attendance and LLCT Invoicing.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
+  getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
@@ -10,7 +10,7 @@ import { firebaseConfig } from './config.js';
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export {
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField,
 };
 
@@ -33,6 +33,29 @@ export const SERVICE_TYPES = [
   { k: 'other', t: 'Other', i: '💬' },
 ];
 export const typeLabel = (k) => (SERVICE_TYPES.find((x) => x.k === k) || { t: k || 'Service' }).t;
+/** All selected service types of a ticket (several can be chosen), as labels. */
+export const typesOf = (t) => {
+  const ks = Array.isArray(t && t.categories) && t.categories.length ? t.categories : [t && t.category].filter(Boolean);
+  return ks.length ? ks.map(typeLabel) : ['Service'];
+};
+export const typesText = (t) => typesOf(t).join(', ');
+
+// Line icons (24×24, stroke) for the service types.
+const IC = {
+  camera: 'M3 8.5h11.5l3-2v9l-3-2H3z M6 13.5v3.5h4 M14.5 10.5h0',
+  recording: 'M4 6.5h16v11H4z M8 10.5h8 M8 13.5h5 M17 13.5h.01',
+  remote: 'M8 3h8a1.5 1.5 0 0 1 1.5 1.5v15A1.5 1.5 0 0 1 16 21H8a1.5 1.5 0 0 1-1.5-1.5v-15A1.5 1.5 0 0 1 8 3z M11 18h2 M4 4l16 16',
+  image: 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z M4 20L20 4',
+  hdd: 'M4 5.5h16v5H4z M4 13.5h16v5H4z M16.5 8h.01 M16.5 16h.01',
+  playback: 'M11 7l-6 5 6 5z M19 7l-6 5 6 5z',
+  power: 'M9 3v5 M15 3v5 M6.5 8h11v3a5.5 5.5 0 0 1-11 0z M12 16.5V21',
+  network: 'M2.5 9.5a14 14 0 0 1 19 0 M5.5 12.8a9.5 9.5 0 0 1 13 0 M8.6 16a5 5 0 0 1 6.8 0 M12 19.2h.01',
+  access: 'M6 21V4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21 M3.5 21h17 M14.5 12.5h.01',
+  ppm: 'M14.5 5.5a4 4 0 0 0-5 5L4 16l4 4 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z',
+  install: 'M3 8.5h11.5l3-2v9l-3-2H3z M19.5 3v5 M17 5.5h5',
+  other: 'M4 5.5h16v10H10l-4 3.5v-3.5H4z M8.5 10.5h.01 M12 10.5h.01 M15.5 10.5h.01',
+};
+export const icon = (k, size = 24) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k] || IC.other}"/></svg>`;
 
 export const PRIORITIES = [
   { k: 'critical', t: 'Critical', s: 'System down / security risk', c: '#d64545', hrs: 4 },
@@ -134,6 +157,7 @@ export const reportViewLink = (reportId) => `${INVOICING_URL}#/view?${encodeURIC
 export function publicView(t) {
   const o = {
     number: t.number, siteName: t.siteName || '', siteAddress: t.siteAddress || '', category: t.category || '',
+    categories: Array.isArray(t.categories) ? t.categories : (t.category ? [t.category] : []),
     description: t.description || '', priority: t.priority || 'normal', preferredDate: t.preferredDate || '',
     preferredSlot: t.preferredSlot || '', contactName: t.contactName || '', status: t.status || 'new',
     photosCount: Array.isArray(t.photos) ? t.photos.length : 0,

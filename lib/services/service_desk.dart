@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/models.dart';
@@ -88,6 +89,7 @@ class ServiceTicket {
   final String contactName;
   final String contactPhone;
   final String category;
+  final List<String> categories;
   final String description;
   final String priority;
   final String preferredDate;
@@ -103,6 +105,7 @@ class ServiceTicket {
   final String reportNo;
   final String techNote;
   final int cameras;
+  final int photosPosted;
   final String source;
   final List<String> photos;
   final List<Map<String, dynamic>> log;
@@ -120,6 +123,7 @@ class ServiceTicket {
     required this.contactName,
     required this.contactPhone,
     required this.category,
+    this.categories = const [],
     required this.description,
     required this.priority,
     required this.preferredDate,
@@ -135,6 +139,7 @@ class ServiceTicket {
     required this.reportNo,
     required this.techNote,
     required this.cameras,
+    this.photosPosted = 0,
     required this.source,
     required this.photos,
     required this.log,
@@ -156,6 +161,7 @@ class ServiceTicket {
       contactName: _s(m['contactName']),
       contactPhone: _s(m['contactPhone']),
       category: _s(m['category']),
+      categories: (m['categories'] is List) ? (m['categories'] as List).whereType<String>().toList() : const [],
       description: _s(m['description']),
       priority: _s(m['priority']).isEmpty ? 'normal' : _s(m['priority']),
       preferredDate: _s(m['preferredDate']),
@@ -171,6 +177,7 @@ class ServiceTicket {
       reportNo: _s(m['reportNo']),
       techNote: _s(m['techNote']),
       cameras: m['cameras'] is num ? (m['cameras'] as num).toInt() : 0,
+      photosPosted: m['photosPosted'] is num ? (m['photosPosted'] as num).toInt() : 0,
       source: _s(m['source']),
       photos: (m['photos'] is List) ? (m['photos'] as List).whereType<String>().toList() : const [],
       log: (m['log'] is List)
@@ -184,7 +191,21 @@ class ServiceTicket {
   bool isMine(String uid) => assignedTo == uid;
   SvcPriority get prio => svcPriority(priority);
   SvcStatus get stat => svcStatus(status);
-  String get typeLabel => svcTypeLabel(category);
+  /// All selected service types (clients can choose several).
+  String get typeLabel => (categories.isNotEmpty ? categories : [category]).map(svcTypeLabel).join(', ');
+  /// Short line for lists: types, then the start of the description.
+  String get shortText {
+    final d = description.replaceAll('\n', ' ').trim();
+    return d.isEmpty ? typeLabel : '$typeLabel — ${d.length > 90 ? '${d.substring(0, 90)}…' : d}';
+  }
+  /// The visit time the client asked for (never in the past).
+  DateTime get preferredDateTime {
+    final d = DateTime.tryParse(preferredDate) ?? DateTime.now();
+    final h = {'morning': 9, 'afternoon': 13, 'evening': 17}[preferredSlot] ?? 9;
+    final want = DateTime(d.year, d.month, d.day, h);
+    final soon = DateTime.now().add(const Duration(hours: 2));
+    return soon.isAfter(want) ? DateTime(soon.year, soon.month, soon.day, soon.hour) : want;
+  }
   DateTime? get respondBy => createdAt?.add(Duration(hours: prio.hours));
   bool get overdue => open && respondBy != null && DateTime.now().isAfter(respondBy!);
 
@@ -352,6 +373,40 @@ class ServiceDesk {
         '${same ? 'Visit updated' : 'Assigned to ${tech.name}'}${when == null ? '' : ' — visit${_when(when)}'}${note.isEmpty ? '' : ' (note: $note)'}',
         clientText:
             'Assigned to our technical team — technician ${tech.name} will visit${when == null ? ' as per your preferred time' : _when(when)}');
+  }
+
+  /// Set or change the visit time (client's preferred time or our own).
+  static Future<void> reschedule(ServiceTicket t, AppUser me, DateTime when, {String reason = ''}) => update(
+      t, me, {'scheduledAt': Timestamp.fromDate(when)},
+      'Visit time set to${_when(when)}${reason.isEmpty ? '' : ' ($reason)'}',
+      clientText: 'Visit ${t.scheduledAt == null ? 'scheduled' : 'rescheduled'}${_when(when)}${reason.isEmpty ? '' : ' — $reason'}');
+
+  /// Photos of the work for the client's request page (svcPortals/{token}/tickets/{id}/photos).
+  static Future<int> postPhotos(ServiceTicket t, AppUser me, {required bool camera}) async {
+    if (t.portal.isEmpty) throw Exception('This request was not raised from a client link.');
+    final picker = ImagePicker();
+    final files = <XFile>[];
+    if (camera) {
+      final x = await picker.pickImage(source: ImageSource.camera, maxWidth: 1280, maxHeight: 1280, imageQuality: 60);
+      if (x != null) files.add(x);
+    } else {
+      files.addAll(await picker.pickMultiImage(maxWidth: 1280, maxHeight: 1280, imageQuality: 60, limit: 6));
+    }
+    if (files.isEmpty) return 0;
+    final col = _fs.collection('svcPortals').doc(t.portal).collection('tickets').doc(t.id).collection('photos');
+    final at = Timestamp.now();
+    var n = 0;
+    for (final f in files.take(6)) {
+      final b = await f.readAsBytes();
+      if (b.length > 700 * 1024) continue;
+      await col.add({'data': 'data:image/jpeg;base64,${base64Encode(b)}', 'caption': '', 'by': me.id, 'byName': me.name, 'at': at});
+      n++;
+    }
+    if (n > 0) {
+      await update(t, me, {'photosPosted': t.photosPosted + n}, '$n photo${n > 1 ? 's' : ''} posted for the client',
+          clientText: '$n photo${n > 1 ? 's' : ''} of the work added');
+    }
+    return n;
   }
 
   static Future<void> addNote(ServiceTicket t, AppUser me, String note) =>

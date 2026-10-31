@@ -232,6 +232,46 @@ class _TicketDetailState extends State<_TicketDetail> {
     }
   }
 
+  /// Visit time: the client's preferred time, or one that suits us.
+  Future<void> _reschedule(ServiceTicket t) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+            child: Text('Client asked for ${_prefText(t)}', style: const TextStyle(color: AppColors.muted)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_pin_circle_outlined),
+            title: const Text("Client's preferred time"),
+            subtitle: Text(fmtDateTime(t.preferredDateTime)),
+            onTap: () => Navigator.pop(c, 'pref'),
+          ),
+          ListTile(leading: const Icon(Icons.edit_calendar_outlined), title: const Text('Choose another date and time'), onTap: () => Navigator.pop(c, 'pick')),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    DateTime? when;
+    var reason = '';
+    if (choice == 'pref') {
+      when = t.preferredDateTime;
+    } else {
+      final now = DateTime.now();
+      final base = t.scheduledAt ?? t.preferredDateTime;
+      final d = await showDatePicker(
+          context: context, initialDate: base.isBefore(now) ? now : base, firstDate: now.subtract(const Duration(days: 1)), lastDate: now.add(const Duration(days: 120)));
+      if (d == null || !mounted) return;
+      final tm = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(base));
+      if (tm == null || !mounted) return;
+      when = DateTime(d.year, d.month, d.day, tm.hour, tm.minute);
+      reason = await _ask(context, 'Reason for the new time', 'Shown to the client (optional)') ?? '';
+    }
+    await _run(() => ServiceDesk.reschedule(t, widget.me, when!, reason: reason.trim()), 'Visit time saved: ${fmtDateTime(when)}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = widget.t, me = widget.me;
@@ -275,13 +315,47 @@ class _TicketDetailState extends State<_TicketDetail> {
         add(t.assignedTo.isEmpty ? 'Assign technician' : 'Re-assign', Icons.engineering_outlined,
             () => showAssignSheet(context, me, t), color: AppColors.accentDark, filled: true);
       }
+      if ((mine || canAssign) && t.assignedTo.isNotEmpty) {
+        add('Change visit time', Icons.edit_calendar_outlined, () => _reschedule(t));
+      }
       if (mine && !canAssign) {
         add('Hand back', Icons.undo, () async {
-          final reason = await _ask(context, 'Hand back this job', 'Reason (optional)');
+          final reason = await _ask(context, 'Hand back this job',
+              'You are responsible for this visit. Tell the office why you cannot attend.');
           if (reason == null) return;
-          await _run(() => ServiceDesk.handBack(t, me, reason), 'Job handed back');
+          if (reason.trim().length < 4) {
+            if (mounted) showSnack(context, 'Please give the reason so the office can re-assign it.', error: true);
+            return;
+          }
+          await _run(() => ServiceDesk.handBack(t, me, reason.trim()), 'Job handed back to the office');
         }, color: AppColors.danger);
       }
+    }
+    if ((mine || canAssign) && t.portal.isNotEmpty) {
+      add(t.photosPosted > 0 ? 'Post more photos (${t.photosPosted})' : 'Post photos for client', Icons.add_a_photo_outlined, () async {
+        final camera = await showModalBottomSheet<bool>(
+          context: context,
+          showDragHandle: true,
+          builder: (c) => SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(padding: EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('The client sees these photos on their request.', style: TextStyle(color: AppColors.muted))),
+              ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take photo'), onTap: () => Navigator.pop(c, true)),
+              ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), onTap: () => Navigator.pop(c, false)),
+            ]),
+          ),
+        );
+        if (camera == null) return;
+        if (_busy) return;
+        setState(() => _busy = true);
+        try {
+          final n = await ServiceDesk.postPhotos(t, me, camera: camera);
+          if (mounted && n > 0) showSnack(context, '$n photo${n > 1 ? 's' : ''} posted for the client');
+        } catch (e) {
+          if (mounted) showSnack(context, 'Could not post: $e', error: true);
+        } finally {
+          if (mounted) setState(() => _busy = false);
+        }
+      });
     }
     if (mine || canAssign) {
       add(t.reportId.isEmpty ? 'Make service report' : 'New service report', Icons.description_outlined,

@@ -35,7 +35,7 @@ export function mount(el, params, { setHeader }) {
       <table class="t"><thead><tr><th>Ticket</th><th>Client · site</th><th>Service</th><th>Priority</th><th>Status</th><th>Technician</th><th>Raised</th></tr></thead><tbody>
       ${tickets.map((t) => `<tr${deskUrl ? ' style="cursor:pointer" data-desk' : ''}><td class="mono"><b>${esc(t.number || t.id)}</b></td>
         <td><b>${esc(t.clientName || '')}</b><div class="small muted">${esc(t.siteName || '')}</div></td>
-        <td>${esc(TYPES[t.category] || t.category || '')}</td><td>${pill(...(PRIO[t.priority] || PRIO.normal))}</td>
+        <td>${esc((Array.isArray(t.categories) && t.categories.length ? t.categories : [t.category]).map((k) => TYPES[k] || k || '').join(', '))}</td><td>${pill(...(PRIO[t.priority] || PRIO.normal))}</td>
         <td>${pill(...(STAT[t.status] || [t.status, 'gray']))}</td><td>${esc(t.assignedName || '—')}</td>
         <td class="nowrap small">${tsDate(t.createdAt) ? fmtDate(tsDate(t.createdAt)) : ''}</td></tr>`).join('')
         || '<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">No open service requests.</td></tr>'}

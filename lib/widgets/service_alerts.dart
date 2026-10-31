@@ -6,6 +6,7 @@ import '../core/utils.dart';
 import '../models/models.dart';
 import '../screens/service/service_jobs_screen.dart';
 import '../services/service_desk.dart';
+import '../services/service_reminders.dart';
 
 /// Wrap a shell with this to get a popup whenever a client raises a new service request,
 /// or a job is assigned to the signed-in person (while the app is open).
@@ -44,14 +45,82 @@ class _ServiceAlertsState extends State<ServiceAlerts> {
     final now = {for (final t in list) t.id: t};
     final before = _known;
     _known = now;
-    if (before == null) return; // first load: no popups for what is already there
+    ServiceReminders.sync(list.where((t) => t.isMine(widget.me.id)).toList());
+    if (before == null) {
+      // first load: one summary of what is waiting, instead of a popup per request
+      WidgetsBinding.instance.addPostFrameCallback((_) => _summary(list));
+      return;
+    }
     for (final t in list) {
       final old = before[t.id];
       if (old == null && t.status == 'new') {
         _queue.add((t, false));
       } else if (t.assignedTo == widget.me.id && t.status == 'assigned' && (old == null || old.assignedTo != widget.me.id)) {
         _queue.add((t, true));
+        ServiceReminders.now('Service visit assigned to you', '${t.clientName} – ${t.siteName}\n${t.shortText}', t.id);
       }
+    }
+    _next();
+  }
+
+  static bool _summaryShown = false; // once per app session
+  Future<void> _summary(List<ServiceTicket> list) async {
+    if (_summaryShown || !mounted) return;
+    final me = widget.me;
+    final waiting = list.where((t) => t.unassigned).toList();
+    final today = DateTime.now();
+    bool soon(ServiceTicket t) {
+      final a = t.scheduledAt;
+      if (a == null) return t.status == 'assigned';
+      final d = DateTime(a.year, a.month, a.day).difference(DateTime(today.year, today.month, today.day)).inDays;
+      return d <= 1;
+    }
+    final mine = list.where((t) => t.isMine(me.id) && t.status != 'completed' && soon(t)).toList()
+      ..sort((a, b) => (a.scheduledAt ?? DateTime(2100)).compareTo(b.scheduledAt ?? DateTime(2100)));
+    if (waiting.isEmpty && mine.isEmpty) return;
+    _summaryShown = true;
+    _showing = true;
+    HapticFeedback.mediumImpact();
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        icon: const Icon(Icons.support_agent, color: AppColors.info, size: 36),
+        title: const Text('Service calls'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (mine.isNotEmpty) ...[
+              const Text('Your visits — please attend on time', style: TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              for (final t in mine.take(5))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                      '${t.scheduledAt == null ? 'Time not set' : fmtDateTime(t.scheduledAt)} · ${t.clientName} – ${t.siteName}${t.status == 'assigned' ? '\nNot accepted yet' : ''}',
+                      style: TextStyle(fontSize: 13.5, color: t.status == 'assigned' ? AppColors.danger : AppColors.ink)),
+                ),
+            ],
+            if (waiting.isNotEmpty) ...[
+              if (mine.isNotEmpty) const SizedBox(height: 8),
+              Text('${waiting.length} request${waiting.length == 1 ? '' : 's'} waiting for a technician',
+                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.danger)),
+              const SizedBox(height: 6),
+              for (final t in waiting.take(4))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text('${t.prio.label} · ${t.clientName} – ${t.siteName}', style: const TextStyle(fontSize: 13.5)),
+                ),
+            ],
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Later')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Open service calls')),
+        ],
+      ),
+    );
+    _showing = false;
+    if (go == true && mounted) {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServiceJobsScreen(me: me)));
     }
     _next();
   }

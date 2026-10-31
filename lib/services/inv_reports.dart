@@ -320,7 +320,7 @@ class InvReports {
     await _fs.collection('inv_docs').doc(docId).set(d);
     final r = InvReport(docId, d);
     if (isNew) _rememberPlace(r).catchError((_) {});
-    if (isNew) linkTicket(r, me).catchError((_) {});
+    linkTicket(r, me, logIt: isNew).catchError((_) {});
     return r;
   }
 
@@ -382,7 +382,7 @@ class InvReports {
   }
 
   /// Report number back to the service ticket (and the client's tracking link); signing completes it.
-  static Future<void> linkTicket(InvReport r, AppUser me) async {
+  static Future<void> linkTicket(InvReport r, AppUser me, {bool logIt = true}) async {
     final tid = r.s('ticketId');
     if (tid.isEmpty) return;
     final ref = _fs.collection('svcTickets').doc(tid);
@@ -394,9 +394,10 @@ class InvReports {
       'reportId': r.id,
       'reportNo': r.number,
       'updatedAt': FieldValue.serverTimestamp(),
-      'log': FieldValue.arrayUnion([
-        {'at': at, 'by': me.id, 'byName': me.name, 't': 'Service report ${r.number}${r.signed ? ' signed by customer' : ' created'}'}
-      ]),
+      if (logIt)
+        'log': FieldValue.arrayUnion([
+          {'at': at, 'by': me.id, 'byName': me.name, 't': 'Service report ${r.number}${r.signed ? ' signed by customer' : ' created'}'}
+        ]),
     };
     if (r.signed && t['open'] == true && ['assigned', 'accepted', 'on_way', 'on_site'].contains(t['status'])) {
       up['status'] = 'completed';
@@ -404,20 +405,61 @@ class InvReports {
     }
     final b = _fs.batch()..update(ref, up);
     final portal = (t['portal'] ?? '').toString();
+    final dl = r.delivery;
+    // What the client sees of the report on their request page.
+    final summary = <String, dynamic>{
+      'number': r.number,
+      'kind': r.kind.title,
+      'date': r.date,
+      'technician': r.s('technician').isNotEmpty ? r.s('technician') : r.s('createdByName'),
+      'timeIn': r.s('timeIn'),
+      'timeOut': r.s('timeOut'),
+      'complaint': r.s('complaint'),
+      'workDone': r.s('workDone'),
+      'items': r.items
+          .map((i) => {
+                'name': '${i['name'] ?? ''}',
+                'qty': i['qty'] ?? '',
+                'unit': '${i['unit'] ?? ''}',
+                'status': '${i['status'] ?? ''}',
+                'serials': (i['serials'] is List) ? (i['serials'] as List).map((e) => '$e').toList() : <String>[],
+              })
+          .toList(),
+      'receiver': '${dl['receiver'] ?? ''}',
+      'signedAt': '${dl['signedAt'] ?? ''}',
+    };
     if (portal.isNotEmpty) {
       b.set(
           _fs.collection('svcPortals').doc(portal).collection('tickets').doc(tid),
           {
             'reportNo': r.number,
+            'report': summary,
             'updatedAt': FieldValue.serverTimestamp(),
             if (up['status'] != null) 'status': up['status'],
-            'log': FieldValue.arrayUnion([
-              {'at': at, 't': r.signed ? 'Work completed — service report ${r.number}' : 'Service report ${r.number} prepared'}
-            ]),
+            if (logIt)
+              'log': FieldValue.arrayUnion([
+                {'at': at, 't': r.signed ? 'Work completed — service report ${r.number}' : 'Service report ${r.number} prepared'}
+              ]),
           },
           SetOptions(merge: true));
     }
     await b.commit();
+    // Signed off: the report's photos also go to the client's request page.
+    if (r.signed && portal.isNotEmpty) {
+      final col = _fs.collection('svcPortals').doc(portal).collection('tickets').doc(tid).collection('photos');
+      var n = 0;
+      for (final a in r.attachments.where((a) => a['kind'] == 'image' && a['inPdf'] != false).take(6)) {
+        final ref0 = '${a['ref'] ?? ''}';
+        if (!ref0.startsWith('img:')) continue;
+        try {
+          final d = await _fs.collection('inv_images').doc(ref0.substring(4)).get();
+          final data = '${d.data()?['data'] ?? ''}';
+          if (data.isEmpty || data.length > 950000) continue;
+          await col.doc('rep-${r.id}-$n').set({'data': data, 'caption': '${a['caption'] ?? ''}', 'by': me.id, 'byName': me.name, 'at': Timestamp.now()});
+          n++;
+        } catch (_) {}
+      }
+    }
   }
 
   /// Product with this barcode or SKU in LLCT Invoicing's product list (inv_products), if any.
