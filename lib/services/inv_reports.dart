@@ -420,6 +420,17 @@ class InvReports {
     await b.commit();
   }
 
+  /// Product with this barcode or SKU in LLCT Invoicing's product list (inv_products), if any.
+  static Future<Map<String, dynamic>?> findProduct(String code) async {
+    for (final f in ['barcode', 'sku']) {
+      try {
+        final q = await _fs.collection('inv_products').where(f, isEqualTo: code).limit(1).get();
+        if (q.docs.isNotEmpty) return {...q.docs.first.data(), 'id': q.docs.first.id};
+      } catch (_) {}
+    }
+    return null;
+  }
+
   // ------------------------------------------------------------------ photos (inv_images)
   static final _picker = ImagePicker();
   static final Map<String, Uint8List> _imgCache = {};

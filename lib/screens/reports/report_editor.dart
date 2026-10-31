@@ -8,6 +8,7 @@ import '../../models/models.dart';
 import '../../services/inv_reports.dart';
 import '../../services/location_service.dart';
 import '../../services/service_desk.dart';
+import '../../widgets/barcode_scanner.dart';
 import '../../widgets/common.dart';
 import 'report_view.dart';
 import 'report_widgets.dart';
@@ -234,6 +235,31 @@ class _ReportEditorState extends State<ReportEditor> {
     }
   }
 
+  /// Scan a product barcode: adds that product from the invoicing product list (or a new line with the code).
+  Future<void> _scanProduct() async {
+    final codes = await scanCodes(context, title: 'Scan product');
+    if (codes.isEmpty || !mounted) return;
+    final code = codes.first;
+    final p = await InvReports.findProduct(code);
+    if (!mounted) return;
+    final items = _d!['items'] as List<Map<String, dynamic>>;
+    final it = InvReports.newItem(_kind)
+      ..['name'] = p == null ? code : '${p['name'] ?? code}'
+      ..['desc'] = p == null ? '' : '${p['desc'] ?? ''}'
+      ..['unit'] = p == null ? 'pcs' : '${p['unit'] ?? 'pcs'}';
+    if (p != null) it['pid'] = p['id'];
+    final blank = items.indexWhere((i) => '${i['name'] ?? ''}'.trim().isEmpty && '${i['desc'] ?? ''}'.trim().isEmpty);
+    setState(() {
+      if (blank >= 0) {
+        items[blank] = it;
+      } else {
+        items.add(it);
+      }
+      _gen++;
+    });
+    showSnack(context, p == null ? 'Code $code is not in the product list — added as a new line.' : 'Added ${p['name']}');
+  }
+
   Future<void> _chooseClient() async {
     final c = await pickInvClient(context, _clients);
     if (c != null) _pickClient(c, site: c.sites.length == 1 ? c.sites.first : null);
@@ -415,13 +441,16 @@ class _ReportEditorState extends State<ReportEditor> {
         // ------------------------------------------------ items
         RCard(children: [
           RTitle(k.isService ? 'Parts / items used (optional)' : 'Items',
-              trailing: TextButton.icon(
-                  onPressed: () => setState(() {
-                        items.add(InvReports.newItem(k));
-                        _gen++;
-                      }),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add item'))),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(tooltip: 'Scan product barcode', onPressed: _scanProduct, icon: const Icon(Icons.qr_code_scanner)),
+                TextButton.icon(
+                    onPressed: () => setState(() {
+                          items.add(InvReports.newItem(k));
+                          _gen++;
+                        }),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add item')),
+              ])),
           if (items.isEmpty) const Text('No items.', style: TextStyle(color: AppColors.muted)),
           for (var i = 0; i < items.length; i++)
             ItemEditor(

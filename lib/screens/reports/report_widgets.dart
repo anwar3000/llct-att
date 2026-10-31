@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/inv_reports.dart';
+import '../../widgets/barcode_scanner.dart';
 
 class RCard extends StatelessWidget {
   final List<Widget> children;
@@ -167,6 +168,16 @@ class _ItemEditorState extends State<ItemEditor> {
             ),
           ),
           IconButton(onPressed: () => _addSerials(_sn.text), icon: const Icon(Icons.add_circle_outline)),
+          IconButton.filledTonal(
+            tooltip: 'Scan with camera',
+            onPressed: () async {
+              final name = '${widget.item['name'] ?? ''}'.trim();
+              final codes = await scanCodes(context,
+                  title: 'Scan serials${name.isEmpty ? '' : ' · $name'}', multi: true, existing: List<String>.from(_serials));
+              if (codes.isNotEmpty && mounted) _addSerials(codes.join('\n'));
+            },
+            icon: const Icon(Icons.qr_code_scanner),
+          ),
         ]),
         if (_serials.isNotEmpty)
           Wrap(spacing: 6, runSpacing: 4, children: [

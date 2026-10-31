@@ -13,8 +13,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- NOTE: do NOT add android.permission.CAMERA here. image_picker uses the
-         system camera app; declaring CAMERA without requesting it breaks that. -->
+    <!-- Camera barcode scanning (mobile_scanner). image_picker asks for this permission
+         itself before opening the camera when it is declared, so photos keep working. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:label="LLCT Attendance"
