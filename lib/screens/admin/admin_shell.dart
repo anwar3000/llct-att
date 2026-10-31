@@ -6,6 +6,7 @@ import '../../models/models.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/service_alerts.dart';
+import '../reports/reports_screen.dart';
 import 'admin_live.dart';
 import 'live_map_tab.dart';
 import 'overview_tab.dart';
@@ -104,6 +105,7 @@ class _AdminShellState extends State<AdminShell> {
           icon: Avatar(widget.me.name, size: 32),
           onSelected: (v) {
             if (v == 'out') _signOut();
+            if (v == 'reports') Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportsScreen(me: widget.me)));
           },
           itemBuilder: (_) => [
             PopupMenuItem(
@@ -112,6 +114,14 @@ class _AdminShellState extends State<AdminShell> {
                   style: const TextStyle(color: AppColors.ink)),
             ),
             const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'reports',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.description_outlined),
+                title: Text('Service & delivery reports'),
+              ),
+            ),
             const PopupMenuItem(
               value: 'out',
               child: ListTile(

@@ -14,6 +14,9 @@ import '../../services/violation_service.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
 import '../../widgets/ride_card.dart';
+import '../../services/inv_reports.dart';
+import '../reports/report_editor.dart';
+import '../reports/reports_screen.dart';
 import 'worker_picker_screen.dart';
 
 class HomeTab extends StatefulWidget {
@@ -660,8 +663,9 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   Future<void> _openReport(AttendanceSession open, String kind) async {
-    final ok = await ReportsLink.open(open, kind);
-    if (!ok && mounted) showSnack(context, 'Could not open LLCT Invoicing. Check the internet connection.', error: true);
+    // Built into the app now (same inv_docs as LLCT Invoicing).
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ReportEditor(me: widget.me, kind: kind == 'service' ? kindService : kindDelivery, session: open)));
   }
 
   Widget _reportCard(AttendanceSession open) {
@@ -712,6 +716,15 @@ class _HomeTabState extends State<HomeTab> {
               ),
             ),
           ]),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportsScreen(me: widget.me, session: open))),
+              icon: const Icon(Icons.folder_open_outlined, size: 16),
+              label: const Text('All reports', style: TextStyle(fontSize: 12.5)),
+            ),
+          ),
         ]),
       ),
     );

@@ -15,6 +15,7 @@ import '../../widgets/service_alerts.dart';
 import '../admin/accounts_tab.dart';
 import '../admin/company_documents_screen.dart';
 import '../admin/id_documents_screen.dart';
+import '../reports/reports_screen.dart';
 import 'history_tab.dart';
 import 'home_tab.dart';
 import 'my_documents_screen.dart';
@@ -130,6 +131,15 @@ class _EmployeeShellState extends State<EmployeeShell> {
                 label: Text(me.canEditAccounts ? 'Accounts' : 'Accounts (view)'),
               ),
             ],
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(c);
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportsScreen(me: me, session: _open)));
+              },
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('Service & delivery reports'),
+            ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () {

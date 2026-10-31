@@ -7,6 +7,9 @@ import '../../models/models.dart';
 import '../../services/location_service.dart';
 import '../../services/service_desk.dart';
 import '../../widgets/common.dart';
+import '../../services/inv_reports.dart';
+import '../reports/report_editor.dart';
+import '../reports/report_view.dart';
 
 /// Service requests from clients: new requests to pick up, my jobs, and (for assigners) everything open.
 class ServiceJobsScreen extends StatefulWidget {
@@ -282,9 +285,12 @@ class _TicketDetailState extends State<_TicketDetail> {
     }
     if (mine || canAssign) {
       add(t.reportId.isEmpty ? 'Make service report' : 'New service report', Icons.description_outlined,
-          () => ServiceDesk.openReport(t));
+          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportEditor(me: me, kind: kindService, ticket: t))));
     }
-    if (t.reportId.isNotEmpty) add(t.reportNo.isEmpty ? 'Service report' : t.reportNo, Icons.picture_as_pdf_outlined, () => ServiceDesk.openReportView(t));
+    if (t.reportId.isNotEmpty) {
+      add(t.reportNo.isEmpty ? 'Service report' : t.reportNo, Icons.picture_as_pdf_outlined,
+          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportView(me: me, id: t.reportId))));
+    }
 
     return ListView(controller: widget.scroll, padding: const EdgeInsets.fromLTRB(16, 0, 16, 28), children: [
       Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
