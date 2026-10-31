@@ -22,7 +22,7 @@ The attendance app (Android) also shows a popup for every new request, a **Servi
 4. *Clients & links* → **Create link** for each client → Copy / WhatsApp it to the client.
 
 ### Firebase config
-`js/config.js` takes the config from `https://llct.net/js/config.js` (same project), so nothing to fill in. To make the folder standalone, paste your Firebase web config into `js/config.js` instead (instructions inside). If your Firebase API key has *website restrictions*, add your AWS domain to them.
+`js/config.js` loads the config from the attendance / invoicing web apps on GitHub Pages (same project), so nothing to fill in. To make the folder standalone, paste your Firebase web config into `js/config.js` instead (instructions inside). If your Firebase API key has *website restrictions*, add your AWS domain to them.
 
 ## How a ticket moves
 `Received (new)` → `Assigned` (admin / manager / staff allowed to assign) or picked up directly by a technician → `Accepted` → `On the way` → `At site` → `Completed` (button, or automatically when the customer signs the service report) → `Closed` by the office. Every step is logged and the client sees a plain-English message for it.
