@@ -406,3 +406,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .amcb.bad { background: #FBE3E1; color: var(--danger); }
 .svcpick label { white-space: nowrap; font-weight: 600; color: var(--night); background: #fff; }
 .svcpick input[type=checkbox] { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; flex: none; box-shadow: none; accent-color: var(--ribbon); }
+.impbox { margin-top: 16px; border-style: dashed; background: #F6F8FD; }
+.impres { margin-top: 10px; padding: 10px 12px; background: #fff; border: 1px solid var(--silver); border-radius: 10px; }
+.eqlist { margin-top: 8px; }
+.eqlist summary { cursor: pointer; font-weight: 650; color: var(--ribbon); }
+.eqlist table { margin-top: 6px; font-size: 12.5px; }
+.eqlist td, .eqlist th { padding: 4px 8px; }
+.eqlist { max-width: 100%; overflow-x: auto; } .eqlist td, .eqlist th { white-space: nowrap; } #prof-card .row > .small { min-width: 0; flex: 1; }

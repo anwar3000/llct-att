@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme.dart';
 import '../../core/utils.dart';
@@ -717,6 +718,61 @@ class _FaultsEditorState extends State<_FaultsEditor> {
 }
 
 /// Trade licence, building photo and NVRs of the site (from the client's service profile).
+/// Full equipment list of the site for the technician: NVRs, cameras (NVR, channel, IP, model, serial) and other devices.
+void _showEquipment(BuildContext context, List<Map> nvrs, List<Map> cams, List<Map> others) {
+  String v(Map m, String k) => '${m[k] ?? ''}'.trim();
+  Widget ipChip(String ip) => ip.isEmpty
+      ? const SizedBox.shrink()
+      : InkWell(
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: ip));
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied $ip')));
+          },
+          child: Padding(padding: const EdgeInsets.only(top: 2), child: Text(ip, style: const TextStyle(fontSize: 13, color: AppColors.info, fontWeight: FontWeight.w700))),
+        );
+  Widget row(String title, String sub, String ip) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          if (sub.isNotEmpty) Text(sub, style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+          ipChip(ip),
+        ]),
+      );
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (c) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.8,
+      maxChildSize: 0.95,
+      builder: (c, sc) => ListView(controller: sc, padding: const EdgeInsets.fromLTRB(18, 0, 18, 24), children: [
+        const Text('Equipment at this site', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        const Text('Tap an IP to copy it.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+        if (nvrs.isNotEmpty) ...[
+          const Padding(padding: EdgeInsets.only(top: 14), child: Text('NVR / DVR', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary))),
+          for (final n in nvrs)
+            row('NVR ${v(n, 'no')}${v(n, 'name').isEmpty ? '' : ' – ${v(n, 'name')}'}',
+                [v(n, 'model'), if (v(n, 'serial').isNotEmpty) 'S/N ${v(n, 'serial')}', if (v(n, 'channels').isNotEmpty) '${v(n, 'channels')} ch'].where((x) => x.isNotEmpty).join(' · '), v(n, 'ip')),
+        ],
+        if (cams.isNotEmpty) ...[
+          Padding(padding: const EdgeInsets.only(top: 14), child: Text('Cameras (${cams.length})', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary))),
+          for (final cm in cams)
+            row('Cam ${v(cm, 'no')}${v(cm, 'name').isEmpty ? '' : ' – ${v(cm, 'name')}'}',
+                [if (v(cm, 'nvr').isNotEmpty) 'NVR ${v(cm, 'nvr')}${v(cm, 'ch').isEmpty ? '' : ' ch ${v(cm, 'ch')}'}', v(cm, 'model'), if (v(cm, 'serial').isNotEmpty) 'S/N ${v(cm, 'serial')}'].where((x) => x.isNotEmpty).join(' · '),
+                v(cm, 'ip')),
+        ],
+        if (others.isNotEmpty) ...[
+          const Padding(padding: EdgeInsets.only(top: 14), child: Text('Other equipment', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.primary))),
+          for (final o in others)
+            row('${v(o, 'type').isEmpty ? 'Device' : v(o, 'type')}${v(o, 'name').isEmpty ? '' : ' – ${v(o, 'name')}'}',
+                [v(o, 'model'), if (v(o, 'serial').isNotEmpty) 'S/N ${v(o, 'serial')}', if ((int.tryParse(v(o, 'qty')) ?? 1) > 1) 'Qty ${v(o, 'qty')}'].where((x) => x.isNotEmpty).join(' · '), v(o, 'ip')),
+        ],
+      ]),
+    ),
+  );
+}
+
 class _SiteDetails extends StatelessWidget {
   final ServiceTicket t;
   const _SiteDetails({super.key, required this.t});
@@ -758,8 +814,15 @@ class _SiteDetails extends StatelessWidget {
                   Text('NVR ${n['no'] ?? ''}${'${n['name'] ?? ''}'.isEmpty ? '' : ' – ${n['name']}'}${'${n['ip'] ?? ''}'.isEmpty ? '' : ' · ${n['ip']}'}',
                       style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                 for (final o in others)
-                  Text('${o['type'] ?? 'Device'}${'${o['name'] ?? ''}'.isEmpty ? '' : ' – ${o['name']}'}${'${o['model'] ?? ''}'.isEmpty ? '' : ' · ${o['model']}'}',
+                  Text('${o['type'] ?? 'Device'}${'${o['name'] ?? ''}'.isEmpty ? '' : ' – ${o['name']}'}${'${o['model'] ?? ''}'.isEmpty ? '' : ' · ${o['model']}'}${'${o['ip'] ?? ''}'.isEmpty ? '' : ' · ${o['ip']}'}',
                       style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                if (cams > 0)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                    onPressed: () => _showEquipment(context, nvrs, (p.equipment['cameras'] as List).whereType<Map>().toList(), others),
+                    icon: const Icon(Icons.list_alt, size: 18),
+                    label: Text('All equipment & IPs ($cams cameras)'),
+                  ),
               ]),
             ),
           ]),

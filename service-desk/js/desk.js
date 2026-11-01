@@ -9,8 +9,8 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=10';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=10';
+} from './sd.js?v=11';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=11';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -498,7 +498,9 @@ function openTicket(id, quiet = false) {
         ${prof.tradeLicense ? `<div>Trade licence: <b>${esc(prof.tradeLicense)}</b></div>` : ''}
         <div>${[(e.nvrs || []).length && `${e.nvrs.length} NVR`, (e.cameras || []).length && `${e.cameras.length} cameras`, (e.others || []).length && `${e.others.length} other devices`].filter(Boolean).join(', ') || 'No equipment listed for this site'}</div>
         ${(e.nvrs || []).map((n) => `<div class="muted">NVR ${esc(n.no)}${n.name ? ` – ${esc(n.name)}` : ''}${n.model ? ` · ${esc(n.model)}` : ''}${n.ip ? ` · ${esc(n.ip)}` : ''}</div>`).join('')}
-        ${(e.others || []).map((x) => `<div class="muted">${esc(x.type)}${x.name ? ` – ${esc(x.name)}` : ''}${x.model ? ` · ${esc(x.model)}` : ''}${+x.qty > 1 ? ` × ${esc(x.qty)}` : ''}</div>`).join('')}</div></div>`
+        ${(e.cameras || []).length ? `<details class="eqlist"><summary>All cameras (${e.cameras.length}) — IP, NVR, channel</summary><table class="tbl"><thead><tr><th>No.</th><th>Name</th><th>NVR / ch</th><th>IP</th><th>Model</th><th>Serial</th></tr></thead><tbody>
+          ${e.cameras.map((c) => `<tr><td>${esc(c.no)}</td><td>${esc(c.name || '')}</td><td>${c.nvr ? `NVR ${esc(c.nvr)}` : ''}${c.ch ? ` / ${esc(c.ch)}` : ''}</td><td>${c.ip ? `<a href="http://${esc(c.ip)}" target="_blank" rel="noopener">${esc(c.ip)}</a>` : ''}</td><td>${esc(c.model || '')}</td><td>${esc(c.serial || '')}</td></tr>`).join('')}</tbody></table></details>` : ''}
+        ${(e.others || []).map((x) => `<div class="muted">${esc(x.type)}${x.name ? ` – ${esc(x.name)}` : ''}${x.model ? ` · ${esc(x.model)}` : ''}${x.ip ? ` · ${esc(x.ip)}` : ''}${+x.qty > 1 ? ` × ${esc(x.qty)}` : ''}</div>`).join('')}</div></div>`
         : '<p class="small muted">No AMC or equipment details for this customer yet.</p>'}`;
       const pe = $('#pc-edit', pc); if (pe) pe.onclick = () => profileModal(t.clientId);
       const bi = $('[data-bimg]', pc); if (bi) bi.onclick = () => { const w = window.open(); if (w) w.document.write(`<img src="${bi.src}" style="max-width:100%">`); };
@@ -761,6 +763,77 @@ async function syncAllSitePhotos(clientId, siteIds) {
   await Promise.all(siteIds.map((sid) => getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid))
     .then((d) => syncSitePhoto(clientId, sid, d.exists() && d.data().data ? d.data().data : null)).catch(() => {})));
 }
+// ------------------------------------------------------------------ Excel import of equipment
+let XLSX = null;
+async function xlsxLib() {
+  if (XLSX) return XLSX;
+  for (const u of ['https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs', './vendor/xlsx.mjs']) {
+    try { XLSX = await import(u); return XLSX; } catch (_) { /* try next */ }
+  }
+  throw new Error('Could not load the Excel reader. Check the internet connection, or save the sheet as CSV and try again.');
+}
+const normH = (h) => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const HEAD = {
+  type: ['type', 'device', 'devicetype', 'category', 'equipment', 'item', 'kind'],
+  no: ['no', 'number', 'sr', 'srno', 'sno', 'slno', 'cameraNo', 'camno', 'camerano', 'nvrno', 'id', 'num'],
+  name: ['name', 'location', 'cameraname', 'description', 'desc', 'label', 'area', 'position', 'title'],
+  nvr: ['nvr', 'nvrno', 'recorder', 'dvr', 'connectedto', 'nvrdvr'],
+  ch: ['ch', 'channel', 'channelno', 'chno', 'port'],
+  ip: ['ip', 'ipaddress', 'ipaddr', 'address'],
+  model: ['model', 'modelno', 'make', 'brandmodel', 'partno'],
+  serial: ['serial', 'serialno', 'sn', 'serialnumber', 'snno'],
+  channels: ['channels', 'totalchannels', 'noofchannels', 'channelcount'],
+  qty: ['qty', 'quantity', 'count', 'nos'],
+};
+function kindFrom(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\b(nvr|dvr|recorder|xvr)\b/.test(t)) return 'nvr';
+  if (/\b(cam|camera|cameras|ipc|bullet|dome|ptz|turret)\b/.test(t)) return 'camera';
+  return '';
+}
+function otherType(text) {
+  const t = String(text || '').toLowerCase();
+  const map = [[/switch|poe/, 'Network switch'], [/hdd|hard ?dis[kc]|storage/, 'Hard disk'], [/monitor|tv|screen|display/, 'Monitor / TV'], [/ups|battery/, 'UPS'],
+    [/router|wi-?fi|access point|\bap\b/, 'Router / Wi-Fi'], [/access|door|biometric|card reader/, 'Access control'], [/intercom|vdp|door phone/, 'Intercom'],
+    [/fire|smoke/, 'Fire alarm panel'], [/o2iot|iot/, 'O2IOT switch'], [/o2|oxygen/, 'Oxygen O2 device']];
+  const m = map.find(([re]) => re.test(t)); return m ? m[1] : (text ? String(text).trim() : 'Other');
+}
+async function readEquipmentFile(file) {
+  const L = await xlsxLib();
+  const wb = L.read(await file.arrayBuffer(), { type: 'array' });
+  const out = { nvrs: [], cameras: [], others: [], skipped: 0 };
+  wb.SheetNames.forEach((sn) => {
+    const rows = L.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false });
+    // first row that looks like headings
+    let hi = rows.findIndex((r) => r.filter((c) => Object.values(HEAD).some((l) => l.map(normH).includes(normH(c)))).length >= 2);
+    if (hi < 0) return;
+    const col = {}; rows[hi].forEach((c, i) => { const h = normH(c); Object.entries(HEAD).forEach(([k, l]) => { if (col[k] === undefined && l.map(normH).includes(h)) col[k] = i; }); });
+    const sheetKind = kindFrom(sn) || (/other|device|misc|network|access/i.test(sn) ? 'other' : '');
+    rows.slice(hi + 1).forEach((r) => {
+      const g = (k) => (col[k] === undefined ? '' : String(r[col[k]] ?? '').trim());
+      if (!r.some((c) => String(c).trim())) return;
+      const typ = g('type');
+      const kind = kindFrom(typ) || (typ ? 'other' : '') || sheetKind || (g('nvr') || g('ch') ? 'camera' : '');
+      const rec = { id: newId() + Math.random().toString(36).slice(2, 5), no: g('no'), name: g('name'), model: g('model'), serial: g('serial'), ip: g('ip') };
+      if (!rec.no && !rec.name && !rec.ip && !rec.serial && !rec.model) { out.skipped++; return; }
+      if (kind === 'nvr') out.nvrs.push({ ...rec, no: rec.no || String(out.nvrs.length + 1), channels: g('channels') });
+      else if (kind === 'camera') out.cameras.push({ ...rec, no: rec.no || String(out.cameras.length + 1).padStart(2, '0'), nvr: g('nvr').replace(/^nvr\s*/i, ''), ch: g('ch') });
+      else if (kind === 'other') out.others.push({ id: rec.id, type: otherType(typ || sn), name: rec.name, model: rec.model, serial: rec.serial, ip: rec.ip, qty: g('qty') || '1' });
+      else out.skipped++;
+    });
+  });
+  return out;
+}
+async function equipmentTemplate() {
+  const L = await xlsxLib();
+  const wb = L.utils.book_new();
+  const add = (name, rows, w) => { const ws = L.utils.aoa_to_sheet(rows); ws['!cols'] = w.map((x) => ({ wch: x })); L.utils.book_append_sheet(wb, ws, name); };
+  add('NVR', [['No', 'Name', 'Model', 'Serial', 'IP', 'Channels'], ['1', 'Main office rack', 'Hikvision DS-7616NI', 'DS7616-001', '192.168.1.64', '16']], [6, 24, 22, 18, 16, 10]);
+  add('Cameras', [['No', 'Name', 'NVR', 'Channel', 'IP', 'Model', 'Serial'], ['01', 'Main gate', '1', '1', '192.168.1.101', 'DS-2CD2043G2', 'CAM-0001'], ['02', 'Cash counter', '1', '2', '192.168.1.102', 'DS-2CD2143G2', 'CAM-0002']], [6, 24, 6, 9, 16, 20, 16]);
+  add('Other', [['Type', 'Name', 'Model', 'Serial', 'IP', 'Qty'], ['Network switch', 'Rack PoE switch', 'TP-Link TL-SG1016PE', 'SW-01', '192.168.1.2', '1'], ['Hard disk', 'NVR 1 storage', 'WD Purple 4TB', 'WX12AB345', '', '2'], ['UPS', 'Server room', 'APC 3kVA', 'UPS-01', '', '1']], [18, 22, 22, 16, 16, 6]);
+  L.writeFile(wb, 'equipment-template.xlsx');
+}
+
 /** Service profile of a client: trade licence, and per site the building photo and the equipment we maintain. */
 async function profileModal(clientId) {
   const c = S.clients.find((x) => x.id === clientId); if (!c) return;
@@ -783,7 +856,7 @@ async function profileModal(clientId) {
   const draw = () => {
     const e = sid ? eqOf(sid) : { nvrs: [], cameras: [], others: [] };
     const am = prof.amc || {};
-    const nvrOpts = (v) => `<option value="">—</option>${e.nvrs.map((n) => `<option value="${esc(n.no)}" ${String(v) === String(n.no) ? 'selected' : ''}>NVR ${esc(n.no)}</option>`).join('')}`;
+    const nvrOpts = (v) => `<option value="">—</option>${v && !e.nvrs.some((n) => String(n.no) === String(v)) ? `<option value="${esc(v)}" selected>NVR ${esc(v)}</option>` : ''}${e.nvrs.map((n) => `<option value="${esc(n.no)}" ${String(v) === String(n.no) ? 'selected' : ''}>NVR ${esc(n.no)}</option>`).join('')}`;
     $('#pf', o).innerHTML = `
       <div class="grid2"><label class="field"><span>Trade licence number</span><input id="pf-tl" value="${esc(prof.tradeLicense || '')}" placeholder="e.g. 123456"></label>
         <label class="field"><span>Site</span><select id="pf-site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === sid ? 'selected' : ''}>${esc(x.name)}</option>`).join('') || '<option value="">Add sites to this client in LLCT Invoicing first</option>'}</select></label></div>
@@ -799,22 +872,24 @@ async function profileModal(clientId) {
         <div id="pf-ph" class="pfph"><span class="small muted">Loading photo…</span></div>
         <div class="grow"><b>Building photo</b><p class="small muted" style="margin:2px 0 8px">Shown to the client on their request page and to the technician.</p>
           <label class="btn sm">Upload photo<input type="file" accept="image/*" hidden id="pf-up"></label> <button class="btn sm bad" id="pf-rm" type="button">Remove</button></div></div>
+      <div class="pfsec impbox"><div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><div class="grow"><b>Import from Excel</b><div class="small muted">NVRs, cameras (with IPs) and other equipment for <b>${esc((sites.find((x) => x.id === sid) || {}).name || '')}</b> — .xlsx, .xls or .csv.</div></div>
+        <button class="btn sm" id="pf-tpl" type="button">Download template</button><label class="btn sm primary">Choose Excel file<input type="file" hidden id="pf-xls" accept=".xlsx,.xls,.csv"></label></div><div id="pf-imp"></div></div>
       <h3 style="margin-top:18px">NVR / DVR <span class="muted small">(${e.nvrs.length})</span></h3>
       <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th>Model</th><th>Serial</th><th>IP</th><th style="width:80px">Channels</th><th style="width:40px"></th></tr></thead><tbody>
         ${e.nvrs.map((n, k) => `<tr>${['no', 'name', 'model', 'serial', 'ip', 'channels'].map((f) => `<td><input data-nf="${k}:${f}" value="${esc(n[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-nrm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No NVR yet.</td></tr>'}
       </tbody></table></div>
       <button class="btn sm" id="pf-addn" type="button" style="margin-top:6px">+ NVR</button>
       <h3 style="margin-top:18px">Cameras <span class="muted small">(${e.cameras.length})</span></h3>
-      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th style="width:100px">NVR</th><th style="width:70px">Ch.</th><th>Model</th><th>Serial</th><th style="width:40px"></th></tr></thead><tbody>
+      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th style="width:100px">NVR</th><th style="width:70px">Ch.</th><th>IP</th><th>Model</th><th>Serial</th><th style="width:40px"></th></tr></thead><tbody>
         ${e.cameras.map((cm, k) => `<tr><td><input data-cf="${k}:no" value="${esc(cm.no || '')}"></td><td><input data-cf="${k}:name" value="${esc(cm.name || '')}"></td>
-          <td><select data-cf="${k}:nvr">${nvrOpts(cm.nvr)}</select></td><td><input data-cf="${k}:ch" value="${esc(cm.ch || '')}"></td>
-          <td><input data-cf="${k}:model" value="${esc(cm.model || '')}"></td><td><input data-cf="${k}:serial" value="${esc(cm.serial || '')}"></td><td><button class="btn sm bad" data-crm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No cameras yet.</td></tr>'}
+          <td><select data-cf="${k}:nvr">${nvrOpts(cm.nvr)}</select></td><td><input data-cf="${k}:ch" value="${esc(cm.ch || '')}"></td><td><input data-cf="${k}:ip" value="${esc(cm.ip || '')}"></td>
+          <td><input data-cf="${k}:model" value="${esc(cm.model || '')}"></td><td><input data-cf="${k}:serial" value="${esc(cm.serial || '')}"></td><td><button class="btn sm bad" data-crm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">No cameras yet.</td></tr>'}
       </tbody></table></div>
       <div class="row" style="margin-top:6px"><button class="btn sm" id="pf-addc" type="button">+ Camera</button><button class="btn sm" id="pf-addmany" type="button">+ Several cameras…</button></div>
       <h3 style="margin-top:18px">Other equipment under maintenance <span class="muted small">(${e.others.length})</span></h3>
-      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:170px">Type</th><th>Name / location</th><th>Model</th><th>Serial</th><th style="width:70px">Qty</th><th style="width:40px"></th></tr></thead><tbody>
+      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:170px">Type</th><th>Name / location</th><th>Model</th><th>Serial</th><th>IP</th><th style="width:70px">Qty</th><th style="width:40px"></th></tr></thead><tbody>
         ${e.others.map((x, k) => `<tr><td><select data-of="${k}:type">${OTHER_TYPES.map((t) => `<option ${x.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></td>
-          ${['name', 'model', 'serial', 'qty'].map((f) => `<td><input data-of="${k}:${f}" value="${esc(x[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-orm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Switches, hard disks, UPS, monitors, access control, O2 devices…</td></tr>'}
+          ${['name', 'model', 'serial', 'ip', 'qty'].map((f) => `<td><input data-of="${k}:${f}" value="${esc(x[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-orm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Switches, hard disks, UPS, monitors, access control, O2 devices…</td></tr>'}
       </tbody></table></div>
       <button class="btn sm" id="pf-addo" type="button" style="margin-top:6px">+ Other equipment</button>` : ''}`;
     const ss = $('#pf-site', o); if (ss) ss.onchange = () => { keep(); sid = ss.value; draw(); };
@@ -829,6 +904,22 @@ async function profileModal(clientId) {
     };
     $$('[data-nrm]', o).forEach((b) => (b.onclick = () => { keep(); e.nvrs.splice(+b.dataset.nrm, 1); draw(); }));
     $$('[data-crm]', o).forEach((b) => (b.onclick = () => { keep(); e.cameras.splice(+b.dataset.crm, 1); draw(); }));
+    $('#pf-tpl', o).onclick = () => equipmentTemplate().catch((er) => toast(er.message || 'Could not make the template', true));
+    $('#pf-xls', o).onchange = async (ev) => {
+      const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
+      const box = $('#pf-imp', o); box.innerHTML = '<p class="small muted">Reading file…</p>';
+      let got; try { got = await readEquipmentFile(file); } catch (er) { box.innerHTML = `<p class="small" style="color:var(--danger)">${esc(er.message || 'Could not read this file')}</p>`; return; }
+      const n = got.nvrs.length + got.cameras.length + got.others.length;
+      if (!n) { box.innerHTML = '<p class="small" style="color:var(--danger)">No equipment rows found. Use the template, or make sure the first row has headings like Type, No, Name, NVR, Channel, IP, Model, Serial.</p>'; return; }
+      const cur = e.nvrs.length + e.cameras.length + e.others.length;
+      box.innerHTML = `<div class="impres"><b>Found ${got.nvrs.length} NVR, ${got.cameras.length} cameras, ${got.others.length} other devices</b>${got.skipped ? `<span class="small muted"> · ${got.skipped} empty / unreadable rows skipped</span>` : ''}
+        <div class="small muted" style="margin:4px 0 8px">${got.cameras.slice(0, 4).map((c) => `Cam ${esc(c.no)} ${esc(c.name)}${c.ip ? ' · ' + esc(c.ip) : ''}`).join(' — ')}${got.cameras.length > 4 ? ' …' : ''}</div>
+        <div class="row">${cur ? `<button class="btn sm primary" id="pi-rep" type="button">Replace current list (${cur})</button><button class="btn sm" id="pi-add" type="button">Add to current list</button>` : '<button class="btn sm primary" id="pi-add" type="button">Add to this site</button>'}<button class="btn sm" id="pi-x" type="button">Cancel</button></div></div>`;
+      const apply = (replace) => { keep(); if (replace) { e.nvrs = []; e.cameras = []; e.others = []; } e.nvrs.push(...got.nvrs); e.cameras.push(...got.cameras); e.others.push(...got.others); prof.sites[sid] = e; draw(); toast(`Imported ${n} items — press Save profile to keep them`); };
+      const r = $('#pi-rep', box); if (r) r.onclick = () => apply(true);
+      $('#pi-add', box).onclick = () => apply(false);
+      $('#pi-x', box).onclick = () => { box.innerHTML = ''; };
+    };
     $$('[data-orm]', o).forEach((b) => (b.onclick = () => { keep(); e.others.splice(+b.dataset.orm, 1); draw(); }));
     $('#pf-addo', o).onclick = () => { keep(); e.others.push({ id: newId(), type: OTHER_TYPES[0], name: '', model: '', serial: '', qty: '1' }); draw(); };
     const box = $('#pf-ph', o), here = sid;
