@@ -124,14 +124,22 @@ const sitesFromPlaces = (c) => (c.places || []).map((p, i) => {
   if (p.contact) o.contact = String(p.contact); if (p.phone) o.phone = String(p.phone);
   return o;
 });
+// Firestore hands maps back with their keys in a different order, so compare with sorted keys —
+// a plain JSON.stringify never matched and re-wrote every link in an endless loop (each write
+// triggered the listener again), burning the whole daily write / read quota.
+const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v ?? null));
+const synced = new Map(); // portal id → last value written (never write the same thing twice)
 function syncPortalSites() {
   if (!canAssign() || !S.clients.length || !S.portals.length) return;
   S.portals.filter((p) => p.active).forEach((p) => {
     const c = S.clients.find((x) => x.id === p.clientId); if (!c) return;
     const sites = sitesFromPlaces(c);
-    if (JSON.stringify(sites) !== JSON.stringify(p.sites || []) || (c.name && c.name !== p.clientName)) {
-      updateDoc(doc(db, 'svcPortals', p.id), { sites, clientName: c.name || p.clientName, updatedAt: serverTimestamp() }).catch(() => {});
-    }
+    const name = c.name || p.clientName || '';
+    const want = canon({ sites, name });
+    if (canon({ sites: p.sites || [], name: p.clientName || '' }) === want || synced.get(p.id) === want) return;
+    synced.set(p.id, want);
+    updateDoc(doc(db, 'svcPortals', p.id), { sites, clientName: name, updatedAt: serverTimestamp() }).catch(() => {});
   });
 }
 
