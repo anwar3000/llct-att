@@ -405,6 +405,10 @@ class InvReports {
     }
     final b = _fs.batch()..update(ref, up);
     final portal = (t['portal'] ?? '').toString();
+    final publicId = (t['publicId'] ?? '').toString();
+    final view = portal.isNotEmpty
+        ? _fs.collection('svcPortals').doc(portal).collection('tickets').doc(tid)
+        : (publicId.isNotEmpty ? _fs.collection('svcPublic').doc(publicId) : null);
     final dl = r.delivery;
     // What the client sees of the report on their request page.
     final summary = <String, dynamic>{
@@ -428,9 +432,9 @@ class InvReports {
       'receiver': '${dl['receiver'] ?? ''}',
       'signedAt': '${dl['signedAt'] ?? ''}',
     };
-    if (portal.isNotEmpty) {
+    if (view != null) {
       b.set(
-          _fs.collection('svcPortals').doc(portal).collection('tickets').doc(tid),
+          view,
           {
             'reportNo': r.number,
             'report': summary,
@@ -445,8 +449,8 @@ class InvReports {
     }
     await b.commit();
     // Signed off: the report's photos also go to the client's request page.
-    if (r.signed && portal.isNotEmpty) {
-      final col = _fs.collection('svcPortals').doc(portal).collection('tickets').doc(tid).collection('photos');
+    if (r.signed && view != null) {
+      final col = view.collection('photos');
       var n = 0;
       for (final a in r.attachments.where((a) => a['kind'] == 'image' && a['inPdf'] != false).take(6)) {
         final ref0 = '${a['ref'] ?? ''}';

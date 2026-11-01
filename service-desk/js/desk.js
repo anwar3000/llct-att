@@ -6,7 +6,7 @@ import {
 import {
   app, db, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField, deleteDoc,
-  SERVICE_TYPES, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView,
+  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
 } from './sd.js';
@@ -19,12 +19,16 @@ const LOGIN_DOMAIN = 'staff.attendance.app';
 const loginToEmail = (l) => { const s = String(l || '').trim().toLowerCase(); return s.includes('@') ? s : `${s}@${LOGIN_DOMAIN}`; };
 const root = $('#app');
 const PORTAL_BASE = new URL('./', location.href).href;
+const DEFAULT_KEYS = DEFAULT_TYPES.map((x) => x.k);
 const portalUrl = (token) => `${PORTAL_BASE}?c=${token}`;
+/** Walk-in tracking page (support page). Uses the saved support address if set, else this folder. */
+const trackUrl = (pid) => `${S.supportBase || PORTAL_BASE}?t=${pid}`;
 
 const S = {
   me: null, view: 'tickets', filter: 'open', q: '', fPrio: '', fTech: '',
   open: new Map(), recent: new Map(), users: [], portals: [], clients: [], clientsErr: '',
   unsub: [], loadedOpen: false, popQueue: [], popOn: false, rangeFrom: '', rangeTo: '', rClient: '', rTech: '',
+  supportBase: new URL('../support/', new URL('./', location.href)).href,
   sound: lsGet('llct-sd-sound', '1') === '1', synced: false, layout: lsGet('llct-sd-layout', 'board'),
 };
 function lsGet(k, d) { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } }
@@ -73,6 +77,7 @@ function loginView(err = '') {
 
 // ================================================================== data
 function startData() {
+  loadTypes().then(() => refresh());
   const since = Timestamp.fromDate(new Date(Date.now() - 120 * 864e5));
   S.unsub.push(onSnapshot(query(collection(db, 'svcTickets'), where('open', '==', true)), (q) => {
     const first = !S.loadedOpen;
@@ -105,6 +110,7 @@ function startData() {
     }, (e) => { S.clientsErr = 'Clients come from LLCT Invoicing — ask an admin to give you invoicing access (Staff & access).'; console.warn('clients', e); refresh(); }));
   }
   // Remember where this desk lives so the attendance app & dashboard can link to it.
+  getDoc(doc(db, 'settings', 'service')).then((x) => { if (x.exists() && x.data().supportUrl) S.supportBase = x.data().supportUrl; }).catch(() => {});
   if (isAdmin()) getDoc(doc(db, 'settings', 'service')).then((s) => {
     const want = new URL('desk.html', PORTAL_BASE).href;
     if (!s.exists() || s.data().deskUrl !== want || s.data().portalBase !== PORTAL_BASE) setDoc(doc(db, 'settings', 'service'), { deskUrl: want, portalBase: PORTAL_BASE, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
@@ -153,7 +159,7 @@ function nextPop() {
     `<div class="stack"><div class="mono"><b>${esc(t.number || t.id)}</b> · ${esc(ago(t.createdAt))}</div>
       <div style="font-size:17px"><b>${esc(t.clientName)}</b><br>${esc(t.siteName)}</div>
       <div><b>${esc(typesText(t))}</b><div class="muted">${esc(t.description)}</div></div>
-      <div class="small">Preferred: ${esc(fmtDate(t.preferredDate))} · ${esc(slotLabel(t.preferredSlot))}</div>
+      <div class="small">Preferred: ${esc(prefText(t))}</div>
       ${t.scheduledAt ? `<div class="small">Visit scheduled: <b>${esc(fmtDT(t.scheduledAt))}</b></div>` : ''}</div>`,
     `<button class="btn" data-x>Later</button><button class="btn" id="pp-v">View</button>
      ${it.kind === 'mine' ? '<button class="btn good" id="pp-a">Accept job</button>' : canAssign() ? '<button class="btn primary" id="pp-as">Assign technician</button>' : '<button class="btn good" id="pp-a">Accept job</button>'}`,
@@ -184,14 +190,15 @@ function close(o) { if (!o || !o.parentNode) return; o.remove(); if (o._onClose)
 async function updateTicket(t, changes, logText, clientText) {
   const b = writeBatch(db); const at = Timestamp.now();
   b.update(doc(db, 'svcTickets', t.id), { ...changes, updatedAt: serverTimestamp(), log: arrayUnion({ at, by: S.me.id, byName: S.me.name || '', t: logText }) });
-  if (t.portal) {
+  const mp = mirrorPath(t);
+  if (mp) {
     const merged = { ...t, ...changes };
     const pub = { status: merged.status, priority: merged.priority || 'normal', updatedAt: serverTimestamp() };
     pub.assignedName = merged.assignedTo ? (merged.assignedName || '') : deleteField();
     pub.scheduledAt = merged.scheduledAt && merged.assignedTo ? merged.scheduledAt : deleteField();
     if (merged.reportNo) pub.reportNo = merged.reportNo;
     if (clientText) pub.log = arrayUnion({ at, t: clientText });
-    b.set(doc(db, 'svcPortals', t.portal, 'tickets', t.id), pub, { merge: true });
+    b.set(doc(db, ...mp), pub, { merge: true });
   }
   try { await b.commit(); return true; } catch (e) { toast(friendly(e), true); return false; }
 }
@@ -322,7 +329,7 @@ function boardHtml(list) {
 function cardHtml(t) {
   const p = prio(t.priority), od = overdue(t);
   return `<button class="bcard" data-open="${esc(t.id)}" style="--pc:${p.c}">
-    <div class="bc1"><span class="bprio">${esc(p.t)}</span>${od ? '<span class="bover">Overdue</span>' : ''}<span class="grow"></span><span class="bno">${esc(t.number || t.id)}</span></div>
+    <div class="bc1"><span class="bprio">${esc(p.t)}</span>${od ? '<span class="bover">Overdue</span>' : ''}${t.source === 'walkin' ? '<span class="bwalk">Walk-in</span>' : ''}<span class="grow"></span><span class="bno">${esc(t.number || t.id)}</span></div>
     <div class="bc2">${esc(t.clientName)}</div><div class="bc3">${esc(t.siteName)}</div>
     <div class="bc4">${esc(typesText(t))}</div>
     <div class="bc5">${t.assignedName ? `${avatar(t.assignedName)}<span>${esc(t.assignedName)}</span>` : '<span class="muted">Not assigned</span>'}<span class="grow"></span>
@@ -334,11 +341,11 @@ function rowHtml(t) {
   return `<div class="trow ${fresh ? 'fresh' : ''}" data-open="${esc(t.id)}"><span class="bar" style="background:${p.c}"></span>
     <div style="min-width:0"><div class="row"><span class="t1">${esc(t.clientName)}</span><span class="muted">·</span><span>${esc(t.siteName)}</span></div>
       <div class="t2">${esc(typesText(t))} — ${esc(String(t.description || '').slice(0, 110))}</div>
-      <div class="t2 mono small">${esc(t.number || t.id)} · ${esc(ago(t.createdAt))}${t.source === 'staff' ? ' · by staff' : ''}${t.reportNo ? ' · ' + esc(t.reportNo) : ''}</div></div>
+      <div class="t2 mono small">${esc(t.number || t.id)} · ${esc(ago(t.createdAt))}${t.source === 'staff' ? ' · by staff' : t.source === 'walkin' ? ' · walk-in' : ''}${t.reportNo ? ' · ' + esc(t.reportNo) : ''}</div></div>
     <div class="r"><span class="chip" style="background:${s.c}1f;color:${s.c}"><span class="dot" style="background:${s.c}"></span>${esc(s.t)}</span>
       <span class="chip" style="background:${p.c}14;color:${p.c}">${esc(p.t)}</span>
       <span class="small ${od ? '' : 'muted'}" style="${od ? 'color:var(--danger);font-weight:700' : ''}">${t.assignedName ? '👷 ' + esc(t.assignedName) : od ? 'Overdue' : 'Unassigned'}</span>
-      <span class="small muted">${t.scheduledAt ? '🗓 ' + esc(fmtDT(t.scheduledAt)) : '⏱ ' + esc(fmtDate(t.preferredDate)) + ' · ' + esc((slotLabel(t.preferredSlot) || '').split(' (')[0])}</span></div></div>`;
+      <span class="small muted">${t.scheduledAt ? '🗓 ' + esc(fmtDT(t.scheduledAt)) : '⏱ ' + esc(prefText(t))}</span></div></div>`;
 }
 
 // ================================================================== ticket detail
@@ -362,7 +369,8 @@ function openTicket(id) {
   if (A && t.open) acts.push('<button class="btn bad" data-a="cancel">Cancel ticket</button>');
   if (A && !t.open) acts.push('<button class="btn" data-a="reopen">Re-open</button>');
   if (t.open && (A || mine) && t.assignedTo) acts.push('<button class="btn" data-a="resched">🗓 Change visit time</button>');
-  if (t.portal && (A || mine)) acts.push('<label class="btn">📷 Post photo for client<input type="file" accept="image/*" multiple hidden data-postph></label>');
+  if (hasClientPage(t) && (A || mine)) acts.push('<label class="btn">📷 Post photo for client<input type="file" accept="image/*" multiple hidden data-postph></label>');
+  if (A && !t.clientId) acts.push('<button class="btn" data-a="mkclient">Save as client</button>');
   acts.push('<button class="btn" data-a="pdf">PDF</button>');
   if (isAdmin()) acts.push('<button class="btn bad" data-a="delete">Delete ticket</button>');
   const nav = mapsLink(t);
@@ -375,10 +383,10 @@ function openTicket(id) {
         <span>Service</span><b>${esc(typesText(t))}</b>
         <span>Problem</span><span style="white-space:pre-line">${esc(t.description)}</span>
         ${t.cameras ? `<span>Devices</span><span>${esc(t.cameras)}</span>` : ''}
-        <span>Preferred</span><span>${esc(fmtDate(t.preferredDate))} · ${esc(slotLabel(t.preferredSlot))}</span>
+        <span>Preferred</span><span>${esc(prefText(t))}</span>
         <span>Respond by</span><span>${esc(fmtDT(dueAt(t)))}</span>
         <span>Contact</span><span>${esc(t.contactName)}${t.contactPhone ? `<br><a href="${telLink(t.contactPhone)}">📞 ${esc(t.contactPhone)}</a> · <a href="${waLink(t.contactPhone, '')}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${t.contactEmail ? `<br>${esc(t.contactEmail)}` : ''}</span>
-        <span>Raised</span><span>${esc(fmtDT(t.createdAt))} · ${t.source === 'staff' ? 'by staff' : 'client link'}</span>
+        <span>Raised</span><span>${esc(fmtDT(t.createdAt))} · ${t.source === 'staff' ? 'by staff' : t.source === 'walkin' ? 'walk-in (support page)' : 'client link'}</span>
       </div>${Array.isArray(t.photos) && t.photos.length ? `<div class="thumbs" style="margin-top:12px">${t.photos.map((ph, i) => `<img src="${ph}" data-ph="${i}" alt="photo">`).join('')}</div>` : ''}</div>
     </div><div class="stack">
       <div class="card pad"><h3>Assignment</h3>
@@ -388,22 +396,24 @@ function openTicket(id) {
         ${t.techNote ? `<div class="small" style="margin-top:8px"><b>Technician note:</b> ${esc(t.techNote)}</div>` : ''}
         <div class="row" style="margin-top:12px">${acts.join('')}</div></div>
       <div class="card pad"><h3>Client is told</h3><div class="small" style="margin-top:6px;background:#f6f4f0;border-radius:10px;padding:9px 11px">${esc(clientMessage(t))}</div>
-        <div class="row" style="margin-top:8px">${t.contactPhone ? `<a class="btn sm" target="_blank" rel="noopener" href="${waLink(t.contactPhone, waText(t))}">Send update on WhatsApp</a>` : ''}${t.portal ? '<span class="small muted">Also visible live on the client\'s link.</span>' : ''}</div></div>
+        <div class="row" style="margin-top:8px">${t.contactPhone ? `<a class="btn sm" target="_blank" rel="noopener" href="${waLink(t.contactPhone, waText(t))}">Send update on WhatsApp</a>` : ''}${t.portal ? '<span class="small muted">Also visible live on the client\'s link.</span>' : t.publicId ? `<span class="small muted">Walk-in customer's tracking page: <a href="${trackUrl(t.publicId)}" target="_blank" rel="noopener">open</a></span>` : ''}</div></div>
       <div class="card pad"><h3>Timeline</h3><div class="timeline">${(t.log || []).slice().reverse().map((l) => `<div><b>${esc(l.t)}</b><br><span class="muted small">${esc(fmtDT(l.at))}${l.byName ? ' · ' + esc(l.byName) : ''}</span></div>`).join('')}</div>
         ${A || mine ? '<div class="row" style="margin-top:8px"><input id="tn" placeholder="Add an internal note…" class="grow"><button class="btn sm" id="tnb">Add</button></div>' : ''}</div>
-      ${t.portal ? `<div class="card pad"><h3>Photos for the client</h3><div class="thumbs" id="cph" style="margin-top:8px"><span class="small muted">Loading…</span></div></div>` : ''}
+      ${hasClientPage(t) ? `<div class="card pad"><h3>Photos for the client</h3><div class="thumbs" id="cph" style="margin-top:8px"><span class="small muted">Loading…</span></div></div>` : ''}
     </div></div>`, '', { wide: true });
   o.dataset.tid = t.id;
   $$('[data-a]', o).forEach((b) => (b.onclick = async () => {
     const a = b.dataset.a, cur = getT(t.id) || t;
     if (a === 'assign') { close(o); return assignModal(cur); }
     if (a === 'resched') { close(o); return rescheduleModal(cur); }
+    if (a === 'mkclient') { close(o); return clientFromTicket(cur); }
     if (a === 'pdf') {
       b.disabled = true;
       let report = null, photos = [];
-      if (cur.portal) {
-        try { const m = await getDoc(doc(db, 'svcPortals', cur.portal, 'tickets', cur.id)); report = (m.exists() && m.data().report) || null; } catch (_) { /* ignore */ }
-        try { photos = (await getDocs(query(collection(db, 'svcPortals', cur.portal, 'tickets', cur.id, 'photos'), orderBy('at', 'asc')))).docs.map((d) => d.data()); } catch (_) { /* ignore */ }
+      const mp = mirrorPath(cur);
+      if (mp) {
+        try { const m = await getDoc(doc(db, ...mp)); report = (m.exists() && m.data().report) || null; } catch (_) { /* ignore */ }
+        try { photos = (await getDocs(query(collection(db, ...mp, 'photos'), orderBy('at', 'asc')))).docs.map((d) => d.data()); } catch (_) { /* ignore */ }
       }
       ticketPdf(cur, { report, photos });
       b.disabled = false;
@@ -429,9 +439,9 @@ function openTicket(id) {
     b.disabled = false; // the live update redraws this ticket
   }));
   $$('[data-ph]', o).forEach((im) => (im.onclick = () => { const w = window.open(); if (w) w.document.write(`<img src="${im.src}" style="max-width:100%">`); }));
-  if (t.portal) {
+  if (hasClientPage(t)) {
     const box = $('#cph', o);
-    getDocs(query(collection(db, 'svcPortals', t.portal, 'tickets', t.id, 'photos'), orderBy('at', 'asc'))).then((q) => {
+    getDocs(query(collection(db, ...mirrorPath(t), 'photos'), orderBy('at', 'asc'))).then((q) => {
       if (!box) return;
       box.innerHTML = q.docs.length ? q.docs.map((d) => `<img src="${d.data().data}" alt="" title="${esc(d.data().caption || '')}">`).join('') : '<span class="small muted">None yet. Post photos of the finished work; the client sees them on their request.</span>';
     }).catch(() => { if (box) box.innerHTML = '<span class="small muted">Publish the latest Firestore rules to use client photos.</span>'; });
@@ -447,16 +457,56 @@ function openTicket(id) {
   if (tnb) tnb.onclick = async () => { const v = $('#tn', o).value.trim(); if (!v) return; tnb.disabled = true; $('#tn', o).value = ''; await updateTicket(getT(t.id) || t, mine && !A ? { techNote: v } : {}, 'Note: ' + v); };
 }
 function waText(t) {
-  return `Leaders Line Service – ${t.number || t.id}\n${t.clientName} – ${t.siteName}\n${typesText(t)}\n\n${clientMessage(t)}${t.portal ? `\n\nTrack: ${portalUrl(t.portal)}` : ''}`;
+  return `Leaders Line Service – ${t.number || t.id}\n${t.clientName} – ${t.siteName}\n${typesText(t)}\n\n${clientMessage(t)}${t.portal ? `\n\nTrack: ${portalUrl(t.portal)}` : t.publicId ? `\n\nTrack: ${trackUrl(t.publicId)}` : ''}`;
+}
+
+/** Walk-in customer → a client in LLCT Invoicing (with this store as a site), and link the ticket. */
+function clientFromTicket(t) {
+  const existing = S.clients.filter((c) => String(c.name || '').trim().toLowerCase() === String(t.clientName || '').trim().toLowerCase());
+  const o = modal(`<h2 class="grow">Save ${esc(t.clientName)} as a client</h2>`,
+    `<p class="small muted" style="margin-top:0">${existing.length ? 'A client with this name exists. Add this store as a site there, or create a new client.' : 'Creates the client in LLCT Invoicing with this store as its first site.'}</p>
+     <div class="stack">
+      <label class="field"><span>Client / brand name</span><input id="mc-name" value="${esc(t.clientName || '')}"></label>
+      <label class="field"><span>Store / site name</span><input id="mc-site" value="${esc(t.siteName || '')}"></label>
+      <label class="field"><span>Address</span><input id="mc-addr" value="${esc(t.siteAddress || '')}"></label>
+      <div class="grid2"><label class="field"><span>Contact</span><input id="mc-contact" value="${esc(t.contactName || '')}"></label><label class="field"><span>Mobile</span><input id="mc-phone" value="${esc(t.contactPhone || '')}"></label></div>
+      <label class="field"><span>Email</span><input id="mc-email" value="${esc(t.contactEmail || '')}"></label>
+     </div>`,
+    `<button class="btn" data-x>Cancel</button>${existing.length ? `<button class="btn" id="mc-add">Add site to ${esc(existing[0].name)}</button>` : ''}<button class="btn primary" id="mc-new">Create new client</button>`);
+  const site = () => {
+    const x = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: $('#mc-site', o).value.trim() || 'Store', address: $('#mc-addr', o).value.trim(), addedAt: new Date().toISOString() };
+    if (hasGPS(t)) { x.lat = t.lat; x.lng = t.lng; x.radius = 150; }
+    return x;
+  };
+  const link = async (cid, cname, si) => {
+    await updateTicket(t, { clientId: cid, clientName: cname, siteId: si.id, siteName: si.name }, `Saved as client ${cname}`);
+    toast(`${cname} saved as a client`); close(o); openTicket(t.id);
+  };
+  $('#mc-new', o).onclick = async () => {
+    const name = $('#mc-name', o).value.trim(); if (!name) return toast('Enter the client name', true);
+    const si = site(); const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); const now = new Date().toISOString();
+    try {
+      await setDoc(doc(db, 'inv_clients', id), { name, contact: $('#mc-contact', o).value.trim(), phone: $('#mc-phone', o).value.trim(), email: $('#mc-email', o).value.trim(),
+        address: si.address, taxId: '', creditDays: 0, openingBalance: 0, places: [si], createdAt: now, updatedAt: now, createdBy: S.me.id, source: 'walk-in' });
+      await link(id, name, si);
+    } catch (e) { toast(String(e.code || '').includes('permission') ? 'You need "clients & products" permission in LLCT Invoicing.' : friendly(e), true); }
+  };
+  const add = $('#mc-add', o);
+  if (add) add.onclick = async () => {
+    const c = existing[0]; const si = site();
+    try { await updateDoc(doc(db, 'inv_clients', c.id), { places: [...(c.places || []), si], updatedAt: new Date().toISOString() }); await link(c.id, c.name, si); }
+    catch (e) { toast(friendly(e), true); }
+  };
 }
 
 async function deleteTicket(t) {
-  if (t.portal) {
+  const mp = mirrorPath(t);
+  if (mp) {
     try {
-      const ph = await getDocs(collection(db, 'svcPortals', t.portal, 'tickets', t.id, 'photos'));
+      const ph = await getDocs(collection(db, ...mp, 'photos'));
       await Promise.all(ph.docs.map((d) => deleteDoc(d.ref)));
     } catch (_) { /* no photos / older rules */ }
-    await deleteDoc(doc(db, 'svcPortals', t.portal, 'tickets', t.id)).catch(() => {});
+    await deleteDoc(doc(db, ...mp)).catch(() => {});
   }
   await deleteDoc(doc(db, 'svcTickets', t.id));
   S.open.delete(t.id); S.recent.delete(t.id); refresh();
@@ -465,13 +515,15 @@ async function postClientPhotos(t, files) {
   const at = Timestamp.now(); let n = 0;
   for (const f of files) {
     const data = await compressImage(f, 1280, 0.7);
-    await setDoc(doc(collection(db, 'svcPortals', t.portal, 'tickets', t.id, 'photos')), { data, caption: '', by: S.me.id, byName: S.me.name || '', at });
+    await setDoc(doc(collection(db, ...mirrorPath(t), 'photos')), { data, caption: '', by: S.me.id, byName: S.me.name || '', at });
     n++;
   }
   await updateTicket(t, { photosPosted: (t.photosPosted || 0) + n }, `${n} photo${n > 1 ? 's' : ''} posted for the client`, `${n} photo${n > 1 ? 's' : ''} of the work added`);
 }
 function preferredDateTime(t) {
-  const d = toDate(t.preferredDate) || new Date(); const h = { morning: 9, afternoon: 13, evening: 17 }[t.preferredSlot];
+  const d = toDate(t.preferredDate) || new Date(); const h = { morning: 9, afternoon: 13, evening: 17, night: 22, latenight: 1 }[t.preferredSlot];
+  if (t.preferredSlot === 'latenight') d.setDate(d.getDate() + 1);
+  if (t.preferredSlot === 'exact' && t.preferredTime) { const [hh, mm] = t.preferredTime.split(':').map(Number); d.setHours(hh || 9, mm || 0, 0, 0); return d; }
   d.setHours(h || 9, 0, 0, 0);
   const n = new Date(Date.now() + 2 * 3600e3); n.setMinutes(0, 0, 0);
   return n > d ? n : d; // never in the past
@@ -479,7 +531,7 @@ function preferredDateTime(t) {
 function rescheduleModal(t) {
   const cur = t.scheduledAt ? toDate(t.scheduledAt) : preferredDateTime(t);
   const o = modal(`<h2 class="grow">Visit time for ${esc(t.number || t.id)}</h2>`,
-    `<p class="small muted" style="margin-top:0">Client asked for ${esc(fmtDate(t.preferredDate))}, ${esc((slotLabel(t.preferredSlot) || '').toLowerCase())}.</p>
+    `<p class="small muted" style="margin-top:0">Client asked for ${esc(prefText(t))}.</p>
      <div class="row"><button class="btn sm" id="rs-pref" type="button">Use the client's preferred time</button></div>
      <label class="field" style="margin-top:12px"><span>Visit date and time</span><input type="datetime-local" id="rs-when" value="${esc(localInput(cur))}"></label>
      <label class="field" style="margin-top:10px"><span>Reason (shown to the client, optional)</span><input id="rs-why" placeholder="e.g. Technician availability"></label>`,
@@ -511,10 +563,7 @@ function assignModal(t) {
   const list = staffFor(t);
   let pick = t.assignedTo || '';
   const def = t.scheduledAt ? localInput(t.scheduledAt) : (() => {
-    const d = toDate(t.preferredDate) || new Date(); const h = { morning: 9, afternoon: 13, evening: 17 }[t.preferredSlot];
-    d.setHours(h || 9, 0, 0, 0);
-    const n = new Date(Date.now() + 2 * 3600e3); n.setMinutes(0, 0, 0);
-    return localInput(n > d ? n : d); // never in the past
+    return localInput(preferredDateTime(t));
   })();
   const o = modal(`<h2 class="grow">Assign ${esc(t.number || t.id)}</h2>`,
     `<div class="small muted" style="margin-bottom:10px">${esc(t.clientName)} – ${esc(t.siteName)}. ${hasGPS(t) ? 'Staff are sorted by distance from the site (live location from the attendance app).' : 'This site has no GPS, so staff are listed by workload.'}</div>
@@ -556,7 +605,7 @@ function newTicketModal(preClientId = '') {
       <div class="row" style="align-items:flex-end"><label class="field" style="flex:1;min-width:220px"><span>Client</span><select id="nt-c"><option value="">Choose client…</option>${S.clients.map((x) => `<option value="${esc(x.id)}" ${x.id === F.clientId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
       <label class="field" style="flex:1;min-width:220px"><span>Site</span><select id="nt-s"><option value="">${c ? 'Choose site…' : '—'}</option>${sites.map((s) => `<option value="${esc(s.id)}" ${s.id === F.siteId ? 'selected' : ''}>${esc(s.name)}${hasGPS(s) ? '' : ' (no GPS)'}</option>`).join('')}<option value="_other" ${F.siteId === '_other' ? 'selected' : ''}>Other location…</option></select></label></div>
       ${F.siteId === '_other' ? `<div class="row" style="margin-top:8px"><input id="nt-oname" placeholder="Location name" value="${esc(vals.oname)}" style="flex:1"><input id="nt-oaddr" placeholder="Address" value="${esc(vals.oaddr)}" style="flex:2"></div>` : ''}
-      <div class="sec-t" style="margin-top:14px">Service</div><div class="tiles">${SERVICE_TYPES.map((x) => `<button type="button" class="tile ${F.category === x.k ? 'on' : ''}" data-cat="${x.k}"><span class="ti">${x.i}</span><span>${esc(x.t)}</span></button>`).join('')}</div>
+      <div class="sec-t" style="margin-top:14px">Service</div><div class="tiles">${activeTypes().map((x) => `<button type="button" class="tile ${F.category === x.k ? 'on' : ''}" data-cat="${x.k}"><span class="ti">${icon(x.i || x.k, 20)}</span><span>${esc(x.t)}</span></button>`).join('')}</div>
       <label class="field" style="margin-top:10px"><span>Problem</span><textarea id="nt-desc" rows="3">${esc(vals.desc)}</textarea></label>
       <div class="sec-t" style="margin-top:12px">Priority</div><div class="ptiles">${PRIORITIES.map((p) => `<button type="button" class="tile ptile ${F.priority === p.k ? 'on' : ''}" data-prio="${p.k}" style="border-left-color:${p.c}"><span><b style="color:${p.c}">${p.t}</b><small>${esc(p.s)}</small></span></button>`).join('')}</div>
       <div class="row" style="margin-top:12px;align-items:flex-end"><label class="field" style="flex:1;min-width:150px"><span>Preferred date</span><input type="date" id="nt-date" value="${esc(vals.date)}"></label>
@@ -579,7 +628,7 @@ function newTicketModal(preClientId = '') {
     const portal = S.portals.filter((p) => p.active && p.clientId === c.id).sort((a, b) => (toDate(b.createdAt) || 0) - (toDate(a.createdAt) || 0))[0];
     const t = {
       clientId: c.id, clientName: c.name || '', siteId: site ? site.id : '', siteName: site ? site.name : v('#nt-oname'), siteAddress: site ? site.address : v('#nt-oaddr'),
-      contactName: v('#nt-cname'), contactPhone: v('#nt-cphone'), category: F.category, description: v('#nt-desc'), priority: F.priority,
+      contactName: v('#nt-cname'), contactPhone: v('#nt-cphone'), category: F.category, categories: [F.category], categoryLabels: [typeLabel(F.category)], description: v('#nt-desc'), priority: F.priority,
       preferredDate: v('#nt-date') || dateKey(), preferredSlot: v('#nt-slot') || 'asap', status: 'new', open: true, source: 'staff',
       createdBy: S.me.id, createdByName: S.me.name || '',
     };
@@ -712,7 +761,7 @@ function reportsView(m) {
 }
 function downloadCsv(ts, name) {
   const cols = [['Ticket', (t) => t.number || t.id], ['Raised', (t) => fmtDT(t.createdAt)], ['Client', (t) => t.clientName], ['Site', (t) => t.siteName], ['Address', (t) => t.siteAddress],
-    ['Service', (t) => typesText(t)], ['Problem', (t) => t.description], ['Priority', (t) => prio(t.priority).t], ['Preferred', (t) => `${fmtDate(t.preferredDate)} ${slotLabel(t.preferredSlot)}`],
+    ['Service', (t) => typesText(t)], ['Problem', (t) => t.description], ['Priority', (t) => prio(t.priority).t], ['Preferred', (t) => prefText(t)],
     ['Status', (t) => st(t.status).t], ['Technician', (t) => t.assignedName], ['Visit', (t) => fmtDT(t.scheduledAt)], ['Arrived', (t) => fmtDT(t.arrivedAt)], ['Completed', (t) => fmtDT(t.completedAt)],
     ['Report', (t) => t.reportNo], ['Contact', (t) => t.contactName], ['Mobile', (t) => t.contactPhone], ['Source', (t) => t.source]];
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -727,14 +776,48 @@ function settingsView(m) {
     <div class="card pad"><h3>Who can assign tickets</h3><p class="small muted">Admins and managers can always assign. Tick staff who may also assign jobs to others (everyone can pick up a new job for themselves).</p>
       ${staff.map((u) => `<div class="row" style="padding:7px 0;border-top:1px solid var(--line)">${avatar(u.name)}<span class="grow"><b>${esc(u.name)}</b><div class="small muted">${esc(u.designation || u.role || '')}</div></span>
         <label class="switch"><input type="checkbox" data-asg="${esc(u.id)}" ${u.canAssignService ? 'checked' : ''}><i></i></label></div>`).join('') || '<div class="muted">No staff.</div>'}</div>
+    <div class="card pad" style="grid-column:1/-1"><div class="row"><h3 class="grow">Service options for customers</h3>
+        <button class="btn sm" id="so-reset">Restore defaults</button><button class="btn sm" id="so-add">+ Add option</button><button class="btn sm primary" id="so-save">Save options</button></div>
+      <p class="small muted">What customers can tick under "What needs attention" on client links and the walk-in support page. Hide, rename, reorder or add your own.</p>
+      <div id="so-list"></div></div>
     <div class="card pad stack"><h3>Links</h3>
       <div class="field"><span>Staff desk (this page)</span><div class="linkbox"><input readonly value="${esc(new URL('desk.html', PORTAL_BASE).href)}"><button class="btn sm" id="cp1">Copy</button></div></div>
       <div class="field"><span>Client links start with</span><input readonly value="${esc(PORTAL_BASE)}?c=…"></div>
+      <div class="field"><span>Walk-in support page (public form for any customer)</span><div class="linkbox"><input id="sup-url" value="${esc(S.supportBase)}"><button class="btn sm" id="sup-save">Save</button></div>
+        <small class="muted">Walk-in customers get tracking links on this address. Default is the support folder next to this one.</small></div>
       <p class="small muted">Saved automatically to the shared settings, so the attendance app and llct.net dashboard open this desk.</p>
       <h3>Alerts</h3><p class="small muted">New requests pop up on this desk, in the attendance app (staff &amp; management) and on the llct.net dashboard. Keep this page open on the office PC with sound on.</p>
       <div class="row"><button class="btn sm" id="tst">Test popup &amp; sound</button>${'Notification' in window ? `<span class="small muted">Desktop alerts: ${Notification.permission}</span>` : ''}</div></div></div>`;
   $$('[data-asg]', m).forEach((c) => (c.onchange = () => updateDoc(doc(db, 'users', c.dataset.asg), { canAssignService: c.checked }).then(() => toast('Saved'), (e) => { toast(friendly(e), true); c.checked = !c.checked; })));
   $('#cp1', m).onclick = () => copy(new URL('desk.html', PORTAL_BASE).href);
+  // service options editor
+  let opts = SERVICE_TYPES.filter((x) => !x.retired).map((x) => ({ ...x }));
+  const drawOpts = () => {
+    $('#so-list', m).innerHTML = `<table class="tbl"><thead><tr><th style="width:44px">Show</th><th style="width:150px">Icon</th><th>Text customers see</th><th style="width:120px">Order</th><th style="width:60px"></th></tr></thead><tbody>
+      ${opts.map((x, i) => `<tr><td><label class="switch"><input type="checkbox" data-on="${i}" ${x.on !== false ? 'checked' : ''}><i></i></label></td>
+        <td><div class="row" style="flex-wrap:nowrap"><span style="color:var(--ribbon)">${icon(x.i || x.k, 22)}</span><select data-ic="${i}" style="padding:6px">${ICON_KEYS.map((k) => `<option ${((x.i || x.k) === k) ? 'selected' : ''}>${k}</option>`).join('')}</select></div></td>
+        <td><input data-t="${i}" value="${esc(x.t)}"></td>
+        <td><button class="btn sm" data-up="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button> <button class="btn sm" data-dn="${i}" ${i === opts.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button></td>
+        <td>${DEFAULT_KEYS.includes(x.k) ? '' : `<button class="btn sm bad" data-del="${i}" aria-label="Delete">✕</button>`}</td></tr>`).join('')}</tbody></table>`;
+    $$('[data-on]', m).forEach((e) => (e.onchange = () => { opts[+e.dataset.on].on = e.checked; }));
+    $$('[data-t]', m).forEach((e) => (e.oninput = () => { opts[+e.dataset.t].t = e.value; }));
+    $$('[data-ic]', m).forEach((e) => (e.onchange = () => { opts[+e.dataset.ic].i = e.value; drawOpts(); }));
+    $$('[data-up]', m).forEach((e) => (e.onclick = () => { const i = +e.dataset.up; [opts[i - 1], opts[i]] = [opts[i], opts[i - 1]]; drawOpts(); }));
+    $$('[data-dn]', m).forEach((e) => (e.onclick = () => { const i = +e.dataset.dn; [opts[i + 1], opts[i]] = [opts[i], opts[i + 1]]; drawOpts(); }));
+    $$('[data-del]', m).forEach((e) => (e.onclick = () => { opts.splice(+e.dataset.del, 1); drawOpts(); }));
+  };
+  drawOpts();
+  $('#so-add', m).onclick = () => { opts.push({ k: 'c' + Date.now().toString(36), t: 'New option', i: 'other', on: true }); drawOpts(); const ins = $$('[data-t]', m); ins[ins.length - 1].select(); };
+  $('#so-reset', m).onclick = () => { if (!confirm('Restore the default options? Your own options are removed.')) return; opts = DEFAULT_TYPES.map((x) => ({ ...x, on: true })); drawOpts(); };
+  $('#so-save', m).onclick = async () => {
+    const clean = opts.map((x) => ({ ...x, t: String(x.t || '').trim() })).filter((x) => x.t);
+    if (!clean.some((x) => x.on !== false)) return toast('Show at least one option', true);
+    try { await saveTypes(clean); await loadTypes(); toast('Service options saved — customers see them straight away'); } catch (e) { toast(friendly(e), true); }
+  };
+  $('#sup-save', m).onclick = () => {
+    let v = $('#sup-url', m).value.trim(); if (!v) return; if (!v.endsWith('/') && !v.endsWith('.html')) v += '/';
+    setDoc(doc(db, 'settings', 'service'), { supportUrl: v, updatedAt: serverTimestamp() }, { merge: true }).then(() => { S.supportBase = v; toast('Saved'); }, (e) => toast(friendly(e), true));
+  };
   $('#tst', m).onclick = () => {
     const fake = { id: '_test', number: 'SR-TEST-0000', clientName: 'Test client', siteName: 'Main office', category: 'camera', description: 'This is only a test popup.', priority: 'critical', preferredDate: dateKey(), preferredSlot: 'asap', createdAt: new Date(), status: 'new' };
     S.open.set('_test', fake); queuePop(fake, 'new'); setTimeout(() => S.open.delete('_test'), 60000);

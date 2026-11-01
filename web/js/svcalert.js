@@ -7,7 +7,7 @@ const PRIO = { critical: ['Critical', '#d64545'], high: ['High', '#e08e2b'], nor
 const TYPES = {
   camera: 'CCTV camera not working', recording: 'NVR / DVR not recording', remote: 'No remote / mobile view', image: 'Image blurry, dark or no night vision',
   hdd: 'Hard disk / storage error', playback: 'Footage backup / playback needed', power: 'Power, cable or PoE issue', network: 'Network / Wi‑Fi / internet',
-  access: 'Access control / door / intercom', ppm: 'Preventive maintenance (AMC visit)', install: 'New camera / relocation', other: 'Other',
+  access: 'Access control / door / intercom', o2device: 'Oxygen O2 device not working', o2switch: 'O2IOT switching issue', o2connect: 'O2IOT device not connecting', ppm: 'Preventive maintenance (AMC visit)', install: 'New camera / relocation', other: 'Other',
 };
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let unsub = null;
@@ -50,7 +50,7 @@ function popup(t) {
     <div style="padding:16px 18px"><div style="display:flex;gap:8px;align-items:center"><span style="background:${pc};color:#fff;border-radius:20px;padding:2px 9px;font-size:12px;font-weight:700">${pl}</span>
       <b style="font-size:16px">New service request</b><span style="margin-left:auto;color:#75757a;font-family:monospace;font-size:12px">${esc(t.number || t.id)}</span></div>
       <div style="margin-top:12px;font-size:16px"><b>${esc(t.clientName)}</b><br>${esc(t.siteName)}</div>
-      <div style="margin-top:8px"><b>${esc((Array.isArray(t.categories) && t.categories.length ? t.categories : [t.category]).map((k) => TYPES[k] || k || '').join(', '))}</b><div style="color:#75757a">${esc(t.description)}</div></div></div>
+      <div style="margin-top:8px"><b>${esc((Array.isArray(t.categoryLabels) && t.categoryLabels.length ? t.categoryLabels : (Array.isArray(t.categories) && t.categories.length ? t.categories : [t.category]).map((k) => TYPES[k] || k || '')).join(', '))}</b><div style="color:#75757a">${esc(t.description)}</div></div></div>
     <div style="padding:12px 18px;border-top:1px solid #ebe8e3;display:flex;gap:8px;justify-content:flex-end">
       <button class="btn" data-x>Later</button>${deskUrl ? '<a class="btn primary" data-go target="_blank" rel="noopener">Open service desk</a>' : ''}</div></div>`;
   const go = o.querySelector('[data-go]'); if (go) { go.href = deskUrl; go.onclick = () => o.remove(); }

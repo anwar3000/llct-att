@@ -177,7 +177,11 @@ class _TicketCard extends StatelessWidget {
 }
 
 String _prefText(ServiceTicket t) {
+  if (t.preferredSlot.isEmpty || t.preferredSlot == 'asap') return 'As soon as possible';
   final d = DateTime.tryParse(t.preferredDate);
+  if (t.preferredSlot == 'exact' && t.preferredTime.isNotEmpty) {
+    return '${d == null ? '' : '${fmtDateShort(d)} '}at ${t.preferredTime}';
+  }
   final slot = (svcSlots[t.preferredSlot] ?? '').split(' (').first;
   return [if (d != null) fmtDateShort(d), if (slot.isNotEmpty) slot].join(' · ');
 }
@@ -331,7 +335,7 @@ class _TicketDetailState extends State<_TicketDetail> {
         }, color: AppColors.danger);
       }
     }
-    if ((mine || canAssign) && t.portal.isNotEmpty) {
+    if ((mine || canAssign) && t.hasClientPage) {
       add(t.photosPosted > 0 ? 'Post more photos (${t.photosPosted})' : 'Post photos for client', Icons.add_a_photo_outlined, () async {
         final camera = await showModalBottomSheet<bool>(
           context: context,
@@ -403,7 +407,7 @@ class _TicketDetailState extends State<_TicketDetail> {
       InfoRow(Icons.person_outline, 'Contact', [t.contactName, t.contactPhone].where((x) => x.isNotEmpty).join(' · ')),
       InfoRow(Icons.engineering_outlined, 'Technician', t.assignedName.isEmpty ? 'Not assigned' : t.assignedName),
       if (t.techNote.isNotEmpty) InfoRow(Icons.sticky_note_2_outlined, 'Note', t.techNote),
-      InfoRow(Icons.access_time, 'Raised', '${fmtDateTime(t.createdAt)} · ${t.source == 'staff' ? 'by staff' : 'client link'}'),
+      InfoRow(Icons.access_time, 'Raised', '${fmtDateTime(t.createdAt)} · ${t.source == 'staff' ? 'by staff' : t.walkIn ? 'walk-in (support page)' : 'client link'}'),
       if (t.photos.isNotEmpty) ...[
         const SizedBox(height: 10),
         SizedBox(

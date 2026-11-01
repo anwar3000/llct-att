@@ -287,7 +287,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   padding: 9px 15px; min-height: 42px; display: inline-flex; align-items: center; position: relative; font-weight: 550;
 }
 .pchip.on { background: var(--night); border-color: var(--night); color: #fff; }
-.pchip input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.pchip input[type=date], .pchip input[type=time] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
 .photos .addph { flex-direction: column; gap: 2px; display: flex; align-items: center; justify-content: center; }
@@ -343,3 +343,4 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .bc4 { font-size: 13.5px; margin-top: 4px; }
 .bc5 { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
 .bc5 .av { width: 22px; height: 22px; font-size: 10px; }
+.bwalk { background: #EDE7F8; color: var(--purple); border-radius: 99px; padding: 0 7px; font-weight: 650; }

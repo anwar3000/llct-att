@@ -12,7 +12,7 @@ const dateOf = (s) => (s ? fmtDate(new Date(String(s).length <= 10 ? `${s}T00:00
 
 const PRIO = { critical: ['Critical', 'red'], high: ['High', 'amber'], normal: ['Normal', 'blue'], low: ['Low', 'gray'] };
 const STAT = { new: ['New — not assigned', 'red'], assigned: ['Assigned', 'purple'], accepted: ['Accepted', 'blue'], on_way: ['On the way', 'amber'], on_site: ['At site', 'amber'], completed: ['Completed', 'green'] };
-const TYPES = { camera: 'CCTV camera not working', recording: 'NVR / DVR not recording', remote: 'No remote / mobile view', image: 'Image blurry / dark', hdd: 'Hard disk / storage', playback: 'Footage backup / playback', power: 'Power / cable / PoE', network: 'Network / Wi-Fi', access: 'Access control / intercom', ppm: 'Preventive maintenance (AMC)', install: 'New camera / relocation', other: 'Other' };
+const TYPES = { camera: 'CCTV camera not working', recording: 'NVR / DVR not recording', remote: 'No remote / mobile view', image: 'Image blurry / dark', hdd: 'Hard disk / storage', playback: 'Footage backup / playback', power: 'Power / cable / PoE', network: 'Network / Wi-Fi', access: 'Access control / intercom', o2device: 'Oxygen O2 device not working', o2switch: 'O2IOT switching issue', o2connect: 'O2IOT device not connecting', ppm: 'Preventive maintenance (AMC)', install: 'New camera / relocation', other: 'Other' };
 const tsDate = (v) => (v && typeof v.toDate === 'function' ? v.toDate() : null);
 let tab = 'service';
 let q = '';
@@ -35,7 +35,7 @@ export function mount(el, params, { setHeader }) {
       <table class="t"><thead><tr><th>Ticket</th><th>Client · site</th><th>Service</th><th>Priority</th><th>Status</th><th>Technician</th><th>Raised</th></tr></thead><tbody>
       ${tickets.map((t) => `<tr${deskUrl ? ' style="cursor:pointer" data-desk' : ''}><td class="mono"><b>${esc(t.number || t.id)}</b></td>
         <td><b>${esc(t.clientName || '')}</b><div class="small muted">${esc(t.siteName || '')}</div></td>
-        <td>${esc((Array.isArray(t.categories) && t.categories.length ? t.categories : [t.category]).map((k) => TYPES[k] || k || '').join(', '))}</td><td>${pill(...(PRIO[t.priority] || PRIO.normal))}</td>
+        <td>${esc((Array.isArray(t.categoryLabels) && t.categoryLabels.length ? t.categoryLabels : (Array.isArray(t.categories) && t.categories.length ? t.categories : [t.category]).map((k) => TYPES[k] || k || '')).join(', '))}</td><td>${pill(...(PRIO[t.priority] || PRIO.normal))}</td>
         <td>${pill(...(STAT[t.status] || [t.status, 'gray']))}</td><td>${esc(t.assignedName || '—')}</td>
         <td class="nowrap small">${tsDate(t.createdAt) ? fmtDate(tsDate(t.createdAt)) : ''}</td></tr>`).join('')
         || '<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">No open service requests.</td></tr>'}

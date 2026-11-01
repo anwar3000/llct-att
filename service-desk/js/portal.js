@@ -2,7 +2,7 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, COMPANY, icon,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
 } from './sd.js';
 
@@ -12,8 +12,15 @@ const app = $('#app');
 const TK = 'llct-sd-token';
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } };
-const urlToken = new URLSearchParams(location.search).get('c') || (location.hash.match(/c=([\w-]+)/) || [])[1] || '';
-const token = urlToken || lsGet(TK) || '';
+const QS = new URLSearchParams(location.search);
+const urlToken = QS.get('c') || (location.hash.match(/c=([\w-]+)/) || [])[1] || '';
+const trackId = QS.get('t') || '';
+// 'link': a client's private link · 'walkin': public support page (any customer) · 'track': one walk-in request
+const MODE = urlToken ? 'link' : (window.SD_MODE === 'walkin' ? (trackId ? 'track' : 'walkin') : trackId ? 'track' : (lsGet(TK) ? 'link' : 'walkin'));
+const token = MODE === 'link' ? (urlToken || lsGet(TK) || '') : '';
+const WK = 'llct-sd-walkins'; // this device's walk-in requests (tracking ids)
+const myWalkins = () => { try { return JSON.parse(lsGet(WK) || '[]'); } catch (_) { return []; } };
+const addWalkin = (pid, number) => { const l = myWalkins().filter((x) => x.pid !== pid); l.unshift({ pid, number }); lsSet(WK, JSON.stringify(l.slice(0, 20))); };
 const S = { portal: null, tickets: [], tab: 'new', form: freshForm(), photos: [], open: null, sent: null, busy: false, shots: {}, shotSub: null };
 const LS = 'llct-sd-contact';
 const STEPS = ['new', 'assigned', 'accepted', 'on_way', 'on_site', 'completed'];
@@ -22,7 +29,7 @@ const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); retur
 function freshForm() {
   let c = {};
   try { c = JSON.parse(lsGet(LS) || '{}'); } catch (_) { /* ignore */ }
-  return { siteId: '', otherName: '', otherAddress: '', gps: null, cats: [], priority: 'normal', preferredDate: dateKey(), preferredSlot: 'asap', description: '', cameras: 0, contactName: c.name || '', contactPhone: c.phone || '', contactEmail: c.email || '' };
+  return { brand: c.brand || '', store: c.store || '', area: c.area || '', siteId: '', otherName: '', otherAddress: '', gps: null, cats: [], priority: 'normal', preferredDate: dateKey(), preferredSlot: 'asap', description: '', cameras: 0, contactName: c.name || '', contactPhone: c.phone || '', contactEmail: c.email || '' };
 }
 
 function fail(title, msg) {
@@ -32,6 +39,7 @@ function fail(title, msg) {
 }
 
 async function start() {
+  if (MODE !== 'link') return startPublic();
   if (!token) return fail('Open your service link', 'Please open the full service request link you received from Leaders Line.');
   try {
     const s = await getDoc(doc(db, 'svcPortals', token));
@@ -56,6 +64,31 @@ async function start() {
   render();
 }
 
+// Walk-in customers: public form, and their requests followed through tracking ids saved on this device.
+const pubSubs = new Map();
+function startPublic() {
+  S.portal = { clientName: '', sites: [], walkin: true };
+  $('#p-client').textContent = MODE === 'track' ? 'Your service request' : 'Request a service visit';
+  $('#p-sub').textContent = MODE === 'track' ? 'Follow your request here until the work is done.' : 'For CCTV, security and network faults or maintenance. Tell us where you are and what needs attention — our team will call you to confirm.';
+  document.title = 'Service request – Leaders Line';
+  if (trackId) { addWalkin(trackId, ''); S.tab = 'list'; S.open = trackId; }
+  const watch = () => {
+    myWalkins().forEach(({ pid }) => {
+      if (pubSubs.has(pid)) return;
+      pubSubs.set(pid, onSnapshot(doc(db, 'svcPublic', pid), (d) => {
+        S.tickets = S.tickets.filter((x) => x._pid !== pid);
+        if (d.exists()) S.tickets.push({ id: pid, _pid: pid, ...d.data() });
+        S.tickets.sort((a, b) => (toDate(b.createdAt) || 0) - (toDate(a.createdAt) || 0));
+        if (S.tab === 'list' && !S.sent) render(); else renderTabs();
+      }, () => {}));
+    });
+  };
+  S.watchPublic = watch;
+  watch();
+  if (S.open) watchShots(S.open);
+  render();
+}
+
 const openCount = () => S.tickets.filter((t) => !['completed', 'closed', 'cancelled'].includes(t.status)).length;
 function tabsHtml() {
   return `<div class="tabs" id="tabs" role="tablist"><button role="tab" data-tab="new" class="${S.tab === 'new' ? 'on' : ''}">New request</button>
@@ -70,7 +103,11 @@ function render() {
   app.innerHTML = tabsHtml() + body + footHtml();
   bindTabs();
   bindInstall();
-  if (S.sent) { $('#again').onclick = () => { S.sent = null; S.tab = 'new'; render(); }; $('#see').onclick = () => { S.sent = null; S.tab = 'list'; render(); }; }
+  if (S.sent) {
+    $('#again').onclick = () => { S.sent = null; S.tab = 'new'; render(); };
+    $('#see').onclick = () => { S.open = S.sent._pid || S.sent.id; S.sent = null; S.tab = 'list'; watchShots(S.open); render(); };
+    const tc = $('#trk-c'); if (tc) tc.onclick = () => { const i = $('#trk'); (navigator.clipboard ? navigator.clipboard.writeText(i.value) : Promise.reject()).then(() => toast('Link copied'), () => { i.select(); document.execCommand('copy'); toast('Link copied'); }); };
+  }
   else if (S.tab === 'list') bindList();
   else bindForm();
 }
@@ -106,17 +143,24 @@ function formHtml() {
       <span class="ot">${esc(name)}</span>${sub ? `<span class="os">${esc(sub)}</span>` : ''}${gps ? '<span class="og" title="Location saved">Location saved</span>' : ''}</button>`;
   const asap = f.preferredSlot === 'asap';
   const dateSel = asap ? 'asap' : f.preferredDate === dateKey() ? 'today' : f.preferredDate === tomorrow() ? 'tomorrow' : 'pick';
-  return `<form id="f" novalidate><div class="sheet">
-  <div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">Which of your sites needs the visit?</p>
+  const step1 = S.portal.walkin ? `<div class="step"><span class="sn">1</span><div class="sb"><h2>Your business</h2><p class="hint">Who and where is the visit for?</p>
+    <div class="grid2"><label class="field"><span>Brand or company name <b>*</b></span><input id="f-brand" autocomplete="organization" value="${esc(f.brand)}" placeholder="e.g. Al Noor Pharmacy"></label>
+      <label class="field"><span>Store or location <b>*</b></span><input id="f-store" value="${esc(f.store)}" placeholder="e.g. Dubai Mall branch"></label></div>
+    <label class="field" style="margin-top:12px"><span>Address or area</span><input id="f-area" autocomplete="street-address" value="${esc(f.area)}" placeholder="Building, street, area, emirate"></label>
+    <div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Helps the technician find you — only if you are at the store now.'}</span></div>
+  </div></div>` : '';
+  const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">Which of your sites needs the visit?</p>
     ${asCards ? `<div class="opts" role="radiogroup">${sites.map((s) => siteCard(s.id, s.name, String(s.address || '').split('\n')[0], hasGPS(s))).join('')}${siteCard('_other', 'Another location', 'Not in this list', false)}</div>`
       : `<select id="f-site" aria-label="Site"><option value="">Choose the site…</option>${sites.map((s) => `<option value="${esc(s.id)}" ${f.siteId === s.id ? 'selected' : ''}>${esc(s.name)}${s.address ? ' — ' + esc(String(s.address).split('\n')[0]) : ''}</option>`).join('')}<option value="_other" ${other ? 'selected' : ''}>Another location (not in the list)</option></select>`}
     ${other ? `<div class="stack" style="margin-top:12px"><label class="field"><span>Location name <b>*</b></span><input id="f-oname" value="${esc(f.otherName)}" placeholder="e.g. Warehouse 3, Al Quoz"></label>
       <label class="field"><span>Address or landmark</span><input id="f-oaddr" value="${esc(f.otherAddress)}" placeholder="Building, street, area"></label>
       <div class="row"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Only if you are at the site now.'}</span></div></div>` : ''}
-  </div></div>
+  </div></div>`;
+  return `<form id="f" novalidate><div class="sheet">
+  ${step1}${S.portal.walkin ? '' : siteStep}
 
   <div class="step"><span class="sn">2</span><div class="sb"><h2>What needs attention</h2><p class="hint">Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}</p>
-    <div class="ctiles">${SERVICE_TYPES.map((t) => `<button type="button" class="ctile ${f.cats.includes(t.k) ? 'on' : ''}" data-cat="${t.k}" aria-pressed="${f.cats.includes(t.k)}">${icon(t.k, 26)}<span>${esc(t.t)}</span><i class="ck" aria-hidden="true"></i></button>`).join('')}</div>
+    <div class="ctiles">${activeTypes().map((t) => `<button type="button" class="ctile ${f.cats.includes(t.k) ? 'on' : ''}" data-cat="${t.k}" aria-pressed="${f.cats.includes(t.k)}">${icon(t.i || t.k, 26)}<span>${esc(t.t)}</span><i class="ck" aria-hidden="true"></i></button>`).join('')}</div>
     <label class="field" style="margin-top:16px"><span>Tell us more <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. Camera 4 at the main gate shows no picture since yesterday evening.">${esc(f.description)}</textarea></label>
     <div class="row" style="margin-top:14px;gap:16px;align-items:flex-start">
       <div class="field"><span>Cameras or devices affected</span><div class="stepper"><button type="button" data-cam="-1" aria-label="Fewer">−</button><output id="f-cams">${f.cameras || '–'}</output><button type="button" data-cam="1" aria-label="More">+</button></div></div>
@@ -129,14 +173,19 @@ function formHtml() {
     <div class="prios" role="radiogroup">${PRIORITIES.map((p) => `<button type="button" class="prio ${f.priority === p.k ? 'on' : ''}" data-prio="${p.k}" role="radio" aria-checked="${f.priority === p.k}" style="--pc:${p.c}"><span class="pd"></span><b>${p.t}</b><small>${esc(p.s)}</small></button>`).join('')}</div>
   </div></div>
 
-  <div class="step"><span class="sn">4</span><div class="sb"><h2>Preferred visit</h2><p class="hint">We confirm the exact time when a technician is assigned. Pick a day only if you need a particular one.</p>
+  <div class="step"><span class="sn">4</span><div class="sb"><h2>Preferred visit</h2><p class="hint">We confirm the visit time when a technician is assigned. Pick a day, and a time, only if you need a particular one.</p>
     <div class="chips" role="radiogroup" aria-label="When">
       <button type="button" class="pchip ${dateSel === 'asap' ? 'on' : ''}" data-day="asap">As soon as possible</button>
       <button type="button" class="pchip ${dateSel === 'today' ? 'on' : ''}" data-day="today">Today</button>
       <button type="button" class="pchip ${dateSel === 'tomorrow' ? 'on' : ''}" data-day="tomorrow">Tomorrow</button>
       <label class="pchip ${dateSel === 'pick' ? 'on' : ''}">${dateSel === 'pick' ? esc(fmtDate(f.preferredDate)) : 'Pick a date'}<input type="date" id="f-date" min="${dateKey()}" value="${esc(f.preferredDate)}"></label>
     </div>
-    ${asap ? '' : `<div class="chips" role="radiogroup" aria-label="Time" style="margin-top:10px">${SLOTS.filter((s) => s.k !== 'asap').map((s) => `<button type="button" class="pchip ${f.preferredSlot === s.k ? 'on' : ''}" data-slot="${s.k}">${esc(s.t)}</button>`).join('')}</div>`}
+    ${asap ? '' : `<div class="chips" role="radiogroup" aria-label="Time" style="margin-top:10px">${SLOTS.filter((s) => s.k !== 'asap').map((s) => `<button type="button" class="pchip ${f.preferredSlot === s.k ? 'on' : ''}" data-slot="${s.k}">${esc(s.t)}</button>`).join('')}
+      <button type="button" class="pchip ${f.preferredSlot === 'exact' ? 'on' : ''}" data-slot="exact">Exact time</button></div>
+      ${f.preferredSlot === 'exact' ? (() => { const [hh, mm] = (f.preferredTime || '10:00').split(':'); return `<div class="row" style="margin-top:10px;gap:6px" aria-label="Exact time, 24-hour">
+        <select id="f-hh" style="width:auto" aria-label="Hour">${Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((h) => `<option ${h === hh ? 'selected' : ''}>${h}</option>`).join('')}</select>
+        <b>:</b><select id="f-mm" style="width:auto" aria-label="Minutes">${['00', '15', '30', '45'].map((m) => `<option ${m === mm ? 'selected' : ''}>${m}</option>`).join('')}</select>
+        <span class="small muted">24-hour time</span></div>`; })() : ''}`}
   </div></div>
 
   <div class="step"><span class="sn">5</span><div class="sb"><h2>Contact at site</h2><p class="hint">Who should the technician ask for?</p>
@@ -157,6 +206,7 @@ function readForm() {
   if ($('#f-site')) f.siteId = $('#f-site').value || f.siteId;
   set('description', '#f-desc'); set('contactName', '#f-cname'); set('contactPhone', '#f-cphone'); set('contactEmail', '#f-cemail');
   set('otherName', '#f-oname'); set('otherAddress', '#f-oaddr');
+  set('brand', '#f-brand'); set('store', '#f-store'); set('area', '#f-area');
 }
 
 function bindForm() {
@@ -179,7 +229,9 @@ function bindForm() {
     redraw();
   }));
   const di = $('#f-date'); if (di) di.onchange = () => { if (di.value) { f.preferredDate = di.value; if (f.preferredSlot === 'asap') f.preferredSlot = 'any'; redraw(); } };
-  $$('[data-slot]').forEach((b) => (b.onclick = () => { f.preferredSlot = b.dataset.slot; $$('[data-slot]').forEach((x) => x.classList.toggle('on', x === b)); }));
+  $$('[data-slot]').forEach((b) => (b.onclick = () => { f.preferredSlot = b.dataset.slot; f.preferredTime = b.dataset.slot === 'exact' ? (f.preferredTime || '10:00') : ''; redraw(); }));
+  const setTime = () => { f.preferredTime = `${$('#f-hh').value}:${$('#f-mm').value}`; };
+  if ($('#f-hh')) { $('#f-hh').onchange = setTime; $('#f-mm').onchange = setTime; }
   $$('[data-rmph]').forEach((b) => (b.onclick = () => { S.photos.splice(+b.dataset.rmph, 1); redraw(); }));
   const ph = $('#f-ph');
   if (ph) ph.onchange = async () => {
@@ -203,25 +255,31 @@ async function submit() {
   const f = S.form, sites = S.portal.sites || [];
   const site = sites.find((s) => s.id === f.siteId);
   const other = f.siteId === '_other';
+  const walk = !!S.portal.walkin;
   const miss = [];
-  if (!site && !(other && f.otherName)) miss.push('site');
+  if (walk) { if (!f.brand) miss.push('brand or company name'); if (!f.store) miss.push('store or location'); }
+  else if (!site && !(other && f.otherName)) miss.push('site');
   if (!f.cats.length) miss.push('what needs attention');
   if (f.description.length < 4) miss.push('a short description');
   if (!f.contactName) miss.push('contact name');
   if (f.contactPhone.replace(/\D/g, '').length < 7) miss.push('mobile number');
   if (miss.length) return toast('Please add: ' + miss.join(', '), true);
-  lsSet(LS, JSON.stringify({ name: f.contactName, phone: f.contactPhone, email: f.contactEmail }));
+  lsSet(LS, JSON.stringify({ name: f.contactName, phone: f.contactPhone, email: f.contactEmail, brand: f.brand, store: f.store, area: f.area }));
 
-  const t = {
+  const pid = walk ? randToken(24) : '';
+  const t = walk ? { publicId: pid, clientId: '', clientName: f.brand, brand: f.brand, siteName: f.store, siteAddress: f.area } : {
     portal: token, clientId: S.portal.clientId || '', clientName: S.portal.clientName || '',
     siteId: site ? site.id : '', siteName: site ? site.name : f.otherName,
     siteAddress: site ? (site.address || '') : f.otherAddress,
-    contactName: f.contactName, contactPhone: f.contactPhone,
-    category: f.cats[0], categories: f.cats.slice(), description: f.description, priority: f.priority,
-    preferredDate: f.preferredDate || dateKey(), preferredSlot: f.preferredSlot,
-    status: 'new', open: true, source: 'portal',
   };
-  const gps = site && hasGPS(site) ? site : other && f.gps ? f.gps : null;
+  Object.assign(t, {
+    contactName: f.contactName, contactPhone: f.contactPhone,
+    category: f.cats[0], categories: f.cats.slice(), categoryLabels: f.cats.map(typeLabel), description: f.description, priority: f.priority,
+    preferredDate: f.preferredDate || dateKey(), preferredSlot: f.preferredSlot,
+    status: 'new', open: true, source: walk ? 'walkin' : 'portal',
+  });
+  if (f.preferredSlot === 'exact' && f.preferredTime) t.preferredTime = f.preferredTime;
+  const gps = site && hasGPS(site) ? site : (other || walk) && f.gps ? f.gps : null;
   if (gps) { t.lat = +gps.lat; t.lng = +gps.lng; }
   if (f.contactEmail) t.contactEmail = f.contactEmail;
   if (f.cameras > 0) t.cameras = f.cameras;
@@ -233,7 +291,7 @@ async function submit() {
     const id = newTicketNo();
     const data = { ...t };
     if (!withCats) { // older rules without the 'categories' field: keep the extra choices in the description
-      delete data.categories;
+      delete data.categories; delete data.categoryLabels; delete data.preferredTime;
       if (t.categories.length > 1) data.description = `${t.description}\nAlso: ${t.categories.slice(1).map(typeLabel).join(', ')}`;
     }
     const full = { ...data, number: id, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
@@ -243,9 +301,11 @@ async function submit() {
     try {
       const b = writeBatch(db);
       b.set(doc(db, 'svcTickets', id), full);
-      b.set(doc(db, 'svcPortals', token, 'tickets', id), pub);
+      if (walk) b.set(doc(db, 'svcPublic', pid), { ...pub, number: id, clientName: f.brand });
+      else b.set(doc(db, 'svcPortals', token, 'tickets', id), pub);
       await b.commit();
-      S.busy = false; S.sent = { ...full, id }; S.form = freshForm(); S.photos = [];
+      if (walk) { addWalkin(pid, id); if (S.watchPublic) S.watchPublic(); }
+      S.busy = false; S.sent = { ...full, id, _pid: pid }; S.form = freshForm(); S.photos = [];
       render(); window.scrollTo(0, 0);
       return;
     } catch (e) {
@@ -263,6 +323,8 @@ function sentHtml() {
   return `<div class="card done-box"><img src="img/shield-256.png" alt="" style="width:64px"><h2>Request received</h2>
     <div class="tno">${esc(t.number)}</div>
     <p>Thank you, ${esc(t.contactName)}. Your request for ${esc(t.siteName)} is with our technical team. We will assign a technician and confirm the visit time here and by phone.</p>
+    ${t._pid ? (() => { const u = `${location.origin}${location.pathname}?t=${t._pid}`; return `<div class="trackbox"><b>Your tracking link</b><p class="small muted" style="margin:4px 0 8px">Save it to follow this request from any phone. It is also remembered on this device.</p>
+      <div class="linkbox"><input readonly value="${esc(u)}" id="trk"><button class="btn sm" type="button" id="trk-c">Copy</button><a class="btn sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('My Leaders Line service request ' + t.number + ': ' + u)}">WhatsApp</a></div></div>`; })() : ''}
     <div class="row" style="justify-content:center"><button class="btn" id="again">Raise another request</button><button class="btn primary" id="see">Follow my requests</button></div></div>`;
 }
 
@@ -280,7 +342,7 @@ function reportHtml(r) {
 }
 
 function listHtml() {
-  if (!S.tickets.length) return '<div class="card empty">No service requests yet. Use New request to report a fault or book a visit.</div>';
+  if (!S.tickets.length) return `<div class="card empty">${S.portal.walkin ? 'Requests you send from this phone appear here. You can also open the tracking link you received.' : 'No service requests yet. Use New request to report a fault or book a visit.'}</div>`;
   return `<div class="card tklist">${S.tickets.map((t) => {
     const s = st(t.status), p = prio(t.priority), i = STEPS.indexOf(t.status), open = S.open === t.id;
     const shots = S.shots[t.id] || [];
@@ -292,7 +354,7 @@ function listHtml() {
       <div class="msg">${esc(clientMessage(t))}</div>
       ${open ? `<div class="tkd">
         <p class="muted" style="white-space:pre-line">${esc(t.description)}</p>
-        <div class="small">Raised ${esc(fmtDT(t.createdAt))}${t.preferredDate ? ` · preferred ${esc(fmtDate(t.preferredDate))}, ${esc((slotLabel(t.preferredSlot) || '').split(' (')[0].toLowerCase())}` : ''}</div>
+        <div class="small">Raised ${esc(fmtDT(t.createdAt))}· preferred ${esc(prefText(t))}</div>
         ${t.assignedName ? `<div class="small">Technician <b>${esc(t.assignedName)}</b>${t.scheduledAt ? `, visit ${esc(fmtDT(t.scheduledAt))}` : ''}</div>` : ''}
         ${shots.length ? `<h4>Photos from our technician</h4><div class="thumbs">${shots.map((ph) => `<img src="${ph.data}" alt="${esc(ph.caption || 'Photo')}" data-zoom>`).join('')}</div>` : ''}
         ${reportHtml(t.report)}
@@ -305,7 +367,9 @@ function listHtml() {
 function watchShots(id) {
   if (S.shotSub) { S.shotSub(); S.shotSub = null; }
   if (!id) return;
-  S.shotSub = onSnapshot(query(collection(db, 'svcPortals', token, 'tickets', id, 'photos'), orderBy('at', 'asc'), limit(30)), (q) => {
+  const tk = S.tickets.find((x) => x.id === id);
+  const col = (tk && tk._pid) || MODE !== 'link' ? collection(db, 'svcPublic', id, 'photos') : collection(db, 'svcPortals', token, 'tickets', id, 'photos');
+  S.shotSub = onSnapshot(query(col, orderBy('at', 'asc'), limit(30)), (q) => {
     S.shots[id] = q.docs.map((d) => ({ id: d.id, ...d.data() }));
     if (S.tab === 'list' && S.open === id) render();
   }, () => { /* rules not published yet */ });
@@ -319,7 +383,7 @@ function printReport(t) {
     .hd{display:flex;gap:14px;align-items:center;border-bottom:3px solid #1C47AE;padding-bottom:12px;margin-bottom:12px}.hd img{width:60px}table{width:100%;border-collapse:collapse}td{padding:4px 0;vertical-align:top}</style></head><body>
     <div class="hd"><img src="${new URL('img/shield-256.png', location.href).href}" alt=""><div><b>LEADERS LINE TRADING LLC</b><br><span>${esc(COMPANY.phone)} · ${esc(COMPANY.email)}</span></div></div>
     <h1>${esc(r.kind || 'Service report')} ${esc(r.number || '')}</h1>
-    <table><tr><td>Client</td><td><b>${esc(S.portal.clientName || '')}</b></td></tr><tr><td>Site</td><td>${esc(t.siteName || '')}</td></tr>
+    <table><tr><td>Client</td><td><b>${esc(t.clientName || S.portal.clientName || '')}</b></td></tr><tr><td>Site</td><td>${esc(t.siteName || '')}</td></tr>
     <tr><td>Date</td><td>${esc(fmtDate(r.date))}</td></tr><tr><td>Request</td><td>${esc(t.number || '')}</td></tr>${r.technician ? `<tr><td>Technician</td><td>${esc(r.technician)}</td></tr>` : ''}</table>
     ${reportHtml(r).replace(/<button[^>]*>.*?<\/button>/, '')}
     <script>setTimeout(function(){print()},400)<\/script></body></html>`);
@@ -339,4 +403,4 @@ function bindList() {
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-start();
+loadTypes().finally(start);

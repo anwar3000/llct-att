@@ -62,6 +62,9 @@ const svcTypes = {
   'power': 'Power, cable or PoE issue',
   'network': 'Network / Wi-Fi / internet',
   'access': 'Access control / door / intercom',
+  'o2device': 'Oxygen O2 device not working',
+  'o2switch': 'O2IOT switching issue',
+  'o2connect': 'O2IOT device not connecting',
   'ppm': 'Preventive maintenance (AMC visit)',
   'install': 'New camera / relocation',
   'other': 'Other',
@@ -73,13 +76,18 @@ const svcSlots = {
   'morning': 'Morning (8 am – 12 pm)',
   'afternoon': 'Afternoon (12 – 4 pm)',
   'evening': 'Evening (4 – 8 pm)',
-  'any': 'Any time that day',
+  'night': 'Night (10 pm – 1 am)',
+  'latenight': 'Late night (1 – 5 am)',
+  'any': 'Any time',
+  'exact': 'Exact time',
 };
 
 class ServiceTicket {
   final String id;
   final String number;
   final String portal;
+  /// Walk-in request from the public support page: its tracking page is svcPublic/{publicId}.
+  final String publicId;
   final String clientId;
   final String clientName;
   final String siteName;
@@ -90,10 +98,12 @@ class ServiceTicket {
   final String contactPhone;
   final String category;
   final List<String> categories;
+  final List<String> categoryLabels;
   final String description;
   final String priority;
   final String preferredDate;
   final String preferredSlot;
+  final String preferredTime;
   final String status;
   final bool open;
   final String assignedTo;
@@ -114,6 +124,7 @@ class ServiceTicket {
     required this.id,
     required this.number,
     required this.portal,
+    this.publicId = '',
     required this.clientId,
     required this.clientName,
     required this.siteName,
@@ -124,10 +135,12 @@ class ServiceTicket {
     required this.contactPhone,
     required this.category,
     this.categories = const [],
+    this.categoryLabels = const [],
     required this.description,
     required this.priority,
     required this.preferredDate,
     required this.preferredSlot,
+    this.preferredTime = '',
     required this.status,
     required this.open,
     required this.assignedTo,
@@ -152,6 +165,7 @@ class ServiceTicket {
       id: d.id,
       number: _s(m['number']).isEmpty ? d.id : _s(m['number']),
       portal: _s(m['portal']),
+      publicId: _s(m['publicId']),
       clientId: _s(m['clientId']),
       clientName: _s(m['clientName']),
       siteName: _s(m['siteName']),
@@ -162,10 +176,12 @@ class ServiceTicket {
       contactPhone: _s(m['contactPhone']),
       category: _s(m['category']),
       categories: (m['categories'] is List) ? (m['categories'] as List).whereType<String>().toList() : const [],
+      categoryLabels: (m['categoryLabels'] is List) ? (m['categoryLabels'] as List).whereType<String>().toList() : const [],
       description: _s(m['description']),
       priority: _s(m['priority']).isEmpty ? 'normal' : _s(m['priority']),
       preferredDate: _s(m['preferredDate']),
       preferredSlot: _s(m['preferredSlot']),
+      preferredTime: _s(m['preferredTime']),
       status: _s(m['status']).isEmpty ? 'new' : _s(m['status']),
       open: m['open'] == true,
       assignedTo: _s(m['assignedTo']),
@@ -192,7 +208,15 @@ class ServiceTicket {
   SvcPriority get prio => svcPriority(priority);
   SvcStatus get stat => svcStatus(status);
   /// All selected service types (clients can choose several).
-  String get typeLabel => (categories.isNotEmpty ? categories : [category]).map(svcTypeLabel).join(', ');
+  String get typeLabel => categoryLabels.isNotEmpty
+      ? categoryLabels.join(', ')
+      : (categories.isNotEmpty ? categories : [category]).map(svcTypeLabel).join(', ');
+  bool get walkIn => source == 'walkin';
+  /// The customer can see this ticket (client link or walk-in tracking page).
+  bool get hasClientPage => portal.isNotEmpty || publicId.isNotEmpty;
+  DocumentReference<Map<String, dynamic>>? get clientView => portal.isNotEmpty
+      ? FirebaseFirestore.instance.collection('svcPortals').doc(portal).collection('tickets').doc(id)
+      : (publicId.isNotEmpty ? FirebaseFirestore.instance.collection('svcPublic').doc(publicId) : null);
   /// Short line for lists: types, then the start of the description.
   String get shortText {
     final d = description.replaceAll('\n', ' ').trim();
@@ -201,8 +225,10 @@ class ServiceTicket {
   /// The visit time the client asked for (never in the past).
   DateTime get preferredDateTime {
     final d = DateTime.tryParse(preferredDate) ?? DateTime.now();
-    final h = {'morning': 9, 'afternoon': 13, 'evening': 17}[preferredSlot] ?? 9;
-    final want = DateTime(d.year, d.month, d.day, h);
+    final hm = preferredTime.split(':');
+    final exact = preferredSlot == 'exact' && hm.length == 2;
+    final h = exact ? (int.tryParse(hm[0]) ?? 9) : ({'morning': 9, 'afternoon': 13, 'evening': 17, 'night': 22, 'latenight': 1}[preferredSlot] ?? 9);
+    final want = DateTime(d.year, d.month, d.day + (preferredSlot == 'latenight' ? 1 : 0), h, exact ? (int.tryParse(hm[1]) ?? 0) : 0);
     final soon = DateTime.now().add(const Duration(hours: 2));
     return soon.isAfter(want) ? DateTime(soon.year, soon.month, soon.day, soon.hour) : want;
   }
@@ -277,7 +303,8 @@ class ServiceDesk {
         {'at': at, 'by': me.id, 'byName': me.name, 't': logText}
       ]),
     });
-    if (t.portal.isNotEmpty) {
+    final view = t.clientView;
+    if (view != null) {
       final assignedTo = changes.containsKey('assignedTo') ? (changes['assignedTo'] as String? ?? '') : t.assignedTo;
       final assignedName = changes.containsKey('assignedName') ? (changes['assignedName'] as String? ?? '') : t.assignedName;
       final sched = changes.containsKey('scheduledAt') ? changes['scheduledAt'] : (t.scheduledAt == null ? null : Timestamp.fromDate(t.scheduledAt!));
@@ -295,7 +322,7 @@ class ServiceDesk {
           {'at': at, 't': clientText}
         ]);
       }
-      b.set(_fs.collection('svcPortals').doc(t.portal).collection('tickets').doc(t.id), pub, SetOptions(merge: true));
+      b.set(view, pub, SetOptions(merge: true));
     }
     await b.commit();
   }
@@ -383,7 +410,8 @@ class ServiceDesk {
 
   /// Photos of the work for the client's request page (svcPortals/{token}/tickets/{id}/photos).
   static Future<int> postPhotos(ServiceTicket t, AppUser me, {required bool camera}) async {
-    if (t.portal.isEmpty) throw Exception('This request was not raised from a client link.');
+    final view = t.clientView;
+    if (view == null) throw Exception('This request has no client page.');
     final picker = ImagePicker();
     final files = <XFile>[];
     if (camera) {
@@ -393,7 +421,7 @@ class ServiceDesk {
       files.addAll(await picker.pickMultiImage(maxWidth: 1280, maxHeight: 1280, imageQuality: 60, limit: 6));
     }
     if (files.isEmpty) return 0;
-    final col = _fs.collection('svcPortals').doc(t.portal).collection('tickets').doc(t.id).collection('photos');
+    final col = view.collection('photos');
     final at = Timestamp.now();
     var n = 0;
     for (final f in files.take(6)) {

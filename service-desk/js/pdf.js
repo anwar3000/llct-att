@@ -1,6 +1,6 @@
 // PDF reports for the staff desk: a branded print page the browser saves as PDF
 // (Print → Save as PDF). No server software or PDF library needed.
-import { esc, fmtDate, fmtDT, prio, st, typesText, slotLabel, COMPANY, toDate, clientMessage } from './sd.js';
+import { esc, fmtDate, fmtDT, prio, st, typesText, slotLabel, COMPANY, toDate, clientMessage, prefText } from './sd.js';
 
 // The logo is embedded in the PDF page (data URL), so it always prints.
 let logoData = '';
@@ -135,7 +135,7 @@ export function ticketPdf(t, { report = null, photos = [] } = {}) {
         <span>Priority</span><span>${pill({ t: p.t, c: p.c })}</span>
         <span>Status</span><span>${pill(s)}</span>
         <span>Raised</span><span>${esc(fmtDT(t.createdAt))}</span>
-        <span>Preferred</span><span>${esc(fmtDate(t.preferredDate))}, ${esc((slotLabel(t.preferredSlot) || '').toLowerCase())}</span>
+        <span>Preferred</span><span>${esc(prefText(t))}</span>
         <span>Technician</span><span>${esc(t.assignedName || 'Not assigned')}</span>
         <span>Visit</span><span>${esc(t.scheduledAt ? fmtDT(t.scheduledAt) : '—')}</span>
       </div></div>
