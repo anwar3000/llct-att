@@ -663,31 +663,38 @@ class _HomeTabState extends State<HomeTab> {
     });
   }
 
-  Future<void> _openReport(AttendanceSession open, String kind) async {
-    // Built into the app now (same inv_docs as LLCT Invoicing).
-    await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ReportEditor(me: widget.me, kind: kind == 'service' ? kindService : kindDelivery, session: open)));
+  Future<void> _openReport(AttendanceSession? open) async {
+    // One document for every report — the type (service / call-out / delivery) is picked inside it.
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportEditor(me: widget.me, kind: kindService, session: open)));
   }
 
-  Widget _reportCard(AttendanceSession open) {
-    final done = _reportsToday > 0;
-    final color = done ? AppColors.success : AppColors.warning;
+  /// Shown with or without check-in, so reports can be prepared before going to site.
+  Widget _reportCard(AttendanceSession? open) {
+    final done = open != null && _reportsToday > 0;
+    final color = done ? AppColors.success : (open != null ? AppColors.warning : AppColors.primary);
+    final bg = done ? const Color(0xFFE6F4EC) : (open != null ? const Color(0xFFFFF4E2) : const Color(0xFFEFF4FB));
+    final title = done
+        ? 'Report done · $_reportsToday today'
+        : open != null
+            ? 'Report for ${open.siteName}'
+            : 'Service / delivery report';
+    final sub = open != null ? null : 'Prepare it before you go — copy from an old report';
+    final btn = const TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
     return Card(
       margin: EdgeInsets.zero,
-      color: done ? const Color(0xFFE6F4EC) : const Color(0xFFFFF4E2),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: color.withValues(alpha: 0.5))),
+      color: bg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: color.withValues(alpha: 0.45))),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            Icon(done ? Icons.task_alt : Icons.assignment_late_outlined, color: color, size: 20),
+            Icon(done ? Icons.task_alt : (open != null ? Icons.assignment_late_outlined : Icons.description_outlined), color: color, size: 20),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                  done ? 'Report done · $_reportsToday today' : 'Service report for ${open.siteName}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                if (sub != null) Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+              ]),
             ),
           ]),
           const SizedBox(height: 8),
@@ -698,34 +705,22 @@ class _HomeTabState extends State<HomeTab> {
                     backgroundColor: done ? AppColors.success : AppColors.primary,
                     minimumSize: const Size(0, 38),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                onPressed: () => _openReport(open, 'service'),
-                icon: const Icon(Icons.build_circle_outlined, size: 18),
-                label: const Text('Service report'),
+                    textStyle: btn),
+                onPressed: () => _openReport(open),
+                icon: const Icon(Icons.note_add_outlined, size: 18),
+                label: const Text('New report'),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 38),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                onPressed: () => _openReport(open, 'delivery'),
-                icon: const Icon(Icons.local_shipping_outlined, size: 18),
-                label: const Text('Delivery note'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38), padding: const EdgeInsets.symmetric(horizontal: 8), textStyle: btn),
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportsScreen(me: widget.me, session: open))),
+                icon: const Icon(Icons.history, size: 18),
+                label: const Text('Old reports'),
               ),
             ),
           ]),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportsScreen(me: widget.me, session: open))),
-              icon: const Icon(Icons.folder_open_outlined, size: 16),
-              label: const Text('All reports', style: TextStyle(fontSize: 12.5)),
-            ),
-          ),
         ]),
       ),
     );
@@ -767,7 +762,7 @@ class _HomeTabState extends State<HomeTab> {
             open != null || _myWorkers.isNotEmpty ? _workersCard(open) : _workersHint(),
             const SizedBox(height: 12),
             _quickActions(open),
-            if (open != null && _canReport) ...[
+            if (_canReport) ...[
               const SizedBox(height: 10),
               _reportCard(open),
             ],

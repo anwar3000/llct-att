@@ -299,6 +299,34 @@ class InvReports {
     };
   }
 
+  /// Fields that belong to one particular report and are never copied to a new one.
+  static const _noCopy = {
+    'number', 'date', 'createdAt', 'updatedAt', 'updatedBy', 'createdBy', 'createdByName', 'delivery', 'attachments',
+    'ticketId', 'ticketNo', 'attSessionId', 'attSiteId', 'attSiteName', 'gps', 'status', 'type', 'reportType',
+    'invoiceId', 'invoiceNo', 'signedAt', 'sentAt', 'emailedAt',
+  };
+
+  /// Copies the content of an old report (client, site, subject, complaint, work done, items, notes…)
+  /// into [d], a new draft — the new draft keeps its own number, date, type and links.
+  static void copyInto(Map<String, dynamic> d, InvReport from, ReportKind k) {
+    dynamic deep(dynamic v) => v is Map
+        ? {for (final e in v.entries) '${e.key}': deep(e.value)}
+        : v is List
+            ? [for (final x in v) deep(x)]
+            : v;
+    from.m.forEach((key, v) {
+      if (_noCopy.contains(key)) return;
+      d[key] = deep(v);
+    });
+    final items = ((d['items'] as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    for (final i in items) {
+      if (!k.statuses.contains(i['status'])) i['status'] = k.statuses.first;
+    }
+    d['items'] = items.isEmpty && !k.isService ? [newItem(k)] : items;
+    d['attachments'] = <Map<String, dynamic>>[];
+    d['copiedFrom'] = from.number;
+  }
+
   static Map<String, dynamic> newItem(ReportKind k) =>
       {'name': '', 'desc': '', 'qty': 1, 'unit': 'pcs', 'price': 0, 'photo': '', 'status': k.statuses.first, 'serials': <String>[]};
 

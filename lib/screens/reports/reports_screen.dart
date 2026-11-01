@@ -31,26 +31,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
+  /// One document for every report: the type is chosen in the dropdown inside it.
   Future<void> _new() async {
-    final k = await showModalBottomSheet<ReportKind>(
-      context: context,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final k in reportKinds)
-            ListTile(
-              leading: Icon(k == kindDelivery ? Icons.local_shipping_outlined : (k == kindService ? Icons.build_circle_outlined : Icons.support_agent)),
-              title: Text(k.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(k == kindDelivery
-                  ? 'Goods delivered, serials, receiver signature'
-                  : (k == kindService ? 'Technician visit, work done, customer sign-off' : 'Call-out attended, customer sign-off')),
-              onTap: () => Navigator.pop(c, k),
-            ),
-          const SizedBox(height: 8),
-        ]),
-      ),
-    );
-    if (k == null || !mounted) return;
+    const k = kindService;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportEditor(me: widget.me, kind: k, session: widget.session)));
   }
 

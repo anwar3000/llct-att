@@ -86,8 +86,15 @@ class _ReportViewState extends State<ReportView> {
               PopupMenuButton<String>(
                 onSelected: (v) {
                   if (v == 'inv') _openInvoicing(r);
+                  if (v == 'copy') {
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportEditor(me: widget.me, kind: k, copyFrom: r)));
+                  }
                 },
-                itemBuilder: (_) => const [PopupMenuItem(value: 'inv', child: Text('Open in LLCT Invoicing'))],
+                itemBuilder: (_) => [
+                  if (acc != null && acc.makes)
+                    const PopupMenuItem(value: 'copy', child: ListTile(leading: Icon(Icons.content_copy), title: Text('Copy as new report'))),
+                  const PopupMenuItem(value: 'inv', child: Text('Open in LLCT Invoicing')),
+                ],
               ),
             ],
           ),

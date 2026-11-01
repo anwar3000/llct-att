@@ -20,7 +20,9 @@ class ReportEditor extends StatefulWidget {
   final InvReport? existing;
   final AttendanceSession? session;
   final ServiceTicket? ticket;
-  const ReportEditor({super.key, required this.me, required this.kind, this.existing, this.session, this.ticket});
+  /// Start the new report as a copy of this old one (content only — new number, date and signature).
+  final InvReport? copyFrom;
+  const ReportEditor({super.key, required this.me, required this.kind, this.existing, this.session, this.ticket, this.copyFrom});
 
   @override
   State<ReportEditor> createState() => _ReportEditorState();
@@ -54,6 +56,7 @@ class _ReportEditorState extends State<ReportEditor> {
     final d = widget.existing != null ? Map<String, dynamic>.from(widget.existing!.m) : InvReports.newDraft(widget.kind, cfg, widget.me);
     d['items'] = ((d['items'] as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     d['attachments'] = ((d['attachments'] as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    if (_isNew && widget.copyFrom != null) InvReports.copyInto(d, widget.copyFrom!, widget.kind);
     final s = widget.session;
     if (_isNew && s != null) {
       d['attSiteId'] = s.siteId;
@@ -187,6 +190,35 @@ class _ReportEditorState extends State<ReportEditor> {
         });
       }
     }
+  }
+
+  /// Pick an old report and copy its content (client, site, subject, complaint, work done, items, notes) into this one.
+  Future<void> _copyFromOld() async {
+    final acc = await InvAccess.load(widget.me);
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<InvReport>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (c) => _OldReportPicker(me: widget.me, acc: acc),
+    );
+    if (picked == null || !mounted) return;
+    final d = _d!;
+    setState(() {
+      // same type as the old one, unless the user changes it again
+      final k = picked.kind;
+      if (k.isService) {
+        d['reportType'] = k.key;
+      } else {
+        d.remove('reportType');
+      }
+      d['number'] = InvReports.suggestNumber(k, _cfg!, '${d['date']}');
+      final keep = {for (final key in ['attSiteId', 'attSessionId', 'attSiteName', 'ticketId', 'ticketNo']) if (d[key] != null) key: d[key]};
+      InvReports.copyInto(d, picked, k);
+      d.addAll(keep);
+      _gen++;
+    });
+    showSnack(context, 'Copied from ${picked.number} — check and change what is different, then Save.');
   }
 
   void _changeKind(ReportKind k) {
@@ -327,12 +359,35 @@ class _ReportEditorState extends State<ReportEditor> {
         ],
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(14, 12, 14, 40), children: [
-        if (_isNew)
-          SegmentedButton<String>(
-            segments: reportKinds.map((x) => ButtonSegment(value: x.key, label: Text(x.short == 'CO' ? 'Call-out' : x.short == 'SR' ? 'Service' : 'Delivery'))).toList(),
-            selected: {k.key},
-            onSelectionChanged: (v) => _changeKind(kindOf(v.first)),
+        if (_isNew) ...[
+          // One document for every report — pick the type here.
+          DropdownButtonFormField<String>(
+            value: k.key,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Report type', prefixIcon: Icon(Icons.description_outlined)),
+            items: [
+              for (final x in reportKinds)
+                DropdownMenuItem(
+                    value: x.key,
+                    child: Row(children: [
+                      Icon(x == kindDelivery ? Icons.local_shipping_outlined : (x == kindService ? Icons.build_circle_outlined : Icons.support_agent),
+                          size: 18, color: AppColors.muted),
+                      const SizedBox(width: 8),
+                      Text(x.title),
+                    ])),
+            ],
+            onChanged: (v) {
+              if (v != null && v != k.key) _changeKind(kindOf(v));
+            },
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+            onPressed: _copyFromOld,
+            icon: const Icon(Icons.content_copy, size: 18),
+            label: Text(d['copiedFrom'] != null ? 'Copied from ${d['copiedFrom']} — copy another' : 'Copy from an old report'),
+          ),
+        ],
         if (d['ticketNo'] != null && '${d['ticketNo']}'.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 10),
@@ -499,6 +554,74 @@ class _ReportEditorState extends State<ReportEditor> {
           onPressed: _saving ? null : _save,
           icon: const Icon(Icons.save_outlined),
           label: Text(_saving ? 'Saving…' : 'Save ${k.title.toLowerCase()}'),
+        ),
+      ]),
+    );
+  }
+}
+
+
+/// Search and pick one of the old reports to copy from.
+class _OldReportPicker extends StatefulWidget {
+  final AppUser me;
+  final InvAccess acc;
+  const _OldReportPicker({required this.me, required this.acc});
+  @override
+  State<_OldReportPicker> createState() => _OldReportPickerState();
+}
+
+class _OldReportPickerState extends State<_OldReportPicker> {
+  String _q = '';
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.8,
+      child: Column(children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text('Copy from an old report', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: TextField(
+            autofocus: false,
+            decoration: const InputDecoration(isDense: true, prefixIcon: Icon(Icons.search), hintText: 'Client, site, number, subject…'),
+            onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<List<InvReport>>(
+            stream: InvReports.list(widget.me, widget.acc),
+            builder: (c, snap) {
+              if (snap.hasError) return Padding(padding: const EdgeInsets.all(16), child: Text('Could not load: ${snap.error}'));
+              if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+              var l = snap.data!;
+              if (_q.isNotEmpty) {
+                l = l.where((r) => '${r.number} ${r.clientName} ${r.place} ${r.s('subject')} ${r.s('complaint')}'.toLowerCase().contains(_q)).toList();
+              }
+              if (l.isEmpty) return const EmptyState(icon: Icons.description_outlined, title: 'No reports found');
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 20),
+                itemCount: l.length > 200 ? 200 : l.length,
+                itemBuilder: (c, i) {
+                  final r = l[i];
+                  final dd = DateTime.tryParse(r.date);
+                  final what = [r.s('subject'), r.s('complaint')].firstWhere((x) => x.trim().isNotEmpty, orElse: () => '');
+                  return ListTile(
+                    leading: Icon(r.kind == kindDelivery ? Icons.local_shipping_outlined : (r.kind == kindService ? Icons.build_circle_outlined : Icons.support_agent)),
+                    title: Text(r.clientName.isEmpty ? '(no client)' : r.clientName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(
+                        '${r.kind.title} · ${r.number} · ${dd == null ? r.date : fmtDateShort(dd)}${what.isNotEmpty ? '\n${what.split('\n').first}' : ''}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12.5)),
+                    trailing: const Icon(Icons.content_copy, size: 18),
+                    onTap: () => Navigator.pop(context, r),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ]),
     );
