@@ -236,16 +236,22 @@ async function setStatus(t, s) {
 }
 
 // ================================================================== shell
+let lastSig = '';
 function refresh() {
   if (!S.me) return;
   // keep open forms (assign, new ticket, links) intact
   if (document.querySelector('.overlay:not(.alertpop):not([data-tid])')) { drawNav(); return; }
-  render();
-  // an open ticket follows live changes
+  // redraw the page only when something on it changed
+  const sig = canon([[...S.open.values()], [...S.recent.values()].map((t) => [t.id, t.status, t.updatedAt]), S.users.map((u) => [u.id, u.name, u.active, u.lastLocation]),
+    S.portals.map((p) => [p.id, p.active, (p.sites || []).length]), S.clients.map((c) => [c.id, c.name, (c.places || []).length])]);
+  if (sig !== lastSig) { lastSig = sig; render(); }
+  // an open ticket follows live changes — redrawn only when that ticket changed, without the opening animation
   const d = document.querySelector('.overlay[data-tid]');
   if (d) {
-    const id = d.dataset.tid, sc = d.querySelector('.modal').scrollTop, note = (d.querySelector('#tn') || {}).value || '';
-    d.remove(); openTicket(id);
+    const id = d.dataset.tid, t = getT(id);
+    if (!t || canon(t) === d._sig) return;
+    const sc = d.querySelector('.modal').scrollTop, note = (d.querySelector('#tn') || {}).value || '';
+    d.remove(); openTicket(id, true);
     const n = document.querySelector('.overlay[data-tid]');
     if (n) { n.querySelector('.modal').scrollTop = sc; if (note && n.querySelector('#tn')) n.querySelector('#tn').value = note; }
   }
@@ -357,7 +363,7 @@ function rowHtml(t) {
 }
 
 // ================================================================== ticket detail
-function openTicket(id) {
+function openTicket(id, quiet = false) {
   const t = getT(id);
   if (!t) { getDoc(doc(db, 'svcTickets', id)).then((s) => { if (s.exists()) { S.recent.set(id, { id, ...s.data() }); openTicket(id); } }); return; }
   const s = st(t.status), p = prio(t.priority), mine = t.assignedTo === S.me.id, A = canAssign();
@@ -408,8 +414,8 @@ function openTicket(id) {
       <div class="card pad"><h3>Timeline</h3><div class="timeline">${(t.log || []).slice().reverse().map((l) => `<div><b>${esc(l.t)}</b><br><span class="muted small">${esc(fmtDT(l.at))}${l.byName ? ' · ' + esc(l.byName) : ''}</span></div>`).join('')}</div>
         ${A || mine ? '<div class="row" style="margin-top:8px"><input id="tn" placeholder="Add an internal note…" class="grow"><button class="btn sm" id="tnb">Add</button></div>' : ''}</div>
       ${hasClientPage(t) ? `<div class="card pad"><h3>Photos for the client</h3><div class="thumbs" id="cph" style="margin-top:8px"><span class="small muted">Loading…</span></div></div>` : ''}
-    </div></div>`, '', { wide: true });
-  o.dataset.tid = t.id;
+    </div></div>`, '', { wide: true, cls: quiet ? 'noanim' : '' });
+  o.dataset.tid = t.id; o._sig = canon(t);
   $$('[data-a]', o).forEach((b) => (b.onclick = async () => {
     const a = b.dataset.a, cur = getT(t.id) || t;
     if (a === 'assign') { close(o); return assignModal(cur); }

@@ -344,3 +344,4 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .bc5 { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
 .bc5 .av { width: 22px; height: 22px; font-size: 10px; }
 .bwalk { background: #EDE7F8; color: var(--purple); border-radius: 99px; padding: 0 7px; font-weight: 650; }
+.overlay.noanim, .overlay.noanim .modal { animation: none !important; }
