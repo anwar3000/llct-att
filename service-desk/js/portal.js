@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, RESULT_COLOR, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=8';
+} from './sd.js?v=9';
 
 window.__sdStarted = true;
 
@@ -56,6 +56,7 @@ async function start() {
   document.title = `Service request – ${S.portal.clientName || 'Leaders Line'}`;
   const sites = S.portal.sites || [];
   if (sites.length === 1) S.form.siteId = sites[0].id;
+  loadSitePhotos(sites);
   if (!S.form.contactName && S.portal.contact) S.form.contactName = S.portal.contact;
   if (!S.form.contactPhone && S.portal.phone) S.form.contactPhone = S.portal.phone;
   onSnapshot(query(collection(db, 'svcPortals', token, 'tickets'), orderBy('createdAt', 'desc'), limit(200)), (q) => {
@@ -63,6 +64,20 @@ async function start() {
     if (S.tab === 'list' && !S.sent) render(); else renderTabs();
   }, (e) => console.warn('tickets', e));
   render();
+}
+
+// Building photos the office added for each site (copied onto this link by the Service Desk).
+function loadSitePhotos(sites) {
+  S.photos = S.photos || {};
+  sites.forEach((x) => getDoc(doc(db, 'svcPortals', token, 'sitePhotos', x.id)).then((d) => {
+    S.photos[x.id] = d.exists() && d.data().data ? d.data().data : null; applyPhotos();
+  }, () => { S.photos[x.id] = null; }));
+}
+function applyPhotos() {
+  $$('[data-sphoto]').forEach((e) => {
+    const src = S.photos && S.photos[e.dataset.sphoto];
+    if (src && !e.classList.contains('has')) { e.style.backgroundImage = `url("${src}")`; e.classList.add('has'); }
+  });
 }
 
 // Walk-in customers: public form, and their requests followed through tracking ids saved on this device.
@@ -140,9 +155,6 @@ function bindInstall() {
 function formHtml() {
   const f = S.form, sites = S.portal.sites || [];
   const other = f.siteId === '_other';
-  const asCards = sites.length <= 8;
-  const siteCard = (id, name, sub, gps) => `<button type="button" class="opt ${f.siteId === id ? 'on' : ''}" data-site="${esc(id)}" role="radio" aria-checked="${f.siteId === id}">
-      <span class="ot">${esc(name)}</span>${sub ? `<span class="os">${esc(sub)}</span>` : ''}${gps ? '<span class="og" title="Location saved">Location saved</span>' : ''}</button>`;
   const asap = f.preferredSlot === 'asap';
   const dateSel = asap ? 'asap' : f.preferredDate === dateKey() ? 'today' : f.preferredDate === tomorrow() ? 'tomorrow' : 'pick';
   const step1 = S.portal.walkin ? `<div class="step"><span class="sn">1</span><div class="sb"><h2>Your business</h2><p class="hint">Who and where is the visit for?</p>
@@ -159,19 +171,37 @@ function formHtml() {
       const groups = {}; cams.forEach((c) => { (groups[c.nvr || ''] = groups[c.nvr || ''] || []).push(c); });
       return Object.entries(groups).map(([nv, l]) => `<h4>Cameras${nv ? ` on NVR ${esc(nv)}` : ''}</h4><div class="eqchips">${l.map((c) => `<button type="button" class="eqchip ${f.eq.includes(c.id) ? 'on' : ''}" data-eq="${esc(c.id)}" aria-pressed="${f.eq.includes(c.id)}">Cam ${esc(c.no)}${c.name ? `<small>${esc(c.name)}</small>` : ''}</button>`).join('')}</div>`).join('');
     })()}</div>` : '';
-  const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">Which of your sites needs the visit?</p>
-    ${asCards ? `<div class="opts" role="radiogroup">${sites.map((s) => siteCard(s.id, s.name, String(s.address || '').split('\n')[0], hasGPS(s))).join('')}${siteCard('_other', 'Another location', 'Not in this list', false)}</div>`
-      : `<select id="f-site" aria-label="Site"><option value="">Choose the site…</option>${sites.map((s) => `<option value="${esc(s.id)}" ${f.siteId === s.id ? 'selected' : ''}>${esc(s.name)}${s.address ? ' — ' + esc(String(s.address).split('\n')[0]) : ''}</option>`).join('')}<option value="_other" ${other ? 'selected' : ''}>Another location (not in the list)</option></select>`}
-    ${other ? `<div class="stack" style="margin-top:12px"><label class="field"><span>Location name <b>*</b></span><input id="f-oname" value="${esc(f.otherName)}" placeholder="e.g. Warehouse 3, Al Quoz"></label>
+  const cur = sites.find((x) => x.id === f.siteId);
+  const one = sites.length === 1;
+  const addr1 = (x) => String(x.address || '').split('\n')[0];
+  const otherForm = `<div class="stack" style="margin-top:12px"><label class="field"><span>Location name <b>*</b></span><input id="f-oname" value="${esc(f.otherName)}" placeholder="e.g. Warehouse 3, Al Quoz"></label>
       <label class="field"><span>Address or landmark</span><input id="f-oaddr" value="${esc(f.otherAddress)}" placeholder="Building, street, area"></label>
-      <div class="row"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Only if you are at the site now.'}</span></div></div>` : ''}
+      <div class="row"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Only if you are at the site now.'}</span></div></div>`;
+  let siteBody;
+  if (cur) {
+    siteBody = `<div class="shero" data-sphoto="${esc(cur.id)}">
+        <div class="shero-in"><span class="shero-k">Service location</span><span class="shero-n">${esc(cur.name)}</span>${addr1(cur) ? `<span class="shero-a">${esc(addr1(cur))}</span>` : ''}
+          <span class="shero-tags"><span class="stag ok">✓ Selected</span>${hasGPS(cur) ? '<span class="stag">📍 Location on file</span>' : ''}</span></div></div>
+      <div class="shero-act">${one ? '<button type="button" class="linkbtn" data-site="_other">Request for a different location instead</button>' : '<button type="button" class="btn sm" data-site="">Change site</button>'}</div>`;
+  } else if (other) {
+    siteBody = `<div class="row" style="justify-content:space-between"><b>Another location</b><button type="button" class="linkbtn" data-site="${one ? esc(sites[0].id) : ''}">${one ? `Back to ${esc(sites[0].name)}` : 'Back to my sites'}</button></div>${otherForm}`;
+  } else if (sites.length <= 8) {
+    siteBody = `<div class="scards" role="radiogroup">${sites.map((x) => `<button type="button" class="scard" data-site="${esc(x.id)}" role="radio" aria-checked="false">
+        <span class="scard-ph" data-sphoto="${esc(x.id)}"><span class="scard-ic">${esc((x.name || '?').trim().charAt(0).toUpperCase())}</span></span>
+        <span class="scard-t"><b>${esc(x.name)}</b>${addr1(x) ? `<small>${esc(addr1(x))}</small>` : ''}</span></button>`).join('')}</div>
+      <div class="shero-act"><button type="button" class="linkbtn" data-site="_other">Another location, not in this list</button></div>`;
+  } else {
+    siteBody = `<select id="f-site" aria-label="Site"><option value="">Choose the site…</option>${sites.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}${x.address ? ' — ' + esc(addr1(x)) : ''}</option>`).join('')}<option value="_other">Another location (not in the list)</option></select>`;
+  }
+  const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">${cur ? (one ? 'Your registered site.' : 'Site selected.') : other ? 'Tell us where the visit is.' : 'Which of your sites needs the visit?'}</p>
+    ${siteBody}
   </div></div>`;
   return `<form id="f" novalidate><div class="sheet">
   ${step1}${S.portal.walkin ? '' : siteStep}
 
   <div class="step"><span class="sn">2</span><div class="sb"><h2>What needs attention</h2><p class="hint">Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}</p>
     ${eqHtml}
-    <div class="ctiles">${activeTypes().map((t) => `<button type="button" class="ctile ${f.cats.includes(t.k) ? 'on' : ''}" data-cat="${t.k}" aria-pressed="${f.cats.includes(t.k)}">${icon(t.i || t.k, 26)}<span>${esc(t.t)}</span><i class="ck" aria-hidden="true"></i></button>`).join('')}</div>
+    <div class="ctiles">${clientTypes().map((t) => `<button type="button" class="ctile ${f.cats.includes(t.k) ? 'on' : ''}" data-cat="${t.k}" aria-pressed="${f.cats.includes(t.k)}">${icon(t.i || t.k, 26)}<span>${esc(t.t)}</span><i class="ck" aria-hidden="true"></i></button>`).join('')}</div>
     <label class="field" style="margin-top:16px"><span>Tell us more <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. Camera 4 at the main gate shows no picture since yesterday evening.">${esc(f.description)}</textarea></label>
     <div class="row" style="margin-top:14px;gap:16px;align-items:flex-start">
       <div class="field"><span>Cameras or devices affected</span><div class="stepper"><button type="button" data-cam="-1" aria-label="Fewer">−</button><output id="f-cams">${f.cameras || '–'}</output><button type="button" data-cam="1" aria-label="More">+</button></div></div>
@@ -211,6 +241,14 @@ function formHtml() {
   </form>`;
 }
 
+/** Service options for this client: the ones the office ticked in the client's profile (all when none ticked). */
+function clientTypes() {
+  const all = activeTypes(), want = S.portal && !S.portal.walkin && Array.isArray(S.portal.services) ? S.portal.services : [];
+  if (!want.length) return all;
+  const l = all.filter((t) => want.includes(t.k) || t.k === 'other');
+  return l.length ? l : all;
+}
+
 function readForm() {
   const f = S.form, v = (id) => { const e = $(id); return e ? e.value.trim() : null; };
   const set = (k, id) => { const x = v(id); if (x !== null) f[k] = x; };
@@ -225,6 +263,7 @@ function bindForm() {
   const redraw = () => { readForm(); const y = window.scrollY; render(); window.scrollTo(0, y); };
   if ($('#f-site')) $('#f-site').onchange = () => { f.siteId = $('#f-site').value; redraw(); };
   $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) f.eq = []; f.siteId = b.dataset.site; redraw(); }));
+  applyPhotos();
   $$('[data-cat]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.cat; const i = f.cats.indexOf(k);
     if (i >= 0) f.cats.splice(i, 1); else f.cats.push(k);

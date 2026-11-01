@@ -9,8 +9,8 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=8';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=8';
+} from './sd.js?v=9';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=9';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -728,20 +728,32 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 function clientProfileForLink(prof) {
   const eq = {};
   Object.entries((prof && prof.sites) || {}).forEach(([sid, e]) => { const l = leanEquipment(e); if (l.nvrs.length || l.cameras.length) eq[sid] = l; });
-  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq };
+  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq, services: (prof && Array.isArray(prof.services)) ? prof.services : [] };
+}
+/** Copy a site's building photo onto every service link of the client, so the client page can show it. */
+async function syncSitePhoto(clientId, sid, data) {
+  await Promise.all(S.portals.filter((p) => p.clientId === clientId).map((p) => {
+    const r = doc(db, 'svcPortals', p.id, 'sitePhotos', sid);
+    return (data ? setDoc(r, { data, at: serverTimestamp() }) : deleteDoc(r)).catch(() => {});
+  }));
+}
+async function syncAllSitePhotos(clientId, siteIds) {
+  await Promise.all(siteIds.map((sid) => getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid))
+    .then((d) => syncSitePhoto(clientId, sid, d.exists() && d.data().data ? d.data().data : null)).catch(() => {})));
 }
 /** Service profile of a client: trade licence, and per site the building photo and the equipment we maintain. */
 async function profileModal(clientId) {
   const c = S.clients.find((x) => x.id === clientId); if (!c) return;
   const sites = sitesFromPlaces(c);
-  let prof = { tradeLicense: '', sites: {} };
-  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, ...d.data() }; } catch (e) { return toast(friendly(e), true); }
+  let prof = { tradeLicense: '', sites: {}, services: [] };
+  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, services: [], ...d.data() }; } catch (e) { return toast(friendly(e), true); }
   let sid = sites[0] ? sites[0].id : '';
   const eqOf = (id) => { prof.sites[id] = prof.sites[id] || { nvrs: [], cameras: [] }; prof.sites[id].nvrs = prof.sites[id].nvrs || []; prof.sites[id].cameras = prof.sites[id].cameras || []; return prof.sites[id]; };
   const o = modal(`<h2 class="grow">${esc(c.name)} — service profile</h2>`, '<div id="pf"></div>',
     `<button class="btn" data-x>Close</button><button class="btn primary" id="pf-save">Save profile</button>`, { wide: true });
   const keep = () => {
     const tl = $('#pf-tl', o); if (tl) prof.tradeLicense = tl.value.trim();
+    if ($('#pf-svc', o)) prof.services = $$('[data-svc]', o).filter((i) => i.checked).map((i) => i.dataset.svc);
     if (!sid) return; const e = eqOf(sid);
     $$('[data-nf]', o).forEach((i) => { const [k, f] = i.dataset.nf.split(':'); e.nvrs[+k][f] = i.value.trim(); });
     $$('[data-cf]', o).forEach((i) => { const [k, f] = i.dataset.cf.split(':'); e.cameras[+k][f] = i.value.trim(); });
@@ -752,9 +764,11 @@ async function profileModal(clientId) {
     $('#pf', o).innerHTML = `
       <div class="grid2"><label class="field"><span>Trade licence number</span><input id="pf-tl" value="${esc(prof.tradeLicense || '')}" placeholder="e.g. 123456"></label>
         <label class="field"><span>Site</span><select id="pf-site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === sid ? 'selected' : ''}>${esc(x.name)}</option>`).join('') || '<option value="">Add sites to this client in LLCT Invoicing first</option>'}</select></label></div>
+      <div id="pf-svc" style="margin-top:14px"><b>Service options this client sees</b><span class="small muted"> — tick only what they have (e.g. CCTV only). None ticked = show all. "Other" always shows.</span>
+        <div class="svcpick">${activeTypes().filter((t) => t.k !== 'other').map((t) => `<label><input type="checkbox" data-svc="${esc(t.k)}" ${(prof.services || []).includes(t.k) ? 'checked' : ''}>${esc(t.t)}</label>`).join('')}</div></div>
       ${sid ? `<div class="row" style="margin-top:14px;align-items:flex-start;gap:14px">
         <div id="pf-ph" class="pfph"><span class="small muted">Loading photo…</span></div>
-        <div class="grow"><b>Building photo</b><p class="small muted" style="margin:2px 0 8px">Helps the technician find the place. Staff only.</p>
+        <div class="grow"><b>Building photo</b><p class="small muted" style="margin:2px 0 8px">Shown to the client on their request page and to the technician.</p>
           <label class="btn sm">Upload photo<input type="file" accept="image/*" hidden id="pf-up"></label> <button class="btn sm bad" id="pf-rm" type="button">Remove</button></div></div>
       <h3 style="margin-top:18px">NVR / DVR <span class="muted small">(${e.nvrs.length})</span></h3>
       <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th>Model</th><th>Serial</th><th>IP</th><th style="width:80px">Channels</th><th style="width:40px"></th></tr></thead><tbody>
@@ -784,10 +798,10 @@ async function profileModal(clientId) {
     getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).then((d) => { if (sid === here && box) box.innerHTML = d.exists() && d.data().data ? `<img src="${d.data().data}" alt="Building">` : '<span class="small muted">No photo</span>'; }).catch(() => { if (box) box.innerHTML = '<span class="small muted">—</span>'; });
     $('#pf-up', o).onchange = async (ev) => {
       const f = ev.target.files[0]; if (!f) return;
-      try { const data = await compressImage(f, 1280, 0.72); await setDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid), { data, by: S.me.id, at: serverTimestamp() }); box.innerHTML = `<img src="${data}" alt="Building">`; toast('Photo saved'); }
+      try { const data = await compressImage(f, 1280, 0.72); await setDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid), { data, by: S.me.id, at: serverTimestamp() }); await syncSitePhoto(clientId, sid, data); box.innerHTML = `<img src="${data}" alt="Building">`; toast('Photo saved'); }
       catch (e2) { toast(friendly(e2), true); }
     };
-    $('#pf-rm', o).onclick = async () => { await deleteDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).catch(() => {}); box.innerHTML = '<span class="small muted">No photo</span>'; };
+    $('#pf-rm', o).onclick = async () => { await deleteDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).catch(() => {}); await syncSitePhoto(clientId, sid, null); box.innerHTML = '<span class="small muted">No photo</span>'; };
   };
   draw();
   $('#pf-save', o).onclick = async () => {
@@ -796,9 +810,10 @@ async function profileModal(clientId) {
     Object.values(prof.sites).forEach((e) => { e.nvrs = (e.nvrs || []).filter((n) => n.no || n.name); e.cameras = (e.cameras || []).filter((x) => x.no || x.name); });
     $('#pf-save', o).disabled = true;
     try {
-      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
+      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
       const extra = clientProfileForLink(prof);
       await Promise.all(S.portals.filter((p) => p.clientId === clientId).map((p) => updateDoc(doc(db, 'svcPortals', p.id), extra).catch(() => {})));
+      await syncAllSitePhotos(clientId, sites.map((x) => x.id));
       toast('Service profile saved — the client can now pick this equipment'); close(o);
     } catch (e) { toast(friendly(e), true); $('#pf-save', o).disabled = false; }
   };
@@ -811,6 +826,7 @@ async function makePortal(c, btn) {
     let extra = {};
     try { const pr = await getDoc(doc(db, 'svcClients', c.id)); if (pr.exists()) extra = clientProfileForLink(pr.data()); } catch (_) { /* no profile yet */ }
     await setDoc(doc(db, 'svcPortals', token), { active: true, clientId: c.id, clientName: c.name || '', contact: c.contact || '', phone: c.phone || '', sites: sitesFromPlaces(c), ...extra, createdAt: serverTimestamp(), createdBy: S.me.id, createdByName: S.me.name || '', updatedAt: serverTimestamp() });
+    await Promise.all(sitesFromPlaces(c).map((x) => getDoc(doc(db, 'svcClients', c.id, 'sitePhotos', x.id)).then((d) => (d.exists() && d.data().data ? setDoc(doc(db, 'svcPortals', token, 'sitePhotos', x.id), { data: d.data().data, at: serverTimestamp() }) : null)).catch(() => {})));
     toast('Link created'); copy(portalUrl(token));
   } catch (e) { toast(friendly(e), true); if (btn) btn.disabled = false; }
 }
