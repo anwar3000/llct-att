@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=11';
+} from './sd.js?v=12';
 
 window.__sdStarted = true;
 
@@ -166,14 +166,18 @@ function formHtml() {
     <div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Helps the technician find you — only if you are at the store now.'}</span></div>
   </div></div>` : '';
   const eqSite = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
-  const eqHtml = eqSite && ((eqSite.nvrs || []).length || (eqSite.cameras || []).length || (eqSite.others || []).length) ? `<div class="eqsel"><h4>Which equipment has the problem? Tap all that apply (optional).${f.eq.length ? ` <b>${f.eq.length} selected</b>` : ''}</h4>
-    ${(eqSite.nvrs || []).length ? `<div class="eqchips">${eqSite.nvrs.map((n) => `<button type="button" class="eqchip ${f.eq.includes(n.id) ? 'on' : ''}" data-eq="${esc(n.id)}" aria-pressed="${f.eq.includes(n.id)}">NVR ${esc(n.no)}${n.name ? `<small>${esc(n.name)}</small>` : ''}</button>`).join('')}</div>` : ''}
-    ${(() => {
-      const cams = eqSite.cameras || []; if (!cams.length) return '';
-      const groups = {}; cams.forEach((c) => { (groups[c.nvr || ''] = groups[c.nvr || ''] || []).push(c); });
-      return Object.entries(groups).map(([nv, l]) => `<h4>Cameras${nv ? ` on NVR ${esc(nv)}` : ''}</h4><div class="eqchips">${l.map((c) => `<button type="button" class="eqchip ${f.eq.includes(c.id) ? 'on' : ''}" data-eq="${esc(c.id)}" aria-pressed="${f.eq.includes(c.id)}">Cam ${esc(c.no)}${c.name ? `<small>${esc(c.name)}</small>` : ''}</button>`).join('')}</div>`).join('');
-    })()}
-    ${(eqSite.others || []).length ? `<h4>Other devices</h4><div class="eqchips">${eqSite.others.map((x) => `<button type="button" class="eqchip ${f.eq.includes(x.id) ? 'on' : ''}" data-eq="${esc(x.id)}" aria-pressed="${f.eq.includes(x.id)}">${esc(x.type || 'Device')}${x.name ? `<small>${esc(x.name)}</small>` : ''}</button>`).join('')}</div>` : ''}</div>` : '';
+  const EQ = eqSite ? eqModel(eqSite) : null;
+  let eqHtml = '';
+  if (EQ && EQ.groups.length) {
+    const g = EQ.groups.find((x) => x.k === f.eqGroup) || EQ.groups[0];
+    const picked = f.eq.map((id) => EQ.byId[id]).filter(Boolean);
+    eqHtml = `<div class="eqsel"><h4>Which equipment has the problem? <span class="muted">(optional)</span></h4>
+      <div class="eqdd">${EQ.groups.length > 1 ? `<label class="field"><span>Recorder / group</span><select id="f-eqg">${EQ.groups.map((x) => `<option value="${esc(x.k)}" ${x.k === g.k ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select></label>` : ''}
+        <label class="field"><span>${g.k === 'o' ? 'Device' : 'Camera or recorder'}</span><select id="f-eqi"><option value="">Choose to add…</option>
+          ${g.items.map((it) => `<option value="${esc(it.v)}" ${it.v.startsWith('all:') ? '' : f.eq.includes(it.v) ? 'disabled' : ''}>${f.eq.includes(it.v) ? '✓ ' : ''}${esc(it.text)}</option>`).join('')}</select></label></div>
+      ${picked.length ? `<div class="eqpicked">${picked.map((x) => `<span class="eqtag">${esc(x.label)}<button type="button" data-eqrm="${esc(x.id)}" aria-label="Remove ${esc(x.label)}">✕</button></span>`).join('')}</div>
+        <p class="small muted" style="margin:6px 0 0">${picked.length} selected — describe each one in the box below.</p>` : ''}</div>`;
+  }
   const cur = sites.find((x) => x.id === f.siteId);
   const one = sites.length === 1;
   const addr1 = (x) => String(x.address || '').split('\n')[0];
@@ -244,6 +248,28 @@ function formHtml() {
   </form>`;
 }
 
+/** Equipment of a site arranged for the dropdowns: groups (one per NVR, plus other devices), items, and a lookup by id. */
+function eqModel(e) {
+  const byId = {}, groups = [];
+  const nvrs = e.nvrs || [], cams = e.cameras || [], others = e.others || [];
+  const nvrLabel = (n) => `NVR ${n.no}${n.name ? ` – ${n.name}` : ''}`;
+  nvrs.forEach((n) => { byId[n.id] = { id: n.id, label: nvrLabel(n) }; });
+  cams.forEach((c) => { byId[c.id] = { id: c.id, label: `Cam ${c.no}${c.name ? ` – ${c.name}` : ''}` }; });
+  others.forEach((x) => { byId[x.id] = { id: x.id, label: `${x.type || 'Device'}${x.name ? ` – ${x.name}` : ''}` }; });
+  const keys = [...new Set([...nvrs.map((n) => String(n.no)), ...cams.map((c) => String(c.nvr || ''))])];
+  keys.forEach((no) => {
+    const n = nvrs.find((x) => String(x.no) === no);
+    const cs = cams.filter((c) => String(c.nvr || '') === no);
+    const items = [];
+    if (n) items.push({ v: n.id, text: `${nvrLabel(n)} (the recorder itself)` });
+    if (cs.length > 1) items.push({ v: `all:${no}`, text: `All ${cs.length} cameras${no ? ` on NVR ${no}` : ''}` });
+    cs.forEach((c) => items.push({ v: c.id, text: `Cam ${c.no}${c.name ? ` – ${c.name}` : ''}${c.ch ? `  (ch ${c.ch})` : ''}` }));
+    if (items.length) groups.push({ k: `n:${no}`, label: no ? (n ? nvrLabel(n) : `NVR ${no}`) : 'Cameras', items, cams: cs.map((c) => c.id) });
+  });
+  if (others.length) groups.push({ k: 'o', label: 'Other devices', items: others.map((x) => ({ v: x.id, text: byId[x.id].label })) });
+  return { groups, byId };
+}
+
 /** Service options for this client: the ones the office ticked in the client's profile (all when none ticked). */
 function clientTypes() {
   const all = activeTypes(), want = S.portal && !S.portal.walkin && Array.isArray(S.portal.services) ? S.portal.services : [];
@@ -256,7 +282,7 @@ function readForm() {
   const f = S.form, v = (id) => { const e = $(id); return e ? e.value.trim() : null; };
   const set = (k, id) => { const x = v(id); if (x !== null) f[k] = x; };
   if ($('#f-site')) f.siteId = $('#f-site').value || f.siteId;
-  set('description', '#f-desc'); set('contactName', '#f-cname'); set('contactPhone', '#f-cphone'); set('contactEmail', '#f-cemail');
+  { const d = $('#f-desc'); if (d) f.description = d.value; } set('contactName', '#f-cname'); set('contactPhone', '#f-cphone'); set('contactEmail', '#f-cemail');
   set('otherName', '#f-oname'); set('otherAddress', '#f-oaddr');
   set('brand', '#f-brand'); set('store', '#f-store'); set('area', '#f-area');
 }
@@ -265,7 +291,7 @@ function bindForm() {
   const f = S.form;
   const redraw = () => { readForm(); const y = window.scrollY; render(); window.scrollTo(0, y); };
   if ($('#f-site')) $('#f-site').onchange = () => { f.siteId = $('#f-site').value; redraw(); };
-  $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) f.eq = []; f.siteId = b.dataset.site; redraw(); }));
+  $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) { f.eq = []; f.eqGroup = ''; } f.siteId = b.dataset.site; redraw(); }));
   applyPhotos();
   $$('[data-cat]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.cat; const i = f.cats.indexOf(k);
@@ -273,12 +299,29 @@ function bindForm() {
     b.classList.toggle('on', i < 0); b.setAttribute('aria-pressed', String(i < 0));
     const h = b.closest('.sb').querySelector('.hint'); h.innerHTML = `Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}`;
   }));
-  $$('[data-eq]').forEach((b) => (b.onclick = () => {
-    const k = b.dataset.eq; const i = f.eq.indexOf(k);
-    if (i >= 0) f.eq.splice(i, 1); else f.eq.push(k);
-    b.classList.toggle('on', i < 0); b.setAttribute('aria-pressed', String(i < 0));
-    const h = b.closest('.eqsel').querySelector('h4'); h.innerHTML = `Which equipment has the problem? Tap all that apply (optional).${f.eq.length ? ` <b>${f.eq.length} selected</b>` : ''}`;
-  }));
+  const eqSiteB = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
+  if (eqSiteB) {
+    const EQ = eqModel(eqSiteB);
+    const note = (add, label) => {
+      const ta = $('#f-desc'); if (!ta) return;
+      let lines = ta.value.split('\n');
+      if (add) { if (!lines.some((l) => l.trim().startsWith(label + ':'))) { if (lines.length === 1 && !lines[0].trim()) lines = []; lines.push(`${label}: `); } }
+      else lines = lines.filter((l) => l.trim() !== `${label}:`);
+      f.description = lines.join('\n'); ta.value = f.description;
+    };
+    const g = $('#f-eqg'); if (g) g.onchange = () => { f.eqGroup = g.value; redraw(); };
+    const it = $('#f-eqi');
+    if (it) it.onchange = () => {
+      readForm();
+      const v = it.value; if (!v) return;
+      let ids = [v];
+      if (v.startsWith('all:')) { const grp = EQ.groups.find((x) => x.k === 'n:' + v.slice(4)); ids = grp ? grp.cams : []; }
+      ids.filter((id) => !f.eq.includes(id) && EQ.byId[id]).forEach((id) => { f.eq.push(id); note(true, EQ.byId[id].label); });
+      redraw();
+      const ta = $('#f-desc'); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); ta.style.height = 'auto'; ta.style.height = Math.min(320, ta.scrollHeight + 4) + 'px'; }
+    };
+    $$('[data-eqrm]').forEach((b) => (b.onclick = () => { readForm(); const id = b.dataset.eqrm; f.eq = f.eq.filter((x) => x !== id); if (EQ.byId[id]) note(false, EQ.byId[id].label); redraw(); }));
+  }
   $$('[data-prio]').forEach((b) => (b.onclick = () => { f.priority = b.dataset.prio; $$('[data-prio]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }); }));
   $$('[data-cam]').forEach((b) => (b.onclick = () => { f.cameras = Math.max(0, Math.min(999, (f.cameras || 0) + Number(b.dataset.cam))); $('#f-cams').textContent = f.cameras || '–'; }));
   $$('[data-day]').forEach((b) => (b.onclick = () => {
@@ -319,7 +362,7 @@ async function submit() {
   if (walk) { if (!f.brand) miss.push('brand or company name'); if (!f.store) miss.push('store or location'); }
   else if (!site && !(other && f.otherName)) miss.push('site');
   if (!f.cats.length) miss.push('what needs attention');
-  if (f.description.length < 4) miss.push('a short description');
+  if (f.description.trim().length < 4) miss.push('a short description');
   if (!f.contactName) miss.push('contact name');
   if (f.contactPhone.replace(/\D/g, '').length < 7) miss.push('mobile number');
   if (miss.length) return toast('Please add: ' + miss.join(', '), true);
@@ -333,7 +376,7 @@ async function submit() {
   };
   Object.assign(t, {
     contactName: f.contactName, contactPhone: f.contactPhone,
-    category: f.cats[0], categories: f.cats.slice(), categoryLabels: f.cats.map(typeLabel), description: f.description, priority: f.priority,
+    category: f.cats[0], categories: f.cats.slice(), categoryLabels: f.cats.map(typeLabel), description: f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(), priority: f.priority,
     preferredDate: f.preferredDate || dateKey(), preferredSlot: f.preferredSlot,
     status: 'new', open: true, source: walk ? 'walkin' : 'portal',
   });

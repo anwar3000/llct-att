@@ -413,3 +413,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .eqlist table { margin-top: 6px; font-size: 12.5px; }
 .eqlist td, .eqlist th { padding: 4px 8px; }
 .eqlist { max-width: 100%; overflow-x: auto; } .eqlist td, .eqlist th { white-space: nowrap; } #prof-card .row > .small { min-width: 0; flex: 1; }
+.eqdd { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; margin-top: 6px; }
+.eqdd .field:only-child { grid-column: 1 / -1; }
+@media (max-width: 560px) { .eqdd { grid-template-columns: 1fr; } }
+.eqpicked { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.eqtag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 999px; background: var(--ribbon-soft); color: var(--night); border: 1px solid #C9D6F3; font-size: 13.5px; font-weight: 650; }
+.eqtag button { width: 24px; height: 24px; border-radius: 50%; border: 0; background: #fff; color: var(--trim); font-weight: 800; cursor: pointer; line-height: 1; }
