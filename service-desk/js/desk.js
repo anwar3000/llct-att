@@ -6,11 +6,11 @@ import {
 import {
   app, db, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField, deleteDoc,
-  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment,
+  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=9';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=9';
+} from './sd.js?v=10';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=10';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -101,6 +101,8 @@ function startData() {
         .sort((a, b) => String(a.name).localeCompare(String(b.name)));
       refresh();
     }, (e) => console.warn('users', e)));
+    S.profiles = {};
+    S.unsub.push(onSnapshot(collection(db, 'svcClients'), (q) => { S.profiles = {}; q.docs.forEach((d) => { S.profiles[d.id] = d.data(); }); if (S.view === 'clients') render(); }, () => {}));
     S.unsub.push(onSnapshot(collection(db, 'svcPortals'), (q) => {
       S.portals = q.docs.map((d) => ({ id: d.id, ...d.data() })); refresh(); syncPortalSites();
     }, (e) => console.warn('portals', e)));
@@ -261,7 +263,7 @@ function drawNav() {
   const n = $('#dnav'); if (!n) return;
   const newN = [...S.open.values()].filter((t) => t.status === 'new').length;
   const mine = [...S.open.values()].filter((t) => t.assignedTo === S.me.id).length;
-  const items = [['tickets', 'Tickets', newN], ...(canAssign() ? [['clients', 'Clients & links', 0], ['reports', 'Reports', 0]] : []), ...(isAdmin() ? [['settings', 'Settings', 0]] : [])];
+  const items = [['tickets', 'Tickets', newN], ...(canAssign() ? [['clients', 'Customers', 0], ['reports', 'Reports', 0]] : []), ...(isAdmin() ? [['settings', 'Settings', 0]] : [])];
   n.innerHTML = items.map(([k, l, c]) => `<button data-nav="${k}" class="${S.view === k ? 'on' : ''}">${l}${c ? `<span class="n">${c}</span>` : ''}</button>`).join('')
     + (mine ? `<button data-nav="tickets" data-mine="1">My jobs<span class="n" style="background:var(--info)">${mine}</span></button>` : '');
   $$('[data-nav]', n).forEach((b) => (b.onclick = () => { S.view = b.dataset.nav; if (b.dataset.mine) S.filter = 'mine'; render(); }));
@@ -488,10 +490,17 @@ function openTicket(id, quiet = false) {
     Promise.all([getDoc(doc(db, 'svcClients', t.clientId)), t.siteId ? getDoc(doc(db, 'svcClients', t.clientId, 'sitePhotos', t.siteId)) : Promise.resolve(null)]).then(([pr, ph]) => {
       const prof = pr && pr.exists() ? pr.data() : {}; const img = ph && ph.exists() ? ph.data().data : '';
       const e = (prof.sites || {})[t.siteId] || {};
-      if (!prof.tradeLicense && !img && !(e.nvrs || []).length) { pc.remove(); return; }
-      pc.innerHTML = `<h3>Site details</h3><div class="row" style="margin-top:8px;align-items:flex-start;gap:12px">${img ? `<img src="${img}" alt="Building" style="width:150px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--silver);cursor:zoom-in" data-bimg>` : ''}
-        <div class="small">${prof.tradeLicense ? `<div>Trade licence: <b>${esc(prof.tradeLicense)}</b></div>` : ''}${(e.nvrs || []).length ? `<div>${e.nvrs.length} NVR, ${(e.cameras || []).length} cameras under maintenance</div>` : ''}
-        ${(e.nvrs || []).map((n) => `<div class="muted">NVR ${esc(n.no)}${n.name ? ` – ${esc(n.name)}` : ''}${n.model ? ` · ${esc(n.model)}` : ''}${n.ip ? ` · ${esc(n.ip)}` : ''}</div>`).join('')}</div></div>`;
+      const a = amcStatus(prof.amc), tone = { ok: 'var(--success)', warn: 'var(--warning)', bad: 'var(--danger)' }[a.tone] || '';
+      const has = prof.tradeLicense || img || (e.nvrs || []).length || (e.cameras || []).length || (e.others || []).length || a.text;
+      pc.innerHTML = `<div class="row"><h3 class="grow">Site details</h3>${canAssign() ? `<button class="btn sm" id="pc-edit">${has ? 'Edit equipment' : 'Set up profile'}</button>` : ''}</div>
+        ${has ? `<div class="row" style="margin-top:8px;align-items:flex-start;gap:12px">${img ? `<img src="${img}" alt="Building" style="width:150px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--silver);cursor:zoom-in" data-bimg>` : ''}
+        <div class="small">${a.text ? `<div style="color:${tone};font-weight:650">${esc(a.text)}${prof.amc.no ? ` · ${esc(prof.amc.no)}` : ''}</div>` : ''}${prof.amc && prof.amc.covered ? `<div class="muted">${esc(prof.amc.covered)}</div>` : ''}
+        ${prof.tradeLicense ? `<div>Trade licence: <b>${esc(prof.tradeLicense)}</b></div>` : ''}
+        <div>${[(e.nvrs || []).length && `${e.nvrs.length} NVR`, (e.cameras || []).length && `${e.cameras.length} cameras`, (e.others || []).length && `${e.others.length} other devices`].filter(Boolean).join(', ') || 'No equipment listed for this site'}</div>
+        ${(e.nvrs || []).map((n) => `<div class="muted">NVR ${esc(n.no)}${n.name ? ` – ${esc(n.name)}` : ''}${n.model ? ` · ${esc(n.model)}` : ''}${n.ip ? ` · ${esc(n.ip)}` : ''}</div>`).join('')}
+        ${(e.others || []).map((x) => `<div class="muted">${esc(x.type)}${x.name ? ` – ${esc(x.name)}` : ''}${x.model ? ` · ${esc(x.model)}` : ''}${+x.qty > 1 ? ` × ${esc(x.qty)}` : ''}</div>`).join('')}</div></div>`
+        : '<p class="small muted">No AMC or equipment details for this customer yet.</p>'}`;
+      const pe = $('#pc-edit', pc); if (pe) pe.onclick = () => profileModal(t.clientId);
       const bi = $('[data-bimg]', pc); if (bi) bi.onclick = () => { const w = window.open(); if (w) w.document.write(`<img src="${bi.src}" style="max-width:100%">`); };
     }).catch(() => pc.remove());
   }
@@ -701,13 +710,13 @@ function clientsView(m) {
     const ts = all.filter((t) => t.clientId === c.id);
     return { c, p, n: ts.length, open: ts.filter((t) => t.open).length, last: ts.map((t) => toDate(t.createdAt)).filter(Boolean).sort((a, b) => b - a)[0], sites: (c.places || []).length, gps: (c.places || []).filter((x) => hasGPS({ lat: +x.lat, lng: +x.lng })).length };
   });
-  m.innerHTML = `<div class="row" style="margin-bottom:12px"><h1 class="grow">Clients &amp; service links</h1><input id="cq" placeholder="Search client…" value="${esc(S.cq || '')}" style="max-width:280px"></div>
-    <p class="muted small" style="margin-top:-4px">Each client gets one private link to raise and track service requests. Sites and GPS come from the client's sites in LLCT Invoicing and stay in sync.</p>
+  m.innerHTML = `<div class="row" style="margin-bottom:12px"><h1 class="grow">Customers</h1><input id="cq" placeholder="Search client…" value="${esc(S.cq || '')}" style="max-width:280px"></div>
+    <p class="muted small" style="margin-top:-4px">Set up each customer's service profile — AMC contract, trade licence, building photos and the equipment we maintain (NVRs, cameras, other devices) — then share their private service link. Sites and GPS come from LLCT Invoicing.</p>
     ${S.clientsErr ? `<div class="card pad" style="color:var(--danger)">${esc(S.clientsErr)}</div>` : ''}
     <div class="card" style="overflow:auto"><table class="tbl"><thead><tr><th>Client</th><th>Sites</th><th>Service profile</th><th>Tickets</th><th>Last request</th><th>Service link</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td class="click" data-hist="${esc(r.c.id)}" style="cursor:pointer"><b>${esc(r.c.name)}</b>${r.c.phone ? `<div class="small muted">${esc(r.c.contact || '')} ${esc(r.c.phone)}</div>` : ''}</td>
       <td>${r.sites}<div class="small ${r.gps < r.sites ? '' : 'muted'}" style="${r.gps < r.sites ? 'color:var(--warning)' : ''}">${r.gps} with GPS</div></td>
-      <td><button class="btn sm" data-prof="${esc(r.c.id)}">Equipment &amp; licence</button></td>
+      <td>${profSummary(r.c.id)}</td>
       <td>${r.n}${r.open ? ` <span class="chip" style="background:#fde3e3;color:var(--danger)">${r.open} open</span>` : ''}</td>
       <td class="small">${r.last ? esc(fmtDate(r.last)) : '—'}</td>
       <td>${r.p ? `<div class="linkbox"><input readonly value="${esc(portalUrl(r.p.id))}"><button class="btn sm" data-copy="${esc(r.p.id)}">Copy</button>
@@ -721,14 +730,25 @@ function clientsView(m) {
   $$('[data-more]', m).forEach((b) => (b.onclick = () => portalMenu(S.portals.find((p) => p.id === b.dataset.more))));
   $$('[data-hist]', m).forEach((e) => (e.onclick = () => clientHistory(e.dataset.hist)));
 }
+function profSummary(cid) {
+  const pr = (S.profiles || {})[cid];
+  if (!pr) return `<button class="btn sm primary" data-prof="${esc(cid)}">Set up profile</button>`;
+  let n = 0, c = 0, o = 0; Object.values(pr.sites || {}).forEach((e) => { n += (e.nvrs || []).length; c += (e.cameras || []).length; o += (e.others || []).length; });
+  const a = amcStatus(pr.amc);
+  const tone = { ok: 'var(--success)', warn: 'var(--warning)', bad: 'var(--danger)' }[a.tone] || 'var(--steel)';
+  return `<button class="btn sm" data-prof="${esc(cid)}">Edit profile</button>
+    <div class="small" style="margin-top:4px">${[n && `${n} NVR`, c && `${c} cam`, o && `${o} other`].filter(Boolean).join(' · ') || '<span class="muted">No equipment</span>'}</div>
+    ${a.text ? `<div class="small" style="color:${tone}">${esc(a.text)}</div>` : ''}${pr.tradeLicense ? `<div class="small muted">TL ${esc(pr.tradeLicense)}</div>` : ''}`;
+}
 const linkMsg = (c, p) => `Dear ${c.contact || c.name},\n\nFor any CCTV / security service request please use your Leaders Line service link:\n${portalUrl(p.id)}\n\nYou can choose the site, describe the problem, set the priority and preferred visit time, and follow the status of every request.\n\nLeaders Line Trading LLC · 04 880 5577`;
 function copy(text) { (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast('Link copied'), () => prompt('Copy this link:', text)); }
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 /** Fields of the service profile the client's link may show (equipment names only, no serials or IPs). */
 function clientProfileForLink(prof) {
   const eq = {};
-  Object.entries((prof && prof.sites) || {}).forEach(([sid, e]) => { const l = leanEquipment(e); if (l.nvrs.length || l.cameras.length) eq[sid] = l; });
-  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq, services: (prof && Array.isArray(prof.services)) ? prof.services : [] };
+  Object.entries((prof && prof.sites) || {}).forEach(([sid, e]) => { const l = leanEquipment(e); if (l.nvrs.length || l.cameras.length || l.others.length) eq[sid] = l; });
+  const a = (prof && prof.amc) || {};
+  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq, amc: { no: a.no || '', end: a.end || '' }, services: (prof && Array.isArray(prof.services)) ? prof.services : [] };
 }
 /** Copy a site's building photo onto every service link of the client, so the client page can show it. */
 async function syncSitePhoto(clientId, sid, data) {
@@ -745,25 +765,34 @@ async function syncAllSitePhotos(clientId, siteIds) {
 async function profileModal(clientId) {
   const c = S.clients.find((x) => x.id === clientId); if (!c) return;
   const sites = sitesFromPlaces(c);
-  let prof = { tradeLicense: '', sites: {}, services: [] };
-  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, services: [], ...d.data() }; } catch (e) { return toast(friendly(e), true); }
+  let prof = { tradeLicense: '', sites: {}, services: [], amc: {} };
+  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, services: [], amc: {}, ...d.data() }; } catch (e) { return toast(friendly(e), true); }
   let sid = sites[0] ? sites[0].id : '';
-  const eqOf = (id) => { prof.sites[id] = prof.sites[id] || { nvrs: [], cameras: [] }; prof.sites[id].nvrs = prof.sites[id].nvrs || []; prof.sites[id].cameras = prof.sites[id].cameras || []; return prof.sites[id]; };
+  const eqOf = (id) => { const e = prof.sites[id] = prof.sites[id] || {}; e.nvrs = e.nvrs || []; e.cameras = e.cameras || []; e.others = e.others || []; return e; };
   const o = modal(`<h2 class="grow">${esc(c.name)} — service profile</h2>`, '<div id="pf"></div>',
     `<button class="btn" data-x>Close</button><button class="btn primary" id="pf-save">Save profile</button>`, { wide: true });
   const keep = () => {
     const tl = $('#pf-tl', o); if (tl) prof.tradeLicense = tl.value.trim();
+    if ($('#pf-amc', o)) { prof.amc = prof.amc || {}; $$('[data-amc]', o).forEach((i) => { prof.amc[i.dataset.amc] = i.value.trim(); }); }
     if ($('#pf-svc', o)) prof.services = $$('[data-svc]', o).filter((i) => i.checked).map((i) => i.dataset.svc);
     if (!sid) return; const e = eqOf(sid);
     $$('[data-nf]', o).forEach((i) => { const [k, f] = i.dataset.nf.split(':'); e.nvrs[+k][f] = i.value.trim(); });
     $$('[data-cf]', o).forEach((i) => { const [k, f] = i.dataset.cf.split(':'); e.cameras[+k][f] = i.value.trim(); });
+    $$('[data-of]', o).forEach((i) => { const [k, f] = i.dataset.of.split(':'); e.others[+k][f] = i.value.trim(); });
   };
   const draw = () => {
-    const e = sid ? eqOf(sid) : { nvrs: [], cameras: [] };
+    const e = sid ? eqOf(sid) : { nvrs: [], cameras: [], others: [] };
+    const am = prof.amc || {};
     const nvrOpts = (v) => `<option value="">—</option>${e.nvrs.map((n) => `<option value="${esc(n.no)}" ${String(v) === String(n.no) ? 'selected' : ''}>NVR ${esc(n.no)}</option>`).join('')}`;
     $('#pf', o).innerHTML = `
       <div class="grid2"><label class="field"><span>Trade licence number</span><input id="pf-tl" value="${esc(prof.tradeLicense || '')}" placeholder="e.g. 123456"></label>
         <label class="field"><span>Site</span><select id="pf-site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === sid ? 'selected' : ''}>${esc(x.name)}</option>`).join('') || '<option value="">Add sites to this client in LLCT Invoicing first</option>'}</select></label></div>
+      <div id="pf-amc" class="pfsec"><b>AMC contract</b>
+        <div class="grid4"><label class="field"><span>Contract no.</span><input data-amc="no" value="${esc(am.no || '')}" placeholder="e.g. AMC-2026-014"></label>
+          <label class="field"><span>Start</span><input type="date" data-amc="start" value="${esc(am.start || '')}"></label>
+          <label class="field"><span>End</span><input type="date" data-amc="end" value="${esc(am.end || '')}"></label>
+          <label class="field"><span>Visits / year</span><input type="number" min="0" data-amc="visits" value="${esc(am.visits || '')}" placeholder="4"></label></div>
+        <label class="field" style="margin-top:8px"><span>Covered products &amp; services</span><input data-amc="covered" value="${esc(am.covered || '')}" placeholder="e.g. Preventive maintenance, labour, breakdown calls 24/7 — spare parts chargeable"></label></div>
       <div id="pf-svc" style="margin-top:14px"><b>Service options this client sees</b><span class="small muted"> — tick only what they have (e.g. CCTV only). None ticked = show all. "Other" always shows.</span>
         <div class="svcpick">${activeTypes().filter((t) => t.k !== 'other').map((t) => `<label><input type="checkbox" data-svc="${esc(t.k)}" ${(prof.services || []).includes(t.k) ? 'checked' : ''}>${esc(t.t)}</label>`).join('')}</div></div>
       ${sid ? `<div class="row" style="margin-top:14px;align-items:flex-start;gap:14px">
@@ -781,7 +810,13 @@ async function profileModal(clientId) {
           <td><select data-cf="${k}:nvr">${nvrOpts(cm.nvr)}</select></td><td><input data-cf="${k}:ch" value="${esc(cm.ch || '')}"></td>
           <td><input data-cf="${k}:model" value="${esc(cm.model || '')}"></td><td><input data-cf="${k}:serial" value="${esc(cm.serial || '')}"></td><td><button class="btn sm bad" data-crm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No cameras yet.</td></tr>'}
       </tbody></table></div>
-      <div class="row" style="margin-top:6px"><button class="btn sm" id="pf-addc" type="button">+ Camera</button><button class="btn sm" id="pf-addmany" type="button">+ Several cameras…</button></div>` : ''}`;
+      <div class="row" style="margin-top:6px"><button class="btn sm" id="pf-addc" type="button">+ Camera</button><button class="btn sm" id="pf-addmany" type="button">+ Several cameras…</button></div>
+      <h3 style="margin-top:18px">Other equipment under maintenance <span class="muted small">(${e.others.length})</span></h3>
+      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:170px">Type</th><th>Name / location</th><th>Model</th><th>Serial</th><th style="width:70px">Qty</th><th style="width:40px"></th></tr></thead><tbody>
+        ${e.others.map((x, k) => `<tr><td><select data-of="${k}:type">${OTHER_TYPES.map((t) => `<option ${x.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></td>
+          ${['name', 'model', 'serial', 'qty'].map((f) => `<td><input data-of="${k}:${f}" value="${esc(x[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-orm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Switches, hard disks, UPS, monitors, access control, O2 devices…</td></tr>'}
+      </tbody></table></div>
+      <button class="btn sm" id="pf-addo" type="button" style="margin-top:6px">+ Other equipment</button>` : ''}`;
     const ss = $('#pf-site', o); if (ss) ss.onchange = () => { keep(); sid = ss.value; draw(); };
     if (!sid) return;
     $('#pf-addn', o).onclick = () => { keep(); e.nvrs.push({ id: newId(), no: String(e.nvrs.length + 1), name: '', model: '', serial: '', ip: '', channels: '' }); draw(); };
@@ -794,6 +829,8 @@ async function profileModal(clientId) {
     };
     $$('[data-nrm]', o).forEach((b) => (b.onclick = () => { keep(); e.nvrs.splice(+b.dataset.nrm, 1); draw(); }));
     $$('[data-crm]', o).forEach((b) => (b.onclick = () => { keep(); e.cameras.splice(+b.dataset.crm, 1); draw(); }));
+    $$('[data-orm]', o).forEach((b) => (b.onclick = () => { keep(); e.others.splice(+b.dataset.orm, 1); draw(); }));
+    $('#pf-addo', o).onclick = () => { keep(); e.others.push({ id: newId(), type: OTHER_TYPES[0], name: '', model: '', serial: '', qty: '1' }); draw(); };
     const box = $('#pf-ph', o), here = sid;
     getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).then((d) => { if (sid === here && box) box.innerHTML = d.exists() && d.data().data ? `<img src="${d.data().data}" alt="Building">` : '<span class="small muted">No photo</span>'; }).catch(() => { if (box) box.innerHTML = '<span class="small muted">—</span>'; });
     $('#pf-up', o).onchange = async (ev) => {
@@ -807,10 +844,10 @@ async function profileModal(clientId) {
   $('#pf-save', o).onclick = async () => {
     keep();
     // tidy: drop empty rows
-    Object.values(prof.sites).forEach((e) => { e.nvrs = (e.nvrs || []).filter((n) => n.no || n.name); e.cameras = (e.cameras || []).filter((x) => x.no || x.name); });
+    Object.values(prof.sites).forEach((e) => { e.nvrs = (e.nvrs || []).filter((n) => n.no || n.name); e.cameras = (e.cameras || []).filter((x) => x.no || x.name); e.others = (e.others || []).filter((x) => x.name || x.model || x.serial || x.type); });
     $('#pf-save', o).disabled = true;
     try {
-      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
+      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], amc: prof.amc || {}, clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
       const extra = clientProfileForLink(prof);
       await Promise.all(S.portals.filter((p) => p.clientId === clientId).map((p) => updateDoc(doc(db, 'svcPortals', p.id), extra).catch(() => {})));
       await syncAllSitePhotos(clientId, sites.map((x) => x.id));

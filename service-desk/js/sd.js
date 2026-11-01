@@ -205,14 +205,28 @@ export const RESULT_COLOR = { Rectified: '#1F8A5B', Working: '#1F8A5B', Replaced
 export function faultLabel(f) {
   if (!f) return '';
   if (f.kind === 'nvr') return `NVR ${f.no || ''}${f.name ? ` – ${f.name}` : ''}`.trim();
+  if (f.kind === 'other') return `${f.type || 'Device'}${f.name ? ` – ${f.name}` : ''}`.trim();
   const where = f.nvr ? ` (NVR ${f.nvr}${f.ch ? `, ch ${f.ch}` : ''})` : '';
   return `Camera ${f.no || ''}${f.name ? ` – ${f.name}` : ''}${where}`.trim();
 }
+/** Other equipment covered by the AMC, besides NVRs and cameras. */
+export const OTHER_TYPES = ['Network switch', 'Hard disk', 'Monitor / TV', 'UPS', 'Router / Wi-Fi', 'Access control', 'Intercom', 'Fire alarm panel', 'Oxygen O2 device', 'O2IOT switch', 'Other'];
 /** Client-visible copy of a site's equipment (no serials / IPs). */
 export const leanEquipment = (e) => ({
   nvrs: (e && e.nvrs || []).map((n) => ({ id: n.id, no: n.no || '', name: n.name || '' })),
   cameras: (e && e.cameras || []).map((c) => ({ id: c.id, no: c.no || '', name: c.name || '', nvr: c.nvr || '', ch: c.ch || '' })),
+  others: (e && e.others || []).map((o) => ({ id: o.id, type: o.type || '', name: o.name || '' })),
 });
+/** AMC contract status: { text, tone: 'ok' | 'warn' | 'bad' | '' }. */
+export function amcStatus(a) {
+  if (!a || !(a.end || a.no)) return { text: '', tone: '' };
+  const end = a.end ? new Date(a.end + 'T23:59:59') : null;
+  if (!end || isNaN(end)) return { text: `AMC ${a.no || ''}`.trim(), tone: 'ok' };
+  const days = Math.ceil((end - new Date()) / 86400000);
+  const d = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (days < 0) return { text: `AMC expired on ${d}`, tone: 'bad' };
+  return { text: `AMC active until ${d}`, tone: days <= 30 ? 'warn' : 'ok' };
+}
 
 /** Where the customer's view of a ticket lives: their client link, or the walk-in tracking page. */
 export const mirrorPath = (t) => (t.portal ? ['svcPortals', t.portal, 'tickets', t.id || t.number] : t.publicId ? ['svcPublic', t.publicId] : null);

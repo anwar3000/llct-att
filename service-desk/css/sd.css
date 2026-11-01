@@ -398,3 +398,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .svcpick label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #D5DAE3; border-radius: 999px; font-size: 13px; cursor: pointer; }
 .svcpick label:has(input:checked) { border-color: var(--ribbon); background: var(--ribbon-soft); }
 @media (min-width: 900px) { .shero { min-height: 250px; } .shero-n { font-size: 30px; } }
+.pfsec { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--silver); border-radius: 12px; background: #FAFBFD; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 8px; }
+@media (max-width: 700px) { .grid4 { grid-template-columns: 1fr 1fr; } }
+.amcb { display: inline-block; margin-top: 8px; padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 650; background: #E3F3EB; color: var(--success); }
+.amcb.warn { background: #FBEFD9; color: var(--warning); }
+.amcb.bad { background: #FBE3E1; color: var(--danger); }
+.svcpick label { white-space: nowrap; font-weight: 600; color: var(--night); background: #fff; }
+.svcpick input[type=checkbox] { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; flex: none; box-shadow: none; accent-color: var(--ribbon); }

@@ -84,8 +84,20 @@ Color svcResultColor(String r) => switch (r) {
 String svcFaultLabel(Map f) {
   String v(String k) => '${f[k] ?? ''}'.trim();
   if (v('kind') == 'nvr') return 'NVR ${v('no')}${v('name').isEmpty ? '' : ' – ${v('name')}'}'.trim();
+  if (v('kind') == 'other') return '${v('type').isEmpty ? 'Device' : v('type')}${v('name').isEmpty ? '' : ' – ${v('name')}'}'.trim();
   final where = v('nvr').isEmpty ? '' : ' (NVR ${v('nvr')}${v('ch').isEmpty ? '' : ', ch ${v('ch')}'})';
   return 'Camera ${v('no')}${v('name').isEmpty ? '' : ' – ${v('name')}'}$where'.trim();
+}
+
+/// AMC contract line for a client, e.g. "AMC active until 31 Dec 2026" (empty when none).
+String svcAmcText(Map amc) {
+  final end = DateTime.tryParse('${amc['end'] ?? ''}');
+  final no = '${amc['no'] ?? ''}';
+  if (end == null) return no.isEmpty ? '' : 'AMC $no';
+  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final d = '${end.day} ${mo[end.month - 1]} ${end.year}';
+  final expired = DateTime.now().isAfter(end.add(const Duration(days: 1)));
+  return '${expired ? 'AMC expired on' : 'AMC active until'} $d${no.isEmpty ? '' : ' · $no'}';
 }
 
 const svcSlots = {
@@ -479,14 +491,15 @@ class ServiceDesk {
   }
 
   /// Client's service profile (trade licence, equipment per site) and the site's building photo.
-  static Future<({String tradeLicense, Map<String, dynamic> equipment, String photo})> siteProfile(ServiceTicket t) async {
+  static Future<({String tradeLicense, Map<String, dynamic> equipment, String photo, Map<String, dynamic> amc})> siteProfile(ServiceTicket t) async {
     var tl = '', photo = '';
-    Map<String, dynamic> eq = {};
-    if (t.clientId.isEmpty) return (tradeLicense: tl, equipment: eq, photo: photo);
+    Map<String, dynamic> eq = {}, amc = {};
+    if (t.clientId.isEmpty) return (tradeLicense: tl, equipment: eq, photo: photo, amc: amc);
     try {
       final d = await _fs.collection('svcClients').doc(t.clientId).get();
       final m = d.data() ?? {};
       tl = '${m['tradeLicense'] ?? ''}';
+      if (m['amc'] is Map) amc = Map<String, dynamic>.from(m['amc'] as Map);
       final sites = m['sites'];
       if (sites is Map && sites[t.siteId] is Map) eq = Map<String, dynamic>.from(sites[t.siteId] as Map);
       if (t.siteId.isNotEmpty) {
@@ -494,7 +507,7 @@ class ServiceDesk {
         photo = '${p.data()?['data'] ?? ''}';
       }
     } catch (_) {}
-    return (tradeLicense: tl, equipment: eq, photo: photo);
+    return (tradeLicense: tl, equipment: eq, photo: photo, amc: amc);
   }
 
   static Future<void> addNote(ServiceTicket t, AppUser me, String note) =>

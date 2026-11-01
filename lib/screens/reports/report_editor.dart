@@ -79,6 +79,7 @@ class _ReportEditorState extends State<ReportEditor> {
         final eq = [
           ...((prof.equipment['nvrs'] as List?) ?? const []).whereType<Map>(),
           ...((prof.equipment['cameras'] as List?) ?? const []).whereType<Map>(),
+          ...((prof.equipment['others'] as List?) ?? const []).whereType<Map>(),
         ];
         final k = kindOf('${d['reportType'] ?? ''}');
         d['items'] = t.faults.map((f) {

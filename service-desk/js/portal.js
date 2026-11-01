@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, RESULT_COLOR, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=9';
+} from './sd.js?v=10';
 
 window.__sdStarted = true;
 
@@ -54,6 +54,8 @@ async function start() {
   if (!urlToken) history.replaceState(null, '', `?c=${token}`);
   $('#p-client').textContent = S.portal.clientName || 'Service request';
   document.title = `Service request – ${S.portal.clientName || 'Leaders Line'}`;
+  const amc = amcStatus(S.portal.amc);
+  if (amc.text) $('#p-client').insertAdjacentHTML('afterend', `<div class="amcb ${amc.tone}">${esc(amc.text)}${S.portal.amc.no ? ` · Contract ${esc(S.portal.amc.no)}` : ''}</div>`);
   const sites = S.portal.sites || [];
   if (sites.length === 1) S.form.siteId = sites[0].id;
   loadSitePhotos(sites);
@@ -164,13 +166,14 @@ function formHtml() {
     <div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Helps the technician find you — only if you are at the store now.'}</span></div>
   </div></div>` : '';
   const eqSite = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
-  const eqHtml = eqSite && ((eqSite.nvrs || []).length || (eqSite.cameras || []).length) ? `<div class="eqsel"><h4>Which equipment has the problem? Tap all that apply (optional).${f.eq.length ? ` <b>${f.eq.length} selected</b>` : ''}</h4>
+  const eqHtml = eqSite && ((eqSite.nvrs || []).length || (eqSite.cameras || []).length || (eqSite.others || []).length) ? `<div class="eqsel"><h4>Which equipment has the problem? Tap all that apply (optional).${f.eq.length ? ` <b>${f.eq.length} selected</b>` : ''}</h4>
     ${(eqSite.nvrs || []).length ? `<div class="eqchips">${eqSite.nvrs.map((n) => `<button type="button" class="eqchip ${f.eq.includes(n.id) ? 'on' : ''}" data-eq="${esc(n.id)}" aria-pressed="${f.eq.includes(n.id)}">NVR ${esc(n.no)}${n.name ? `<small>${esc(n.name)}</small>` : ''}</button>`).join('')}</div>` : ''}
     ${(() => {
       const cams = eqSite.cameras || []; if (!cams.length) return '';
       const groups = {}; cams.forEach((c) => { (groups[c.nvr || ''] = groups[c.nvr || ''] || []).push(c); });
       return Object.entries(groups).map(([nv, l]) => `<h4>Cameras${nv ? ` on NVR ${esc(nv)}` : ''}</h4><div class="eqchips">${l.map((c) => `<button type="button" class="eqchip ${f.eq.includes(c.id) ? 'on' : ''}" data-eq="${esc(c.id)}" aria-pressed="${f.eq.includes(c.id)}">Cam ${esc(c.no)}${c.name ? `<small>${esc(c.name)}</small>` : ''}</button>`).join('')}</div>`).join('');
-    })()}</div>` : '';
+    })()}
+    ${(eqSite.others || []).length ? `<h4>Other devices</h4><div class="eqchips">${eqSite.others.map((x) => `<button type="button" class="eqchip ${f.eq.includes(x.id) ? 'on' : ''}" data-eq="${esc(x.id)}" aria-pressed="${f.eq.includes(x.id)}">${esc(x.type || 'Device')}${x.name ? `<small>${esc(x.name)}</small>` : ''}</button>`).join('')}</div>` : ''}</div>` : '';
   const cur = sites.find((x) => x.id === f.siteId);
   const one = sites.length === 1;
   const addr1 = (x) => String(x.address || '').split('\n')[0];
@@ -337,8 +340,8 @@ async function submit() {
   if (f.preferredSlot === 'exact' && f.preferredTime) t.preferredTime = f.preferredTime;
   const eqSite = !walk && site && S.portal.equipment ? S.portal.equipment[site.id] : null;
   if (eqSite && f.eq.length) {
-    const all = [...(eqSite.nvrs || []).map((n) => ({ ...n, kind: 'nvr' })), ...(eqSite.cameras || []).map((c) => ({ ...c, kind: 'camera' }))];
-    t.faults = f.eq.map((id) => all.find((x) => x.id === id)).filter(Boolean).map((x) => ({ kind: x.kind, id: x.id, no: x.no || '', name: x.name || '', nvr: x.nvr || '', ch: x.ch || '', result: '', note: '' }));
+    const all = [...(eqSite.nvrs || []).map((n) => ({ ...n, kind: 'nvr' })), ...(eqSite.cameras || []).map((c) => ({ ...c, kind: 'camera' })), ...(eqSite.others || []).map((x) => ({ ...x, kind: 'other' }))];
+    t.faults = f.eq.map((id) => all.find((x) => x.id === id)).filter(Boolean).map((x) => ({ kind: x.kind, id: x.id, no: x.no || '', name: x.name || '', nvr: x.nvr || '', ch: x.ch || '', ...(x.type ? { type: x.type } : {}), result: '', note: '' }));
   }
   const gps = site && hasGPS(site) ? site : (other || walk) && f.gps ? f.gps : null;
   if (gps) { t.lat = +gps.lat; t.lng = +gps.lng; }

@@ -730,7 +730,9 @@ class _SiteDetails extends StatelessWidget {
         if (p == null) return const SizedBox.shrink();
         final nvrs = (p.equipment['nvrs'] is List) ? (p.equipment['nvrs'] as List).whereType<Map>().toList() : const <Map>[];
         final cams = (p.equipment['cameras'] is List) ? (p.equipment['cameras'] as List).length : 0;
-        if (p.tradeLicense.isEmpty && p.photo.isEmpty && nvrs.isEmpty) return const SizedBox.shrink();
+        final others = (p.equipment['others'] is List) ? (p.equipment['others'] as List).whereType<Map>().toList() : const <Map>[];
+        final amc = svcAmcText(p.amc);
+        if (p.tradeLicense.isEmpty && p.photo.isEmpty && nvrs.isEmpty && cams == 0 && others.isEmpty && amc.isEmpty) return const SizedBox.shrink();
         final i = p.photo.indexOf('base64,');
         final b64 = i >= 0 ? p.photo.substring(i + 7) : '';
         return Padding(
@@ -745,10 +747,18 @@ class _SiteDetails extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('Site details', style: TextStyle(fontWeight: FontWeight.w800)),
+                if (amc.isNotEmpty)
+                  Text(amc, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: amc.startsWith('AMC expired') ? AppColors.danger : AppColors.success)),
+                if ('${p.amc['covered'] ?? ''}'.isNotEmpty) Text('${p.amc['covered']}', style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                 if (p.tradeLicense.isNotEmpty) Text('Trade licence: ${p.tradeLicense}', style: const TextStyle(fontSize: 13)),
-                if (nvrs.isNotEmpty) Text('${nvrs.length} NVR, $cams cameras under maintenance', style: const TextStyle(fontSize: 13)),
+                if (nvrs.isNotEmpty || cams > 0 || others.isNotEmpty)
+                  Text([if (nvrs.isNotEmpty) '${nvrs.length} NVR', if (cams > 0) '$cams cameras', if (others.isNotEmpty) '${others.length} other devices'].join(', ') + ' under maintenance',
+                      style: const TextStyle(fontSize: 13)),
                 for (final n in nvrs)
                   Text('NVR ${n['no'] ?? ''}${'${n['name'] ?? ''}'.isEmpty ? '' : ' – ${n['name']}'}${'${n['ip'] ?? ''}'.isEmpty ? '' : ' · ${n['ip']}'}',
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                for (final o in others)
+                  Text('${o['type'] ?? 'Device'}${'${o['name'] ?? ''}'.isEmpty ? '' : ' – ${o['name']}'}${'${o['model'] ?? ''}'.isEmpty ? '' : ' · ${o['model']}'}',
                       style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
               ]),
             ),
