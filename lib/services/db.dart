@@ -80,6 +80,72 @@ class Db {
       siteKeys.doc(_nameKey(name)),
     ];
     return _fs.runTransaction<({Site site, bool existing})>((tx) async {
+      return _createSiteTx(tx, keyRefs, user, name, address, lat, lng);
+    }).catchError((Object e) {
+      // Some phones / moments get "resource-exhausted" or "aborted" for transactions even when the
+      // project is fine — fall back to plain reads + one batch so the employee can still add the site.
+      if (e is FirebaseException && const ['resource-exhausted', 'aborted', 'unavailable', 'deadline-exceeded'].contains(e.code)) {
+        return _createSitePlain(keyRefs, user, name, address, lat, lng);
+      }
+      throw e;
+    });
+  }
+
+  static Future<({Site site, bool existing})> _createSitePlain(List<DocumentReference<Map<String, dynamic>>> keyRefs, AppUser user,
+      String name, String address, double lat, double lng) async {
+    final keys = await Future.wait(keyRefs.map((r) => r.get()));
+    for (final k in keys.where((k) => k.exists)) {
+      final sid = k.data()?['siteId'];
+      if (sid is! String || sid.isEmpty) continue;
+      final sd = await sites.doc(sid).get();
+      if (!sd.exists) continue;
+      final existing = Site.fromDoc(sd);
+      if (existing.active && existing.status != 'rejected') return (site: existing, existing: true);
+    }
+    final ref = sites.doc();
+    final b = _fs.batch();
+    b.set(ref, _newSiteData(user, name, address, lat, lng));
+    final claim = {'siteId': ref.id, 'by': user.id, 'at': FieldValue.serverTimestamp()};
+    b.set(siteKeys.doc(_cell(lat, lng)), claim);
+    b.set(siteKeys.doc(_nameKey(name)), claim);
+    await b.commit();
+    return (site: _newSite(ref.id, user, name, address, lat, lng), existing: false);
+  }
+
+  static Map<String, dynamic> _newSiteData(AppUser user, String name, String address, double lat, double lng) => {
+        'name': name,
+        'address': address,
+        'lat': lat,
+        'lng': lng,
+        'radius': kDefaultSiteRadius,
+        'active': true,
+        'progress': 0,
+        'status': 'active',
+        'notes': 'Added from the field by ${user.name}',
+        'approved': false,
+        'createdBy': user.id,
+        'createdByName': user.name,
+        'addedByEmployee': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+  static Site _newSite(String id, AppUser user, String name, String address, double lat, double lng) => Site(
+        id: id,
+        name: name,
+        address: address,
+        lat: lat,
+        lng: lng,
+        radius: kDefaultSiteRadius,
+        status: 'active',
+        notes: 'Added from the field by ${user.name}',
+        createdByName: user.name,
+        createdBy: user.id,
+        approved: false,
+      );
+
+  static Future<({Site site, bool existing})> _createSiteTx(Transaction tx, List<DocumentReference<Map<String, dynamic>>> keyRefs,
+      AppUser user, String name, String address, double lat, double lng) async {
+    {
       // 1) read every key (all reads must come before writes)
       final keys = <DocumentSnapshot<Map<String, dynamic>>>[];
       for (final r in keyRefs) {
@@ -131,7 +197,7 @@ class Db {
         ),
         existing: false,
       );
-    });
+    }
   }
 
   static Future<Site?> getSite(String id) async {
