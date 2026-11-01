@@ -28,7 +28,7 @@ const S = {
   me: null, view: 'tickets', filter: 'open', q: '', fPrio: '', fTech: '',
   open: new Map(), recent: new Map(), users: [], portals: [], clients: [], clientsErr: '',
   unsub: [], loadedOpen: false, popQueue: [], popOn: false, rangeFrom: '', rangeTo: '', rClient: '', rTech: '',
-  supportBase: new URL('../support/', new URL('./', location.href)).href,
+  supportBase: new URL('./', location.href).href,
   sound: lsGet('llct-sd-sound', '1') === '1', synced: false, layout: lsGet('llct-sd-layout', 'board'),
 };
 function lsGet(k, d) { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } }
@@ -784,7 +784,7 @@ function settingsView(m) {
       <div class="field"><span>Staff desk (this page)</span><div class="linkbox"><input readonly value="${esc(new URL('desk.html', PORTAL_BASE).href)}"><button class="btn sm" id="cp1">Copy</button></div></div>
       <div class="field"><span>Client links start with</span><input readonly value="${esc(PORTAL_BASE)}?c=…"></div>
       <div class="field"><span>Walk-in support page (public form for any customer)</span><div class="linkbox"><input id="sup-url" value="${esc(S.supportBase)}"><button class="btn sm" id="sup-save">Save</button></div>
-        <small class="muted">Walk-in customers get tracking links on this address. Default is the support folder next to this one.</small></div>
+        <small class="muted">Walk-in customers get tracking links on this address. Normally the same folder as this desk.</small></div>
       <p class="small muted">Saved automatically to the shared settings, so the attendance app and llct.net dashboard open this desk.</p>
       <h3>Alerts</h3><p class="small muted">New requests pop up on this desk, in the attendance app (staff &amp; management) and on the llct.net dashboard. Keep this page open on the office PC with sound on.</p>
       <div class="row"><button class="btn sm" id="tst">Test popup &amp; sound</button>${'Notification' in window ? `<span class="small muted">Desktop alerts: ${Notification.permission}</span>` : ''}</div></div></div>`;

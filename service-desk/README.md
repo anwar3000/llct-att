@@ -4,6 +4,7 @@ Client service requests (CCTV AMC and other call-outs) for Leaders Line, on the 
 
 | Page | Who | What |
 |---|---|---|
+| `index.html` | Any customer (walk-in) | Public request form: brand, store/location, contact, the request; gets a tracking link `index.html?t=…`. |
 | `index.html?c=<token>` | Clients (no login) | Raise a request: site, service type, priority, preferred visit time, photos, contact. Track every request live (status, technician, visit time, service report no.). |
 | `desk.html` | Staff (attendance login) | All tickets with live popup + sound for new requests, assign the nearest technician, schedule the visit, status, timeline, WhatsApp updates, client links, per-client history, reports & CSV. |
 
@@ -14,7 +15,7 @@ The attendance app (Android) also shows a popup for every new request, a **Servi
 1. Copy this folder to the web root, e.g.
    ```bash
    scp -r service-desk admin@52.221.223.27:/tmp/
-   ssh admin@52.221.223.27 'sudo mkdir -p /var/www/html/service && sudo cp -r /tmp/service-desk/* /var/www/html/service/'
+   ssh admin@52.221.223.27 'sudo mkdir -p /var/www/html/support && sudo cp -r /tmp/service-desk/* /var/www/html/support/'
    ```
    Any web server works (nginx / Apache). Serve it over **HTTPS** (needed for "use my location" and copy buttons).
 2. Publish the Firestore rules: copy the whole `firestore.rules` from the repo root → Firebase console → Firestore Database → Rules → **Publish**.

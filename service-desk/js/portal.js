@@ -16,7 +16,8 @@ const QS = new URLSearchParams(location.search);
 const urlToken = QS.get('c') || (location.hash.match(/c=([\w-]+)/) || [])[1] || '';
 const trackId = QS.get('t') || '';
 // 'link': a client's private link · 'walkin': public support page (any customer) · 'track': one walk-in request
-const MODE = urlToken ? 'link' : (window.SD_MODE === 'walkin' ? (trackId ? 'track' : 'walkin') : trackId ? 'track' : (lsGet(TK) ? 'link' : 'walkin'));
+// Without a link the page is the walk-in form; the installed app (?app=1) reopens this phone's client page.
+const MODE = urlToken ? 'link' : trackId ? 'track' : (QS.get('app') === '1' && lsGet(TK) ? 'link' : 'walkin');
 const token = MODE === 'link' ? (urlToken || lsGet(TK) || '') : '';
 const WK = 'llct-sd-walkins'; // this device's walk-in requests (tracking ids)
 const myWalkins = () => { try { return JSON.parse(lsGet(WK) || '[]'); } catch (_) { return []; } };
@@ -72,6 +73,7 @@ function startPublic() {
   $('#p-sub').textContent = MODE === 'track' ? 'Follow your request here until the work is done.' : 'For CCTV, security and network faults or maintenance. Tell us where you are and what needs attention — our team will call you to confirm.';
   document.title = 'Service request – Leaders Line';
   if (trackId) { addWalkin(trackId, ''); S.tab = 'list'; S.open = trackId; }
+  if (lsGet(TK)) S.companyLink = `?c=${lsGet(TK)}`;
   const watch = () => {
     myWalkins().forEach(({ pid }) => {
       if (pubSubs.has(pid)) return;
@@ -100,7 +102,7 @@ function bindTabs() { $$('[data-tab]').forEach((b) => (b.onclick = () => { readF
 function render() {
   if (!S.portal) return;
   const body = S.sent ? sentHtml() : S.tab === 'list' ? listHtml() : formHtml();
-  app.innerHTML = tabsHtml() + body + footHtml();
+  app.innerHTML = (S.companyLink && S.portal.walkin ? `<div class="card pad small" style="margin-bottom:14px">Your company has its own service page. <a href="${S.companyLink}"><b>Open my company page</b></a></div>` : '') + tabsHtml() + body + footHtml();
   bindTabs();
   bindInstall();
   if (S.sent) {

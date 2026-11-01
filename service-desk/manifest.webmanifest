@@ -2,7 +2,7 @@
   "name": "Leaders Line Service",
   "short_name": "LL Service",
   "description": "Raise and follow CCTV and security service requests with Leaders Line.",
-  "start_url": "./",
+  "start_url": "./?app=1",
   "scope": "./",
   "display": "standalone",
   "background_color": "#F2F4F7",
