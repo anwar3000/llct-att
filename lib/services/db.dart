@@ -1250,13 +1250,15 @@ class Db {
   /// was already counted when given) and payments to drivers.
   static Future<List<AcctEntry>> acctAuto(String from, String to) async {
     final res = await Future.wait([
-      _fs.collection('petty').where('date', isGreaterThanOrEqualTo: from).where('date', isLessThanOrEqualTo: to).get(),
+      // Only "cash given" lines (small, no receipt photos) — not every staff expense with its photo.
+      _fs.collection('petty').where('type', isEqualTo: 'credit').get(),
       _fs.collection('driverPayments').where('date', isGreaterThanOrEqualTo: from).where('date', isLessThanOrEqualTo: to).get(),
     ]);
     final out = <AcctEntry>[];
     for (final d in res[0].docs) {
       final m = d.data();
-      if (m['type'] != 'credit' || m['status'] == 'rejected') continue;
+      final day = (m['date'] as String?) ?? '';
+      if (m['type'] != 'credit' || m['status'] == 'rejected' || day.compareTo(from) < 0 || day.compareTo(to) > 0) continue;
       out.add(AcctEntry(
         id: 'petty_${d.id}',
         source: 'petty',

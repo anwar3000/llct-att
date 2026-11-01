@@ -530,13 +530,15 @@ export async function acctBroughtForward(from, opening) {
 /** Automatic expense lines: petty cash given to staff, and payments to drivers. */
 export async function autoAcctLines(from, to) {
   const [petty, pays] = await Promise.all([
-    getDocs(query(C('petty'), where('date', '>=', from), where('date', '<=', to))),
+    // Only "cash given" lines (small, no receipt photos) — not every staff expense with its photo.
+    getDocs(query(C('petty'), where('type', '==', 'credit'))),
     getDocs(query(C('driverPayments'), where('date', '>=', from), where('date', '<=', to))),
   ]);
   const out = [];
   for (const d of petty.docs) {
     const t = mapPetty(d);
-    if (t.type !== 'credit' || t.status === 'rejected') continue;
+    const day = t.date || dateKey(t.createdLocal || new Date());
+    if (t.type !== 'credit' || t.status === 'rejected' || day < from || day > to) continue;
     out.push({ id: `petty_${t.id}`, source: 'petty', type: 'expense', date: t.date || dateKey(t.createdLocal || new Date()), amount: t.amount,
       category: 'Petty cash given', method: 'Bank transfer', reference: '', party: t.employeeName, note: [t.note, t.createdByName ? `given by ${t.createdByName}` : ''].filter(Boolean).join(' · '),
       siteId: t.siteId, siteName: t.siteName, hasFile: false });
