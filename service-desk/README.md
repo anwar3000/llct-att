@@ -15,7 +15,7 @@ The attendance app (Android) also shows a popup for every new request, a **Servi
 1. Copy this folder to the web root, e.g.
    ```bash
    scp -r service-desk admin@52.221.223.27:/tmp/
-   ssh admin@52.221.223.27 'sudo mkdir -p /var/www/html/support && sudo cp -r /tmp/service-desk/* /var/www/html/support/'
+   ssh admin@52.221.223.27 'sudo mkdir -p /var/www/html/service && sudo cp -r /tmp/service-desk/* /var/www/html/service/'
    ```
    Any web server works (nginx / Apache). Serve it over **HTTPS** (needed for "use my location" and copy buttons).
 2. Publish the Firestore rules: copy the whole `firestore.rules` from the repo root → Firebase console → Firestore Database → Rules → **Publish**.
