@@ -9,8 +9,8 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=12';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=12';
+} from './sd.js?v=13';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=13';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -405,12 +405,13 @@ function openTicket(id, quiet = false) {
         <span>Contact</span><span>${esc(t.contactName)}${t.contactPhone ? `<br><a href="${telLink(t.contactPhone)}">📞 ${esc(t.contactPhone)}</a> · <a href="${waLink(t.contactPhone, '')}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${t.contactEmail ? `<br>${esc(t.contactEmail)}` : ''}</span>
         <span>Raised</span><span>${esc(fmtDT(t.createdAt))} · ${t.source === 'staff' ? 'by staff' : t.source === 'walkin' ? 'walk-in (support page)' : 'client link'}</span>
       </div>${Array.isArray(t.photos) && t.photos.length ? `<div class="thumbs" style="margin-top:12px">${t.photos.map((ph, i) => `<img src="${ph}" data-ph="${i}" alt="photo">`).join('')}</div>` : ''}</div>
-      ${Array.isArray(t.faults) && t.faults.length ? `<div class="card pad"><h3>Equipment reported faulty (${t.faults.length})</h3>
-        <div class="faults">${t.faults.map((f, i) => `<div class="fault"><span class="fl">${esc(faultLabel(f))}</span>
+      ${(Array.isArray(t.faults) && t.faults.length) || ((A || mine) && t.open && t.clientId) ? `<div class="card pad"><h3>Equipment checked${(t.faults || []).length ? ` (${t.faults.length})` : ''}</h3>
+        ${(t.faults || []).length ? '' : '<p class="small muted" style="margin:4px 0 0">Add the cameras, NVR or devices checked, with a result and comment for each. They go into the service report.</p>'}
+        <div class="faults">${(t.faults || []).map((f, i) => `<div class="fault"><span class="fl">${esc(faultLabel(f))}</span>
           ${(A || mine) && t.open ? `<select data-fr="${i}"><option value="">Result…</option>${RESULTS.map((r) => `<option ${f.result === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
             <input class="fnote" data-fn="${i}" value="${esc(f.note || '')}" placeholder="Comment, e.g. cleaned lens, replaced connector">`
             : `<span>${f.result ? `<span class="rchip" style="background:${RESULT_COLOR[f.result] || '#75757a'}22;color:${RESULT_COLOR[f.result] || '#75757a'}">${esc(f.result)}</span>` : '<span class="muted small">Not checked yet</span>'}</span>${f.note ? `<span class="fnote small muted">${esc(f.note)}</span>` : ''}`}</div>`).join('')}</div>
-        ${(A || mine) && t.open ? '<div class="row" style="margin-top:8px"><button class="btn sm primary" id="fr-save">Save results</button><span class="small muted">They go into the service report automatically.</span></div>' : ''}</div>` : ''}
+        ${(A || mine) && t.open ? `<div class="row" style="margin-top:8px">${t.clientId ? '<button class="btn sm" id="fr-add">+ Add equipment</button>' : ''}${(t.faults || []).length ? '<button class="btn sm primary" id="fr-save">Save results</button><span class="small muted">They go into the service report automatically.</span>' : ''}</div>` : ''}</div>` : ''}
       ${t.clientId ? '<div class="card pad" id="prof-card"><span class="small muted">Loading site details…</span></div>' : ''}
     </div><div class="stack">
       <div class="card pad"><h3>Assignment</h3>
@@ -484,6 +485,26 @@ function openTicket(id, quiet = false) {
     const done = faults.filter((f) => f.result).map((f) => `${faultLabel(f)}: ${f.result}`).join('; ');
     frs.disabled = true;
     await updateTicket(cur, { faults }, `Equipment checked — ${done || 'results updated'}`, done ? `Technician checked: ${done}` : undefined);
+  };
+  const fra = $('#fr-add', o);
+  if (fra) fra.onclick = async () => {
+    let e = {};
+    try { const pr = await getDoc(doc(db, 'svcClients', t.clientId)); e = ((pr.exists() && pr.data().sites) || {})[t.siteId] || {}; } catch (er) { return toast(friendly(er), true); }
+    const all = [...(e.nvrs || []).map((n) => ({ kind: 'nvr', id: n.id, no: n.no || '', name: n.name || '' })),
+      ...(e.cameras || []).map((c) => ({ kind: 'camera', id: c.id, no: c.no || '', name: c.name || '', nvr: c.nvr || '', ch: c.ch || '' })),
+      ...(e.others || []).map((x) => ({ kind: 'other', id: x.id, type: x.type || '', name: x.name || '' }))];
+    if (!all.length) return toast('No equipment saved for this site yet — use Edit equipment under Site details first.', true);
+    const cur = getT(t.id) || t; const have = new Set((cur.faults || []).map((f) => f.id));
+    const m = modal('<h2 class="grow">Add equipment checked</h2>', `<div class="pickl">${all.map((x) => `<label class="pick"><input type="checkbox" data-pk="${esc(x.id)}" ${have.has(x.id) ? 'checked disabled' : ''}> ${esc(faultLabel(x))}${have.has(x.id) ? ' <span class="small muted">(already on this job)</span>' : ''}</label>`).join('')}</div>`,
+      '<button class="btn" data-x>Cancel</button><button class="btn primary" id="pk-ok">Add</button>');
+    $('#pk-ok', m).onclick = async () => {
+      const ids = $$('[data-pk]', m).filter((i) => i.checked && !i.disabled).map((i) => i.dataset.pk);
+      if (!ids.length) return close(m);
+      const c2 = getT(t.id) || t;
+      const faults = [...(c2.faults || []), ...all.filter((x) => ids.includes(x.id)).map((x) => ({ ...x, result: '', note: '' }))];
+      $('#pk-ok', m).disabled = true; close(m);
+      await updateTicket(c2, { faults }, `Equipment added to check: ${ids.length}`);
+    };
   };
   const pc = $('#prof-card', o);
   if (pc) {

@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=12';
+} from './sd.js?v=13';
 
 window.__sdStarted = true;
 

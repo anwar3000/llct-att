@@ -427,7 +427,7 @@ class _TicketDetailState extends State<_TicketDetail> {
           ),
         ),
       ],
-      if (t.faults.isNotEmpty) ...[
+      if (t.faults.isNotEmpty || ((mine || canAssign) && t.open && t.clientId.isNotEmpty)) ...[
         const SizedBox(height: 12),
         _FaultsEditor(key: ValueKey('faults-${t.id}-${t.faults.map((f) => '${f['result']}|${f['note']}').join(',')}'), t: t, me: me, canEdit: (mine || canAssign) && t.open),
       ],
@@ -661,18 +661,91 @@ class _FaultsEditorState extends State<_FaultsEditor> {
     }
   }
 
+  /// Pick equipment of the site (from the customer's profile) to check and comment on.
+  Future<void> _addFromSite() async {
+    final prof = await ServiceDesk.siteProfile(widget.t);
+    if (!mounted) return;
+    List<Map> l(String k) => (prof.equipment[k] is List) ? (prof.equipment[k] as List).whereType<Map>().toList() : const <Map>[];
+    final all = <Map<String, dynamic>>[
+      for (final n in l('nvrs')) {'kind': 'nvr', 'id': '${n['id']}', 'no': '${n['no'] ?? ''}', 'name': '${n['name'] ?? ''}'},
+      for (final c in l('cameras')) {'kind': 'camera', 'id': '${c['id']}', 'no': '${c['no'] ?? ''}', 'name': '${c['name'] ?? ''}', 'nvr': '${c['nvr'] ?? ''}', 'ch': '${c['ch'] ?? ''}'},
+      for (final o in l('others')) {'kind': 'other', 'id': '${o['id']}', 'type': '${o['type'] ?? ''}', 'name': '${o['name'] ?? ''}'},
+    ];
+    if (all.isEmpty) {
+      showSnack(context, 'No equipment saved for this site yet. Ask the office to add it under Customers in the Service Desk.', error: true);
+      return;
+    }
+    final have = _f.map((f) => '${f['id']}').toSet();
+    final sel = <String>{};
+    final picked = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.8,
+          maxChildSize: 0.95,
+          builder: (c, sc) => Column(children: [
+            const Padding(padding: EdgeInsets.fromLTRB(18, 0, 18, 6), child: Text('Add equipment you checked', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
+            Expanded(
+              child: ListView(controller: sc, children: [
+                for (final e in all)
+                  CheckboxListTile(
+                    dense: true,
+                    value: have.contains(e['id']) || sel.contains(e['id']),
+                    onChanged: have.contains(e['id']) ? null : (v) => set(() => v == true ? sel.add('${e['id']}') : sel.remove(e['id'])),
+                    title: Text(svcFaultLabel(e)),
+                    subtitle: have.contains(e['id']) ? const Text('Already on this job') : null,
+                  ),
+              ]),
+            ),
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                child: SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(c, sel), child: Text(sel.isEmpty ? 'Close' : 'Add ${sel.length}'))),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+    setState(() {
+      for (final e in all.where((e) => picked.contains(e['id']))) {
+        _f.add({...e, 'result': '', 'note': ''});
+      }
+      _dirty = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_f.isEmpty && !widget.canEdit) return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(color: const Color(0xFFF4F6FA), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFDCE1E8))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Equipment reported faulty (${_f.length})', style: const TextStyle(fontWeight: FontWeight.w800)),
+        Text(_f.isEmpty ? 'Equipment checked' : 'Equipment checked (${_f.length})', style: const TextStyle(fontWeight: FontWeight.w800)),
+        if (_f.isEmpty) const Padding(padding: EdgeInsets.only(top: 4), child: Text('Add the cameras, NVR or devices you checked, with a result and remark for each. They go into the service report.', style: TextStyle(fontSize: 12.5, color: AppColors.muted))),
         for (var i = 0; i < _f.length; i++)
           Padding(
+            key: ValueKey('f-${_f[i]['id']}-$i'),
             padding: const EdgeInsets.only(top: 10),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(svcFaultLabel(_f[i]), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Row(children: [
+                Expanded(child: Text(svcFaultLabel(_f[i]), style: const TextStyle(fontWeight: FontWeight.w700))),
+                if (widget.canEdit && '${_f[i]['result'] ?? ''}'.isEmpty && '${_f[i]['note'] ?? ''}'.isEmpty)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Remove',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => setState(() {
+                      _f.removeAt(i);
+                      _dirty = true;
+                    }),
+                  ),
+              ]),
               if (!widget.canEdit) ...[
                 Text('${_f[i]['result'] ?? ''}'.isEmpty ? 'Not checked yet' : '${_f[i]['result']}',
                     style: TextStyle(color: svcResultColor('${_f[i]['result'] ?? ''}'), fontWeight: FontWeight.w700, fontSize: 13)),
@@ -706,11 +779,17 @@ class _FaultsEditorState extends State<_FaultsEditor> {
           ),
         if (widget.canEdit) ...[
           const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _busy || !_dirty ? null : _save,
-            icon: const Icon(Icons.save_outlined, size: 18),
-            label: Text(_busy ? 'Saving…' : 'Save results'),
-          ),
+          Row(children: [
+            OutlinedButton.icon(onPressed: _busy ? null : _addFromSite, icon: const Icon(Icons.add, size: 18), label: const Text('Add equipment')),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _busy || !_dirty ? null : _save,
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: Text(_busy ? 'Saving…' : 'Save results'),
+              ),
+            ),
+          ]),
         ],
       ]),
     );
