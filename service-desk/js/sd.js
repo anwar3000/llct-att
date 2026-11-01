@@ -197,6 +197,23 @@ export function newTicketNo() {
 export const reportLink = (ticketId) => `${INVOICING_URL}#/edit?${encodeURIComponent(JSON.stringify({ type: 'delivery', rt: 'service', tk: ticketId }))}`;
 export const reportViewLink = (reportId) => `${INVOICING_URL}#/view?${encodeURIComponent(JSON.stringify({ id: reportId }))}`;
 
+// ------------------------------------------------------------------ equipment under maintenance
+/** What the technician found for each faulty item (also used in the service report). */
+export const RESULTS = ['Rectified', 'Working', 'Need replacement', 'Replaced', 'Pending parts', 'Not checked'];
+export const RESULT_COLOR = { Rectified: '#1F8A5B', Working: '#1F8A5B', Replaced: '#1F8A5B', 'Need replacement': '#B4372B', 'Pending parts': '#C27A12', 'Not checked': '#75757a' };
+/** "NVR 1 – Main office" / "Camera 05 – Main gate (NVR 1, ch 5)" */
+export function faultLabel(f) {
+  if (!f) return '';
+  if (f.kind === 'nvr') return `NVR ${f.no || ''}${f.name ? ` – ${f.name}` : ''}`.trim();
+  const where = f.nvr ? ` (NVR ${f.nvr}${f.ch ? `, ch ${f.ch}` : ''})` : '';
+  return `Camera ${f.no || ''}${f.name ? ` – ${f.name}` : ''}${where}`.trim();
+}
+/** Client-visible copy of a site's equipment (no serials / IPs). */
+export const leanEquipment = (e) => ({
+  nvrs: (e && e.nvrs || []).map((n) => ({ id: n.id, no: n.no || '', name: n.name || '' })),
+  cameras: (e && e.cameras || []).map((c) => ({ id: c.id, no: c.no || '', name: c.name || '', nvr: c.nvr || '', ch: c.ch || '' })),
+});
+
 /** Where the customer's view of a ticket lives: their client link, or the walk-in tracking page. */
 export const mirrorPath = (t) => (t.portal ? ['svcPortals', t.portal, 'tickets', t.id || t.number] : t.publicId ? ['svcPublic', t.publicId] : null);
 export const hasClientPage = (t) => !!(t && (t.portal || t.publicId));
@@ -208,6 +225,7 @@ export function publicView(t) {
     categories: Array.isArray(t.categories) ? t.categories : (t.category ? [t.category] : []),
     description: t.description || '', priority: t.priority || 'normal', preferredDate: t.preferredDate || '',
     preferredSlot: t.preferredSlot || '', preferredTime: t.preferredTime || '', contactName: t.contactName || '', status: t.status || 'new',
+    faults: Array.isArray(t.faults) ? t.faults.map((f) => ({ kind: f.kind, id: f.id, no: f.no || '', name: f.name || '', nvr: f.nvr || '', ch: f.ch || '', result: f.result || '', note: f.note || '' })) : [],
     photosCount: Array.isArray(t.photos) ? t.photos.length : 0,
   };
   if (t.cameras) o.cameras = t.cameras;

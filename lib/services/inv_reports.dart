@@ -39,10 +39,10 @@ const kindDelivery = ReportKind('', 'Delivery Note', 'DN', 'DLN', 'Deliver to', 
     ['Delivered', 'Delivered & installed', 'Installed', 'Partially delivered', 'Pending']);
 const kindService = ReportKind('service', 'Service Report', 'SR', 'SRV', 'Customer', 'Customer confirmation',
     'Work completed to satisfaction. Thank you for your acceptance.', 'Site photos',
-    ['Completed', 'Attended', 'Repaired', 'Replaced', 'Pending parts', 'Follow-up required']);
+    ['Completed', 'Rectified', 'Working', 'Attended', 'Repaired', 'Replaced', 'Need replacement', 'Pending parts', 'Not checked', 'Follow-up required']);
 const kindCallout = ReportKind('callout', 'Call-out Attendance Report', 'CO', 'COR', 'Customer', 'Customer confirmation',
     'Call-out attended. Thank you for your acceptance.', 'Site photos',
-    ['Attended', 'Completed', 'Temporary fix', 'Pending parts', 'Follow-up required']);
+    ['Attended', 'Completed', 'Rectified', 'Working', 'Temporary fix', 'Need replacement', 'Pending parts', 'Not checked', 'Follow-up required']);
 const reportKinds = [kindService, kindCallout, kindDelivery];
 ReportKind kindOf(String rt) => rt == 'service' ? kindService : (rt == 'callout' ? kindCallout : kindDelivery);
 

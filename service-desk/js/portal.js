@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, RESULT_COLOR, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js';
+} from './sd.js?v=8';
 
 window.__sdStarted = true;
 
@@ -30,7 +30,7 @@ const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); retur
 function freshForm() {
   let c = {};
   try { c = JSON.parse(lsGet(LS) || '{}'); } catch (_) { /* ignore */ }
-  return { brand: c.brand || '', store: c.store || '', area: c.area || '', siteId: '', otherName: '', otherAddress: '', gps: null, cats: [], priority: 'normal', preferredDate: dateKey(), preferredSlot: 'asap', description: '', cameras: 0, contactName: c.name || '', contactPhone: c.phone || '', contactEmail: c.email || '' };
+  return { brand: c.brand || '', store: c.store || '', area: c.area || '', siteId: '', otherName: '', otherAddress: '', gps: null, cats: [], eq: [], priority: 'normal', preferredDate: dateKey(), preferredSlot: 'asap', description: '', cameras: 0, contactName: c.name || '', contactPhone: c.phone || '', contactEmail: c.email || '' };
 }
 
 function fail(title, msg) {
@@ -151,6 +151,14 @@ function formHtml() {
     <label class="field" style="margin-top:12px"><span>Address or area</span><input id="f-area" autocomplete="street-address" value="${esc(f.area)}" placeholder="Building, street, area, emirate"></label>
     <div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Helps the technician find you — only if you are at the store now.'}</span></div>
   </div></div>` : '';
+  const eqSite = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
+  const eqHtml = eqSite && ((eqSite.nvrs || []).length || (eqSite.cameras || []).length) ? `<div class="eqsel"><h4>Which equipment has the problem? Tap all that apply (optional).${f.eq.length ? ` <b>${f.eq.length} selected</b>` : ''}</h4>
+    ${(eqSite.nvrs || []).length ? `<div class="eqchips">${eqSite.nvrs.map((n) => `<button type="button" class="eqchip ${f.eq.includes(n.id) ? 'on' : ''}" data-eq="${esc(n.id)}" aria-pressed="${f.eq.includes(n.id)}">NVR ${esc(n.no)}${n.name ? `<small>${esc(n.name)}</small>` : ''}</button>`).join('')}</div>` : ''}
+    ${(() => {
+      const cams = eqSite.cameras || []; if (!cams.length) return '';
+      const groups = {}; cams.forEach((c) => { (groups[c.nvr || ''] = groups[c.nvr || ''] || []).push(c); });
+      return Object.entries(groups).map(([nv, l]) => `<h4>Cameras${nv ? ` on NVR ${esc(nv)}` : ''}</h4><div class="eqchips">${l.map((c) => `<button type="button" class="eqchip ${f.eq.includes(c.id) ? 'on' : ''}" data-eq="${esc(c.id)}" aria-pressed="${f.eq.includes(c.id)}">Cam ${esc(c.no)}${c.name ? `<small>${esc(c.name)}</small>` : ''}</button>`).join('')}</div>`).join('');
+    })()}</div>` : '';
   const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">Which of your sites needs the visit?</p>
     ${asCards ? `<div class="opts" role="radiogroup">${sites.map((s) => siteCard(s.id, s.name, String(s.address || '').split('\n')[0], hasGPS(s))).join('')}${siteCard('_other', 'Another location', 'Not in this list', false)}</div>`
       : `<select id="f-site" aria-label="Site"><option value="">Choose the site…</option>${sites.map((s) => `<option value="${esc(s.id)}" ${f.siteId === s.id ? 'selected' : ''}>${esc(s.name)}${s.address ? ' — ' + esc(String(s.address).split('\n')[0]) : ''}</option>`).join('')}<option value="_other" ${other ? 'selected' : ''}>Another location (not in the list)</option></select>`}
@@ -162,6 +170,7 @@ function formHtml() {
   ${step1}${S.portal.walkin ? '' : siteStep}
 
   <div class="step"><span class="sn">2</span><div class="sb"><h2>What needs attention</h2><p class="hint">Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}</p>
+    ${eqHtml}
     <div class="ctiles">${activeTypes().map((t) => `<button type="button" class="ctile ${f.cats.includes(t.k) ? 'on' : ''}" data-cat="${t.k}" aria-pressed="${f.cats.includes(t.k)}">${icon(t.i || t.k, 26)}<span>${esc(t.t)}</span><i class="ck" aria-hidden="true"></i></button>`).join('')}</div>
     <label class="field" style="margin-top:16px"><span>Tell us more <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. Camera 4 at the main gate shows no picture since yesterday evening.">${esc(f.description)}</textarea></label>
     <div class="row" style="margin-top:14px;gap:16px;align-items:flex-start">
@@ -215,12 +224,18 @@ function bindForm() {
   const f = S.form;
   const redraw = () => { readForm(); const y = window.scrollY; render(); window.scrollTo(0, y); };
   if ($('#f-site')) $('#f-site').onchange = () => { f.siteId = $('#f-site').value; redraw(); };
-  $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); f.siteId = b.dataset.site; redraw(); }));
+  $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) f.eq = []; f.siteId = b.dataset.site; redraw(); }));
   $$('[data-cat]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.cat; const i = f.cats.indexOf(k);
     if (i >= 0) f.cats.splice(i, 1); else f.cats.push(k);
     b.classList.toggle('on', i < 0); b.setAttribute('aria-pressed', String(i < 0));
     const h = b.closest('.sb').querySelector('.hint'); h.innerHTML = `Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}`;
+  }));
+  $$('[data-eq]').forEach((b) => (b.onclick = () => {
+    const k = b.dataset.eq; const i = f.eq.indexOf(k);
+    if (i >= 0) f.eq.splice(i, 1); else f.eq.push(k);
+    b.classList.toggle('on', i < 0); b.setAttribute('aria-pressed', String(i < 0));
+    const h = b.closest('.eqsel').querySelector('h4'); h.innerHTML = `Which equipment has the problem? Tap all that apply (optional).${f.eq.length ? ` <b>${f.eq.length} selected</b>` : ''}`;
   }));
   $$('[data-prio]').forEach((b) => (b.onclick = () => { f.priority = b.dataset.prio; $$('[data-prio]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }); }));
   $$('[data-cam]').forEach((b) => (b.onclick = () => { f.cameras = Math.max(0, Math.min(999, (f.cameras || 0) + Number(b.dataset.cam))); $('#f-cams').textContent = f.cameras || '–'; }));
@@ -281,6 +296,11 @@ async function submit() {
     status: 'new', open: true, source: walk ? 'walkin' : 'portal',
   });
   if (f.preferredSlot === 'exact' && f.preferredTime) t.preferredTime = f.preferredTime;
+  const eqSite = !walk && site && S.portal.equipment ? S.portal.equipment[site.id] : null;
+  if (eqSite && f.eq.length) {
+    const all = [...(eqSite.nvrs || []).map((n) => ({ ...n, kind: 'nvr' })), ...(eqSite.cameras || []).map((c) => ({ ...c, kind: 'camera' }))];
+    t.faults = f.eq.map((id) => all.find((x) => x.id === id)).filter(Boolean).map((x) => ({ kind: x.kind, id: x.id, no: x.no || '', name: x.name || '', nvr: x.nvr || '', ch: x.ch || '', result: '', note: '' }));
+  }
   const gps = site && hasGPS(site) ? site : (other || walk) && f.gps ? f.gps : null;
   if (gps) { t.lat = +gps.lat; t.lng = +gps.lng; }
   if (f.contactEmail) t.contactEmail = f.contactEmail;
@@ -294,6 +314,7 @@ async function submit() {
     const data = { ...t };
     if (!withCats) { // older rules without the 'categories' field: keep the extra choices in the description
       delete data.categories; delete data.categoryLabels; delete data.preferredTime;
+      if (data.faults) { data.description = `${data.description}\nEquipment: ${data.faults.map(faultLabel).join(', ')}`; delete data.faults; }
       if (t.categories.length > 1) data.description = `${t.description}\nAlso: ${t.categories.slice(1).map(typeLabel).join(', ')}`;
     }
     const full = { ...data, number: id, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
@@ -358,6 +379,7 @@ function listHtml() {
         <p class="muted" style="white-space:pre-line">${esc(t.description)}</p>
         <div class="small">Raised ${esc(fmtDT(t.createdAt))}· preferred ${esc(prefText(t))}</div>
         ${t.assignedName ? `<div class="small">Technician <b>${esc(t.assignedName)}</b>${t.scheduledAt ? `, visit ${esc(fmtDT(t.scheduledAt))}` : ''}</div>` : ''}
+        ${Array.isArray(t.faults) && t.faults.length ? `<h4>Equipment</h4><ul class="flist">${t.faults.map((x) => `<li>${esc(faultLabel(x))}${x.result ? ` <span class="rchip" style="background:${RESULT_COLOR[x.result] || '#75757a'}22;color:${RESULT_COLOR[x.result] || '#75757a'}">${esc(x.result)}</span>` : ''}${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}</li>`).join('')}</ul>` : ''}
         ${shots.length ? `<h4>Photos from our technician</h4><div class="thumbs">${shots.map((ph) => `<img src="${ph.data}" alt="${esc(ph.caption || 'Photo')}" data-zoom>`).join('')}</div>` : ''}
         ${reportHtml(t.report)}
         <h4>Progress</h4><div class="timeline">${(t.log || []).slice().reverse().map((l) => `<div><b>${esc(l.t)}</b><br><span class="muted">${esc(fmtDT(l.at))}</span></div>`).join('')}</div>

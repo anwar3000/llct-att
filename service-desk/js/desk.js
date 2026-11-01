@@ -6,11 +6,11 @@ import {
 import {
   app, db, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField, deleteDoc,
-  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText,
+  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js';
+} from './sd.js?v=8';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=8';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -205,6 +205,7 @@ async function updateTicket(t, changes, logText, clientText) {
     pub.assignedName = merged.assignedTo ? (merged.assignedName || '') : deleteField();
     pub.scheduledAt = merged.scheduledAt && merged.assignedTo ? merged.scheduledAt : deleteField();
     if (merged.reportNo) pub.reportNo = merged.reportNo;
+    if (Array.isArray(merged.faults) && 'faults' in changes) pub.faults = merged.faults.map((f) => ({ kind: f.kind, id: f.id, no: f.no || '', name: f.name || '', nvr: f.nvr || '', ch: f.ch || '', result: f.result || '', note: f.note || '' }));
     if (clientText) pub.log = arrayUnion({ at, t: clientText });
     b.set(doc(db, ...mp), pub, { merge: true });
   }
@@ -402,6 +403,13 @@ function openTicket(id, quiet = false) {
         <span>Contact</span><span>${esc(t.contactName)}${t.contactPhone ? `<br><a href="${telLink(t.contactPhone)}">📞 ${esc(t.contactPhone)}</a> · <a href="${waLink(t.contactPhone, '')}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${t.contactEmail ? `<br>${esc(t.contactEmail)}` : ''}</span>
         <span>Raised</span><span>${esc(fmtDT(t.createdAt))} · ${t.source === 'staff' ? 'by staff' : t.source === 'walkin' ? 'walk-in (support page)' : 'client link'}</span>
       </div>${Array.isArray(t.photos) && t.photos.length ? `<div class="thumbs" style="margin-top:12px">${t.photos.map((ph, i) => `<img src="${ph}" data-ph="${i}" alt="photo">`).join('')}</div>` : ''}</div>
+      ${Array.isArray(t.faults) && t.faults.length ? `<div class="card pad"><h3>Equipment reported faulty (${t.faults.length})</h3>
+        <div class="faults">${t.faults.map((f, i) => `<div class="fault"><span class="fl">${esc(faultLabel(f))}</span>
+          ${(A || mine) && t.open ? `<select data-fr="${i}"><option value="">Result…</option>${RESULTS.map((r) => `<option ${f.result === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
+            <input class="fnote" data-fn="${i}" value="${esc(f.note || '')}" placeholder="Comment, e.g. cleaned lens, replaced connector">`
+            : `<span>${f.result ? `<span class="rchip" style="background:${RESULT_COLOR[f.result] || '#75757a'}22;color:${RESULT_COLOR[f.result] || '#75757a'}">${esc(f.result)}</span>` : '<span class="muted small">Not checked yet</span>'}</span>${f.note ? `<span class="fnote small muted">${esc(f.note)}</span>` : ''}`}</div>`).join('')}</div>
+        ${(A || mine) && t.open ? '<div class="row" style="margin-top:8px"><button class="btn sm primary" id="fr-save">Save results</button><span class="small muted">They go into the service report automatically.</span></div>' : ''}</div>` : ''}
+      ${t.clientId ? '<div class="card pad" id="prof-card"><span class="small muted">Loading site details…</span></div>' : ''}
     </div><div class="stack">
       <div class="card pad"><h3>Assignment</h3>
         ${t.assignedTo ? `<div class="row" style="margin-top:8px">${avatar(t.assignedName)}<div class="grow"><b>${esc(t.assignedName)}</b><div class="small muted">${t.assignedByName && t.assignedBy !== t.assignedTo ? 'assigned by ' + esc(t.assignedByName) : 'picked up the job'} · ${esc(ago(t.assignedAt))}</div></div></div>
@@ -467,6 +475,26 @@ function openTicket(id, quiet = false) {
     try { await postClientPhotos(getT(t.id) || t, files); toast(`${files.length} photo${files.length > 1 ? 's' : ''} posted for the client`); close(o); openTicket(t.id); }
     catch (e) { toast(friendly(e), true); }
   };
+  const frs = $('#fr-save', o);
+  if (frs) frs.onclick = async () => {
+    const cur = getT(t.id) || t;
+    const faults = (cur.faults || []).map((f, i) => ({ ...f, result: ($(`[data-fr="${i}"]`, o) || {}).value || f.result || '', note: (($(`[data-fn="${i}"]`, o) || {}).value || '').trim() }));
+    const done = faults.filter((f) => f.result).map((f) => `${faultLabel(f)}: ${f.result}`).join('; ');
+    frs.disabled = true;
+    await updateTicket(cur, { faults }, `Equipment checked — ${done || 'results updated'}`, done ? `Technician checked: ${done}` : undefined);
+  };
+  const pc = $('#prof-card', o);
+  if (pc) {
+    Promise.all([getDoc(doc(db, 'svcClients', t.clientId)), t.siteId ? getDoc(doc(db, 'svcClients', t.clientId, 'sitePhotos', t.siteId)) : Promise.resolve(null)]).then(([pr, ph]) => {
+      const prof = pr && pr.exists() ? pr.data() : {}; const img = ph && ph.exists() ? ph.data().data : '';
+      const e = (prof.sites || {})[t.siteId] || {};
+      if (!prof.tradeLicense && !img && !(e.nvrs || []).length) { pc.remove(); return; }
+      pc.innerHTML = `<h3>Site details</h3><div class="row" style="margin-top:8px;align-items:flex-start;gap:12px">${img ? `<img src="${img}" alt="Building" style="width:150px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--silver);cursor:zoom-in" data-bimg>` : ''}
+        <div class="small">${prof.tradeLicense ? `<div>Trade licence: <b>${esc(prof.tradeLicense)}</b></div>` : ''}${(e.nvrs || []).length ? `<div>${e.nvrs.length} NVR, ${(e.cameras || []).length} cameras under maintenance</div>` : ''}
+        ${(e.nvrs || []).map((n) => `<div class="muted">NVR ${esc(n.no)}${n.name ? ` – ${esc(n.name)}` : ''}${n.model ? ` · ${esc(n.model)}` : ''}${n.ip ? ` · ${esc(n.ip)}` : ''}</div>`).join('')}</div></div>`;
+      const bi = $('[data-bimg]', pc); if (bi) bi.onclick = () => { const w = window.open(); if (w) w.document.write(`<img src="${bi.src}" style="max-width:100%">`); };
+    }).catch(() => pc.remove());
+  }
   const tnb = $('#tnb', o);
   if (tnb) tnb.onclick = async () => { const v = $('#tn', o).value.trim(); if (!v) return; tnb.disabled = true; $('#tn', o).value = ''; await updateTicket(getT(t.id) || t, mine && !A ? { techNote: v } : {}, 'Note: ' + v); };
 }
@@ -676,28 +704,113 @@ function clientsView(m) {
   m.innerHTML = `<div class="row" style="margin-bottom:12px"><h1 class="grow">Clients &amp; service links</h1><input id="cq" placeholder="Search client…" value="${esc(S.cq || '')}" style="max-width:280px"></div>
     <p class="muted small" style="margin-top:-4px">Each client gets one private link to raise and track service requests. Sites and GPS come from the client's sites in LLCT Invoicing and stay in sync.</p>
     ${S.clientsErr ? `<div class="card pad" style="color:var(--danger)">${esc(S.clientsErr)}</div>` : ''}
-    <div class="card" style="overflow:auto"><table class="tbl"><thead><tr><th>Client</th><th>Sites</th><th>Tickets</th><th>Last request</th><th>Service link</th></tr></thead><tbody>
+    <div class="card" style="overflow:auto"><table class="tbl"><thead><tr><th>Client</th><th>Sites</th><th>Service profile</th><th>Tickets</th><th>Last request</th><th>Service link</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td class="click" data-hist="${esc(r.c.id)}" style="cursor:pointer"><b>${esc(r.c.name)}</b>${r.c.phone ? `<div class="small muted">${esc(r.c.contact || '')} ${esc(r.c.phone)}</div>` : ''}</td>
       <td>${r.sites}<div class="small ${r.gps < r.sites ? '' : 'muted'}" style="${r.gps < r.sites ? 'color:var(--warning)' : ''}">${r.gps} with GPS</div></td>
+      <td><button class="btn sm" data-prof="${esc(r.c.id)}">Equipment &amp; licence</button></td>
       <td>${r.n}${r.open ? ` <span class="chip" style="background:#fde3e3;color:var(--danger)">${r.open} open</span>` : ''}</td>
       <td class="small">${r.last ? esc(fmtDate(r.last)) : '—'}</td>
       <td>${r.p ? `<div class="linkbox"><input readonly value="${esc(portalUrl(r.p.id))}"><button class="btn sm" data-copy="${esc(r.p.id)}">Copy</button>
           <a class="btn sm" target="_blank" rel="noopener" href="${waLink(r.c.phone || '', linkMsg(r.c, r.p))}">WhatsApp</a><button class="btn sm" data-more="${esc(r.p.id)}">⋯</button></div>`
-        : `<button class="btn sm primary" data-mk="${esc(r.c.id)}">Create link</button>`}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">${S.clients.length ? 'No match.' : 'No clients yet.'}</td></tr>`}
+        : `<button class="btn sm primary" data-mk="${esc(r.c.id)}">Create link</button>`}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">${S.clients.length ? 'No match.' : 'No clients yet.'}</td></tr>`}
     </tbody></table></div>`;
   const cq = $('#cq', m); cq.oninput = () => { S.cq = cq.value; clearTimeout(cq._t); cq._t = setTimeout(() => { render(); const n = $('#cq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   $$('[data-mk]', m).forEach((b) => (b.onclick = () => makePortal(S.clients.find((c) => c.id === b.dataset.mk), b)));
+  $$('[data-prof]', m).forEach((b) => (b.onclick = () => profileModal(b.dataset.prof)));
   $$('[data-copy]', m).forEach((b) => (b.onclick = () => copy(portalUrl(b.dataset.copy))));
   $$('[data-more]', m).forEach((b) => (b.onclick = () => portalMenu(S.portals.find((p) => p.id === b.dataset.more))));
   $$('[data-hist]', m).forEach((e) => (e.onclick = () => clientHistory(e.dataset.hist)));
 }
 const linkMsg = (c, p) => `Dear ${c.contact || c.name},\n\nFor any CCTV / security service request please use your Leaders Line service link:\n${portalUrl(p.id)}\n\nYou can choose the site, describe the problem, set the priority and preferred visit time, and follow the status of every request.\n\nLeaders Line Trading LLC · 04 880 5577`;
 function copy(text) { (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast('Link copied'), () => prompt('Copy this link:', text)); }
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+/** Fields of the service profile the client's link may show (equipment names only, no serials or IPs). */
+function clientProfileForLink(prof) {
+  const eq = {};
+  Object.entries((prof && prof.sites) || {}).forEach(([sid, e]) => { const l = leanEquipment(e); if (l.nvrs.length || l.cameras.length) eq[sid] = l; });
+  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq };
+}
+/** Service profile of a client: trade licence, and per site the building photo and the equipment we maintain. */
+async function profileModal(clientId) {
+  const c = S.clients.find((x) => x.id === clientId); if (!c) return;
+  const sites = sitesFromPlaces(c);
+  let prof = { tradeLicense: '', sites: {} };
+  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, ...d.data() }; } catch (e) { return toast(friendly(e), true); }
+  let sid = sites[0] ? sites[0].id : '';
+  const eqOf = (id) => { prof.sites[id] = prof.sites[id] || { nvrs: [], cameras: [] }; prof.sites[id].nvrs = prof.sites[id].nvrs || []; prof.sites[id].cameras = prof.sites[id].cameras || []; return prof.sites[id]; };
+  const o = modal(`<h2 class="grow">${esc(c.name)} — service profile</h2>`, '<div id="pf"></div>',
+    `<button class="btn" data-x>Close</button><button class="btn primary" id="pf-save">Save profile</button>`, { wide: true });
+  const keep = () => {
+    const tl = $('#pf-tl', o); if (tl) prof.tradeLicense = tl.value.trim();
+    if (!sid) return; const e = eqOf(sid);
+    $$('[data-nf]', o).forEach((i) => { const [k, f] = i.dataset.nf.split(':'); e.nvrs[+k][f] = i.value.trim(); });
+    $$('[data-cf]', o).forEach((i) => { const [k, f] = i.dataset.cf.split(':'); e.cameras[+k][f] = i.value.trim(); });
+  };
+  const draw = () => {
+    const e = sid ? eqOf(sid) : { nvrs: [], cameras: [] };
+    const nvrOpts = (v) => `<option value="">—</option>${e.nvrs.map((n) => `<option value="${esc(n.no)}" ${String(v) === String(n.no) ? 'selected' : ''}>NVR ${esc(n.no)}</option>`).join('')}`;
+    $('#pf', o).innerHTML = `
+      <div class="grid2"><label class="field"><span>Trade licence number</span><input id="pf-tl" value="${esc(prof.tradeLicense || '')}" placeholder="e.g. 123456"></label>
+        <label class="field"><span>Site</span><select id="pf-site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === sid ? 'selected' : ''}>${esc(x.name)}</option>`).join('') || '<option value="">Add sites to this client in LLCT Invoicing first</option>'}</select></label></div>
+      ${sid ? `<div class="row" style="margin-top:14px;align-items:flex-start;gap:14px">
+        <div id="pf-ph" class="pfph"><span class="small muted">Loading photo…</span></div>
+        <div class="grow"><b>Building photo</b><p class="small muted" style="margin:2px 0 8px">Helps the technician find the place. Staff only.</p>
+          <label class="btn sm">Upload photo<input type="file" accept="image/*" hidden id="pf-up"></label> <button class="btn sm bad" id="pf-rm" type="button">Remove</button></div></div>
+      <h3 style="margin-top:18px">NVR / DVR <span class="muted small">(${e.nvrs.length})</span></h3>
+      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th>Model</th><th>Serial</th><th>IP</th><th style="width:80px">Channels</th><th style="width:40px"></th></tr></thead><tbody>
+        ${e.nvrs.map((n, k) => `<tr>${['no', 'name', 'model', 'serial', 'ip', 'channels'].map((f) => `<td><input data-nf="${k}:${f}" value="${esc(n[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-nrm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No NVR yet.</td></tr>'}
+      </tbody></table></div>
+      <button class="btn sm" id="pf-addn" type="button" style="margin-top:6px">+ NVR</button>
+      <h3 style="margin-top:18px">Cameras <span class="muted small">(${e.cameras.length})</span></h3>
+      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th style="width:100px">NVR</th><th style="width:70px">Ch.</th><th>Model</th><th>Serial</th><th style="width:40px"></th></tr></thead><tbody>
+        ${e.cameras.map((cm, k) => `<tr><td><input data-cf="${k}:no" value="${esc(cm.no || '')}"></td><td><input data-cf="${k}:name" value="${esc(cm.name || '')}"></td>
+          <td><select data-cf="${k}:nvr">${nvrOpts(cm.nvr)}</select></td><td><input data-cf="${k}:ch" value="${esc(cm.ch || '')}"></td>
+          <td><input data-cf="${k}:model" value="${esc(cm.model || '')}"></td><td><input data-cf="${k}:serial" value="${esc(cm.serial || '')}"></td><td><button class="btn sm bad" data-crm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No cameras yet.</td></tr>'}
+      </tbody></table></div>
+      <div class="row" style="margin-top:6px"><button class="btn sm" id="pf-addc" type="button">+ Camera</button><button class="btn sm" id="pf-addmany" type="button">+ Several cameras…</button></div>` : ''}`;
+    const ss = $('#pf-site', o); if (ss) ss.onchange = () => { keep(); sid = ss.value; draw(); };
+    if (!sid) return;
+    $('#pf-addn', o).onclick = () => { keep(); e.nvrs.push({ id: newId(), no: String(e.nvrs.length + 1), name: '', model: '', serial: '', ip: '', channels: '' }); draw(); };
+    $('#pf-addc', o).onclick = () => { keep(); e.cameras.push({ id: newId(), no: String(e.cameras.length + 1).padStart(2, '0'), name: '', nvr: e.nvrs[0] ? e.nvrs[0].no : '', ch: String(e.cameras.length + 1), model: '', serial: '' }); draw(); };
+    $('#pf-addmany', o).onclick = () => {
+      keep(); const n = parseInt(prompt('How many cameras to add?', '8'), 10); if (!(n > 0 && n <= 128)) return;
+      const nv = e.nvrs[0] ? e.nvrs[0].no : '';
+      for (let i = 0; i < n; i++) { const k = e.cameras.length + 1; e.cameras.push({ id: newId(), no: String(k).padStart(2, '0'), name: '', nvr: nv, ch: String(k), model: '', serial: '' }); }
+      draw();
+    };
+    $$('[data-nrm]', o).forEach((b) => (b.onclick = () => { keep(); e.nvrs.splice(+b.dataset.nrm, 1); draw(); }));
+    $$('[data-crm]', o).forEach((b) => (b.onclick = () => { keep(); e.cameras.splice(+b.dataset.crm, 1); draw(); }));
+    const box = $('#pf-ph', o), here = sid;
+    getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).then((d) => { if (sid === here && box) box.innerHTML = d.exists() && d.data().data ? `<img src="${d.data().data}" alt="Building">` : '<span class="small muted">No photo</span>'; }).catch(() => { if (box) box.innerHTML = '<span class="small muted">—</span>'; });
+    $('#pf-up', o).onchange = async (ev) => {
+      const f = ev.target.files[0]; if (!f) return;
+      try { const data = await compressImage(f, 1280, 0.72); await setDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid), { data, by: S.me.id, at: serverTimestamp() }); box.innerHTML = `<img src="${data}" alt="Building">`; toast('Photo saved'); }
+      catch (e2) { toast(friendly(e2), true); }
+    };
+    $('#pf-rm', o).onclick = async () => { await deleteDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).catch(() => {}); box.innerHTML = '<span class="small muted">No photo</span>'; };
+  };
+  draw();
+  $('#pf-save', o).onclick = async () => {
+    keep();
+    // tidy: drop empty rows
+    Object.values(prof.sites).forEach((e) => { e.nvrs = (e.nvrs || []).filter((n) => n.no || n.name); e.cameras = (e.cameras || []).filter((x) => x.no || x.name); });
+    $('#pf-save', o).disabled = true;
+    try {
+      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
+      const extra = clientProfileForLink(prof);
+      await Promise.all(S.portals.filter((p) => p.clientId === clientId).map((p) => updateDoc(doc(db, 'svcPortals', p.id), extra).catch(() => {})));
+      toast('Service profile saved — the client can now pick this equipment'); close(o);
+    } catch (e) { toast(friendly(e), true); $('#pf-save', o).disabled = false; }
+  };
+}
+
 async function makePortal(c, btn) {
   if (!c) return; if (btn) btn.disabled = true;
   const token = randToken();
   try {
-    await setDoc(doc(db, 'svcPortals', token), { active: true, clientId: c.id, clientName: c.name || '', contact: c.contact || '', phone: c.phone || '', sites: sitesFromPlaces(c), createdAt: serverTimestamp(), createdBy: S.me.id, createdByName: S.me.name || '', updatedAt: serverTimestamp() });
+    let extra = {};
+    try { const pr = await getDoc(doc(db, 'svcClients', c.id)); if (pr.exists()) extra = clientProfileForLink(pr.data()); } catch (_) { /* no profile yet */ }
+    await setDoc(doc(db, 'svcPortals', token), { active: true, clientId: c.id, clientName: c.name || '', contact: c.contact || '', phone: c.phone || '', sites: sitesFromPlaces(c), ...extra, createdAt: serverTimestamp(), createdBy: S.me.id, createdByName: S.me.name || '', updatedAt: serverTimestamp() });
     toast('Link created'); copy(portalUrl(token));
   } catch (e) { toast(friendly(e), true); if (btn) btn.disabled = false; }
 }

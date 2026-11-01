@@ -426,6 +426,11 @@ class _TicketDetailState extends State<_TicketDetail> {
           ),
         ),
       ],
+      if (t.faults.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        _FaultsEditor(key: ValueKey('faults-${t.id}-${t.faults.map((f) => '${f['result']}|${f['note']}').join(',')}'), t: t, me: me, canEdit: (mine || canAssign) && t.open),
+      ],
+      if (t.clientId.isNotEmpty) _SiteDetails(key: ValueKey('site-${t.id}'), t: t),
       const SizedBox(height: 16),
       Wrap(spacing: 8, runSpacing: 8, children: actions),
       const SectionTitle('Timeline'),
@@ -618,6 +623,137 @@ class _AssignSheetState extends State<_AssignSheet> {
             label: const Text('Assign'),
           ),
         ]);
+      },
+    );
+  }
+}
+
+
+/// Equipment the client reported: technician picks a result and adds a comment per item.
+class _FaultsEditor extends StatefulWidget {
+  final ServiceTicket t;
+  final AppUser me;
+  final bool canEdit;
+  const _FaultsEditor({super.key, required this.t, required this.me, required this.canEdit});
+
+  @override
+  State<_FaultsEditor> createState() => _FaultsEditorState();
+}
+
+class _FaultsEditorState extends State<_FaultsEditor> {
+  late final List<Map<String, dynamic>> _f = widget.t.faults.map((e) => Map<String, dynamic>.from(e)).toList();
+  bool _busy = false;
+  bool _dirty = false;
+
+  Future<void> _save() async {
+    setState(() => _busy = true);
+    try {
+      await ServiceDesk.saveFaults(widget.t, widget.me, _f);
+      if (mounted) {
+        setState(() => _dirty = false);
+        showSnack(context, 'Results saved — they go into the service report');
+      }
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not save: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(color: const Color(0xFFF4F6FA), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFDCE1E8))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Equipment reported faulty (${_f.length})', style: const TextStyle(fontWeight: FontWeight.w800)),
+        for (var i = 0; i < _f.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(svcFaultLabel(_f[i]), style: const TextStyle(fontWeight: FontWeight.w700)),
+              if (!widget.canEdit) ...[
+                Text('${_f[i]['result'] ?? ''}'.isEmpty ? 'Not checked yet' : '${_f[i]['result']}',
+                    style: TextStyle(color: svcResultColor('${_f[i]['result'] ?? ''}'), fontWeight: FontWeight.w700, fontSize: 13)),
+                if ('${_f[i]['note'] ?? ''}'.isNotEmpty) Text('${_f[i]['note']}', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+              ] else ...[
+                const SizedBox(height: 6),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (final r in svcResults)
+                    ChoiceChip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(r, style: const TextStyle(fontSize: 12.5)),
+                      selected: _f[i]['result'] == r,
+                      selectedColor: svcResultColor(r).withValues(alpha: 0.18),
+                      onSelected: (_) => setState(() {
+                        _f[i]['result'] = _f[i]['result'] == r ? '' : r;
+                        _dirty = true;
+                      }),
+                    ),
+                ]),
+                const SizedBox(height: 6),
+                TextFormField(
+                  initialValue: '${_f[i]['note'] ?? ''}',
+                  decoration: const InputDecoration(isDense: true, hintText: 'Comment, e.g. cleaned lens, replaced connector'),
+                  onChanged: (v) {
+                    _f[i]['note'] = v.trim();
+                    if (!_dirty) setState(() => _dirty = true);
+                  },
+                ),
+              ],
+            ]),
+          ),
+        if (widget.canEdit) ...[
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: _busy || !_dirty ? null : _save,
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: Text(_busy ? 'Saving…' : 'Save results'),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+/// Trade licence, building photo and NVRs of the site (from the client's service profile).
+class _SiteDetails extends StatelessWidget {
+  final ServiceTicket t;
+  const _SiteDetails({super.key, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+      future: ServiceDesk.siteProfile(t),
+      builder: (c, snap) {
+        final p = snap.data;
+        if (p == null) return const SizedBox.shrink();
+        final nvrs = (p.equipment['nvrs'] is List) ? (p.equipment['nvrs'] as List).whereType<Map>().toList() : const <Map>[];
+        final cams = (p.equipment['cameras'] is List) ? (p.equipment['cameras'] as List).length : 0;
+        if (p.tradeLicense.isEmpty && p.photo.isEmpty && nvrs.isEmpty) return const SizedBox.shrink();
+        final i = p.photo.indexOf('base64,');
+        final b64 = i >= 0 ? p.photo.substring(i + 7) : '';
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (b64.isNotEmpty)
+              GestureDetector(
+                onTap: () => showDialog(context: context, builder: (_) => Dialog(child: InteractiveViewer(child: Base64Image(b64, fit: BoxFit.contain)))),
+                child: ClipRRect(borderRadius: BorderRadius.circular(10), child: Base64Image(b64, width: 110, height: 80)),
+              ),
+            if (b64.isNotEmpty) const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Site details', style: TextStyle(fontWeight: FontWeight.w800)),
+                if (p.tradeLicense.isNotEmpty) Text('Trade licence: ${p.tradeLicense}', style: const TextStyle(fontSize: 13)),
+                if (nvrs.isNotEmpty) Text('${nvrs.length} NVR, $cams cameras under maintenance', style: const TextStyle(fontSize: 13)),
+                for (final n in nvrs)
+                  Text('NVR ${n['no'] ?? ''}${'${n['name'] ?? ''}'.isEmpty ? '' : ' – ${n['name']}'}${'${n['ip'] ?? ''}'.isEmpty ? '' : ' · ${n['ip']}'}',
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+              ]),
+            ),
+          ]),
+        );
       },
     );
   }

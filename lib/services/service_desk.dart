@@ -71,6 +71,23 @@ const svcTypes = {
 };
 String svcTypeLabel(String k) => svcTypes[k] ?? (k.isEmpty ? 'Service' : k);
 
+/// What the technician found for each faulty item (also goes into the service report).
+const svcResults = ['Rectified', 'Working', 'Need replacement', 'Replaced', 'Pending parts', 'Not checked'];
+Color svcResultColor(String r) => switch (r) {
+      'Rectified' || 'Working' || 'Replaced' => const Color(0xFF1F8A5B),
+      'Need replacement' => const Color(0xFFB4372B),
+      'Pending parts' => const Color(0xFFC27A12),
+      _ => const Color(0xFF75757A),
+    };
+
+/// "NVR 1 – Main office" / "Camera 05 – Main gate (NVR 1, ch 5)"
+String svcFaultLabel(Map f) {
+  String v(String k) => '${f[k] ?? ''}'.trim();
+  if (v('kind') == 'nvr') return 'NVR ${v('no')}${v('name').isEmpty ? '' : ' – ${v('name')}'}'.trim();
+  final where = v('nvr').isEmpty ? '' : ' (NVR ${v('nvr')}${v('ch').isEmpty ? '' : ', ch ${v('ch')}'})';
+  return 'Camera ${v('no')}${v('name').isEmpty ? '' : ' – ${v('name')}'}$where'.trim();
+}
+
 const svcSlots = {
   'asap': 'As soon as possible',
   'morning': 'Morning (8 am – 12 pm)',
@@ -90,6 +107,7 @@ class ServiceTicket {
   final String publicId;
   final String clientId;
   final String clientName;
+  final String siteId;
   final String siteName;
   final String siteAddress;
   final double? lat;
@@ -119,6 +137,8 @@ class ServiceTicket {
   final String source;
   final List<String> photos;
   final List<Map<String, dynamic>> log;
+  /// Equipment the client reported faulty, with the technician's result and comment per item.
+  final List<Map<String, dynamic>> faults;
 
   ServiceTicket({
     required this.id,
@@ -127,6 +147,7 @@ class ServiceTicket {
     this.publicId = '',
     required this.clientId,
     required this.clientName,
+    this.siteId = '',
     required this.siteName,
     required this.siteAddress,
     required this.lat,
@@ -156,6 +177,7 @@ class ServiceTicket {
     required this.source,
     required this.photos,
     required this.log,
+    this.faults = const [],
   });
 
   factory ServiceTicket.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
@@ -168,6 +190,7 @@ class ServiceTicket {
       publicId: _s(m['publicId']),
       clientId: _s(m['clientId']),
       clientName: _s(m['clientName']),
+      siteId: _s(m['siteId']),
       siteName: _s(m['siteName']),
       siteAddress: _s(m['siteAddress']),
       lat: lat,
@@ -198,6 +221,9 @@ class ServiceTicket {
       photos: (m['photos'] is List) ? (m['photos'] as List).whereType<String>().toList() : const [],
       log: (m['log'] is List)
           ? (m['log'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          : const [],
+      faults: (m['faults'] is List)
+          ? (m['faults'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
           : const [],
     );
   }
@@ -315,6 +341,14 @@ class ServiceDesk {
         'assignedName': assignedTo.isEmpty ? FieldValue.delete() : assignedName,
         'scheduledAt': (assignedTo.isEmpty || sched == null) ? FieldValue.delete() : sched,
       };
+      if (changes['faults'] is List) {
+        pub['faults'] = (changes['faults'] as List)
+            .whereType<Map>()
+            .map((f) => {
+                  for (final k in ['kind', 'id', 'no', 'name', 'nvr', 'ch', 'result', 'note']) k: '${f[k] ?? ''}',
+                })
+            .toList();
+      }
       final rn = changes['reportNo'] ?? t.reportNo;
       if (rn is String && rn.isNotEmpty) pub['reportNo'] = rn;
       if (clientText != null) {
@@ -435,6 +469,32 @@ class ServiceDesk {
           clientText: '$n photo${n > 1 ? 's' : ''} of the work added');
     }
     return n;
+  }
+
+  /// Technician's result and comment for each faulty item.
+  static Future<void> saveFaults(ServiceTicket t, AppUser me, List<Map<String, dynamic>> faults) {
+    final done = faults.where((f) => '${f['result'] ?? ''}'.isNotEmpty).map((f) => '${svcFaultLabel(f)}: ${f['result']}').join('; ');
+    return update(t, me, {'faults': faults}, 'Equipment checked — ${done.isEmpty ? 'results updated' : done}',
+        clientText: done.isEmpty ? null : 'Technician checked: $done');
+  }
+
+  /// Client's service profile (trade licence, equipment per site) and the site's building photo.
+  static Future<({String tradeLicense, Map<String, dynamic> equipment, String photo})> siteProfile(ServiceTicket t) async {
+    var tl = '', photo = '';
+    Map<String, dynamic> eq = {};
+    if (t.clientId.isEmpty) return (tradeLicense: tl, equipment: eq, photo: photo);
+    try {
+      final d = await _fs.collection('svcClients').doc(t.clientId).get();
+      final m = d.data() ?? {};
+      tl = '${m['tradeLicense'] ?? ''}';
+      final sites = m['sites'];
+      if (sites is Map && sites[t.siteId] is Map) eq = Map<String, dynamic>.from(sites[t.siteId] as Map);
+      if (t.siteId.isNotEmpty) {
+        final p = await _fs.collection('svcClients').doc(t.clientId).collection('sitePhotos').doc(t.siteId).get();
+        photo = '${p.data()?['data'] ?? ''}';
+      }
+    } catch (_) {}
+    return (tradeLicense: tl, equipment: eq, photo: photo);
   }
 
   static Future<void> addNote(ServiceTicket t, AppUser me, String note) =>

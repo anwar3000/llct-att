@@ -73,6 +73,34 @@ class _ReportEditorState extends State<ReportEditor> {
           .where((x) => x.isNotEmpty)
           .join('\n');
       d['deliveryAddress'] = [t.siteName, t.siteAddress].where((x) => x.isNotEmpty).join(', ');
+      // Equipment the client reported, with the technician's results → report lines and work carried out.
+      if (t.faults.isNotEmpty) {
+        final prof = await ServiceDesk.siteProfile(t);
+        final eq = [
+          ...((prof.equipment['nvrs'] as List?) ?? const []).whereType<Map>(),
+          ...((prof.equipment['cameras'] as List?) ?? const []).whereType<Map>(),
+        ];
+        final k = kindOf('${d['reportType'] ?? ''}');
+        d['items'] = t.faults.map((f) {
+          final m = eq.where((e) => '${e['id']}' == '${f['id']}').firstOrNull ?? const {};
+          final res = '${f['result'] ?? ''}';
+          return <String, dynamic>{
+            'name': svcFaultLabel(f),
+            'desc': [if ('${m['model'] ?? ''}'.isNotEmpty) 'Model ${m['model']}', if ('${f['note'] ?? ''}'.isNotEmpty) '${f['note']}'].join(' · '),
+            'qty': 1,
+            'unit': 'pcs',
+            'price': 0,
+            'photo': '',
+            'status': k.statuses.contains(res) ? res : k.statuses.first,
+            'serials': <String>[if ('${m['serial'] ?? ''}'.isNotEmpty) '${m['serial']}'],
+          };
+        }).toList();
+        final done = t.faults
+            .where((f) => '${f['result'] ?? ''}'.isNotEmpty || '${f['note'] ?? ''}'.isNotEmpty)
+            .map((f) => '${svcFaultLabel(f)}: ${f['result'] ?? ''}${'${f['note'] ?? ''}'.isEmpty ? '' : ' — ${f['note']}'}')
+            .join('\n');
+        if (done.isNotEmpty) d['workDone'] = done;
+      }
     }
     if (!mounted) return;
     setState(() {

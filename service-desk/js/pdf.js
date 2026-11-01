@@ -1,6 +1,6 @@
 // PDF reports for the staff desk: a branded print page the browser saves as PDF
 // (Print → Save as PDF). No server software or PDF library needed.
-import { esc, fmtDate, fmtDT, prio, st, typesText, slotLabel, COMPANY, toDate, clientMessage, prefText } from './sd.js';
+import { esc, fmtDate, fmtDT, prio, st, typesText, slotLabel, COMPANY, toDate, clientMessage, prefText, faultLabel } from './sd.js?v=8';
 
 // The logo is embedded in the PDF page (data URL), so it always prints.
 let logoData = '';
@@ -144,6 +144,8 @@ export function ticketPdf(t, { report = null, photos = [] } = {}) {
     <p><b>${esc(typesText(t))}</b>${t.cameras ? ` · ${esc(t.cameras)} device(s)` : ''}</p>
     <p class="pre">${esc(t.description || '')}</p>
     <div class="msg">${esc(clientMessage(t))}</div>
+    ${Array.isArray(t.faults) && t.faults.length ? `<h2>Equipment</h2><table><thead><tr><th>Item</th><th style="width:38mm">Result</th><th>Comment</th></tr></thead><tbody>
+      ${t.faults.map((f) => `<tr><td>${esc(faultLabel(f))}</td><td>${esc(f.result || 'Not checked')}</td><td>${esc(f.note || '')}</td></tr>`).join('')}</tbody></table>` : ''}
     ${report ? `<h2>${esc(report.kind || 'Service report')} ${esc(report.number || '')}</h2>
       <p class="muted">${esc(fmtDate(report.date))}${report.technician ? ` · Technician ${esc(report.technician)}` : ''}${report.timeIn || report.timeOut ? ` · ${esc(report.timeIn || '–')} to ${esc(report.timeOut || '–')}` : ''}</p>
       ${report.complaint ? `<p><b>Complaint</b><br><span class="pre">${esc(report.complaint)}</span></p>` : ''}
