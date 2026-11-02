@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=14';
+} from './sd.js?v=16';
 
 window.__sdStarted = true;
 
@@ -204,7 +204,7 @@ function formHtml() {
 
   <div class="step"><span class="sn">2</span><div class="sb"><h2>What is the problem?</h2>
     ${devHtml}
-    <div class="grid2 gtight">${typeSel}</div>
+    <div class="gtight">${typeSel}</div>
     <label class="field" style="margin-top:12px"><span>Description of the work <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. No picture since yesterday evening.">${esc(f.description)}</textarea></label>
     <div class="photos sm" style="margin-top:10px">${S.photos.map((ph, k) => `<div class="ph"><img src="${ph}" alt=""><button type="button" data-rmph="${k}" aria-label="Remove photo">×</button></div>`).join('')}
       ${S.photos.length < 3 ? `<label class="addph">${icon('camera', 18)}<span>Photo</span><input type="file" accept="image/*" id="f-ph" hidden multiple></label>` : ''}</div>

@@ -460,3 +460,33 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pfph.sm { width: 72px; height: 52px; }
 .pfmore { margin-top: 12px; } .pfmore summary { cursor: pointer; font-weight: 650; color: var(--night); }
 .pfsite { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--silver); }
+
+/* ---- client form layout: two columns on big screens, compact single column on phones ---- */
+@media (min-width: 1024px) {
+  .pwrap, .phero, .band .in { max-width: min(1320px, max(860px, 80vw)); }
+  #f .sheet { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 34px; padding: 10px 30px 14px; }
+  #f .sheet > .step:nth-child(1) { grid-column: 1; grid-row: 1; }
+  #f .sheet > .step:nth-child(2) { grid-column: 1; grid-row: 2; border-top: 1px solid #E6E9EE; }
+  #f .sheet > .step:nth-child(3) { grid-column: 2; grid-row: 1; border-top: 0; }
+  #f .sheet > .step:nth-child(4) { grid-column: 2; grid-row: 2; border-top: 1px solid #E6E9EE; align-self: start; }
+  #f .sheet > .step:nth-child(3), #f .sheet > .step:nth-child(4) { padding-left: 34px; margin-left: -1px; border-left: 1px solid #E6E9EE; }
+  #f .sendbar { display: flex; justify-content: flex-end; background: none; position: static; padding-top: 16px; }
+  #f .sendbar .btn { width: auto; min-width: 320px; padding-left: 36px; padding-right: 36px; }
+  #f .devlist { max-height: 300px; overflow: auto; }
+  .tabs { margin-bottom: 18px; }
+}
+@media (max-width: 560px) {
+  .phero { padding: 18px 16px 2px; }
+  .phero h1 { font-size: 24px; }
+  .phero p { font-size: 14px; }
+  .pwrap { padding: 12px 10px 90px; }
+  .sheet { padding: 2px 14px; border-radius: 16px; }
+  .step { grid-template-columns: 1fr; padding: 16px 0; }
+  .step .sn { position: absolute; top: 16px; left: 0; width: 26px; height: 26px; font-size: 13px; }
+  .step .sb > h2, .step .sb > .shead { padding-left: 36px; min-height: 26px; display: flex; align-items: center; }
+  .step .sb > .shead h2 { margin: 0; }
+  .field > span { font-size: 13px; }
+  input, select, textarea { font-size: 16px; } /* no zoom-in on iPhone */
+  .grid2 { grid-template-columns: 1fr; }
+  .sendbar { padding: 10px 0 calc(8px + env(safe-area-inset-bottom)); }
+}

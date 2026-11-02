@@ -25,17 +25,17 @@ export const DEFAULT_TYPES = [
   { k: 'recording', t: 'NVR / DVR not recording', i: 'recording' },
   { k: 'remote', t: 'No remote / mobile view', i: 'remote' },
   { k: 'image', t: 'Image blurry, dark or no night vision', i: 'image' },
-  { k: 'hdd', s: 'HDD', t: 'Hard disk / storage error', i: 'hdd' },
+  { k: 'hdd', t: 'Hard disk / storage error', i: 'hdd' },
   { k: 'playback', t: 'Footage backup / playback needed', i: 'playback' },
   { k: 'power', t: 'Power, cable or PoE issue', i: 'power' },
-  { k: 'network', s: 'Network', t: 'Network / Wi‑Fi / internet', i: 'network' },
+  { k: 'network', t: 'Network / Wi‑Fi / internet', i: 'network' },
   { k: 'access', t: 'Access control / door / intercom', i: 'access' },
   { k: 'o2device', t: 'Oxygen O2 device not working', i: 'o2' },
   { k: 'o2switch', t: 'O2IOT switching issue', i: 'switch' },
   { k: 'o2connect', t: 'O2IOT device not connecting', i: 'signal' },
   { k: 'ppm', t: 'Preventive maintenance (AMC visit)', i: 'ppm' },
   { k: 'install', t: 'New camera / relocation', i: 'install' },
-  { k: 'other', s: 'Other', t: 'Other', i: 'other' },
+  { k: 'other', t: 'Other', i: 'other' },
 ];
 export let SERVICE_TYPES = DEFAULT_TYPES.map((x) => ({ ...x, on: true }));
 /** Options shown to customers, in the admin's order. */
@@ -219,10 +219,10 @@ export function faultLabel(f) {
 export const DEVICE_LISTS = [
   { k: 'cameras', s: 'Camera', t: 'Cameras', ph: 'R01 C01 Entrance\nR01 C02 Reception\nR02 C03 Parking', cat: 'camera' },
   { k: 'nvrs', s: 'NVR', t: 'NVR / DVR', ph: 'NVR 1 Main rack 32ch', cat: 'recording' },
-  { k: 'hdd', t: 'Hard disks (HDD)', type: 'Hard disk', ph: 'NVR 1 HDD 1 – 6TB\nNVR 1 HDD 2 – 6TB', cat: 'hdd' },
+  { k: 'hdd', s: 'HDD', t: 'Hard disks (HDD)', type: 'Hard disk', ph: 'NVR 1 HDD 1 – 6TB\nNVR 1 HDD 2 – 6TB', cat: 'hdd' },
   { k: 'ups', s: 'UPS', t: 'UPS', type: 'UPS', ph: 'Server room UPS 3kVA', cat: 'power' },
-  { k: 'network', t: 'Network – switches, routers', type: 'Network switch', ph: 'PoE switch 16 port – rack\nRouter – Etisalat', cat: 'network' },
-  { k: 'other', t: 'Other devices', type: 'Other', ph: 'Monitor 43" – security room\nAccess control – main door', cat: 'other' },
+  { k: 'network', s: 'Network', t: 'Network – switches, routers', type: 'Network switch', ph: 'PoE switch 16 port – rack\nRouter – Etisalat', cat: 'network' },
+  { k: 'other', s: 'Other', t: 'Other devices', type: 'Other', ph: 'Monitor 43" – security room\nAccess control – main door', cat: 'other' },
 ];
 /** Which list an existing "other" device belongs to. */
 export const listOfOther = (x) => (x.type === 'Hard disk' ? 'hdd' : x.type === 'UPS' ? 'ups' : /switch|router|wi-?fi|network/i.test(x.type || '') ? 'network' : 'other');
