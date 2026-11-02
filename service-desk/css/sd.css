@@ -490,3 +490,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .grid2 { grid-template-columns: 1fr; }
   .sendbar { padding: 10px 0 calc(8px + env(safe-area-inset-bottom)); }
 }
+/* priority row: each option in its own colour */
+.seg [data-prio] { color: var(--pc); background: color-mix(in srgb, var(--pc) 9%, #fff); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.seg [data-prio]::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--pc); flex: none; }
+.seg [data-prio].on { background: var(--pc); color: #fff; }
+.seg [data-prio].on::before { background: #fff; }

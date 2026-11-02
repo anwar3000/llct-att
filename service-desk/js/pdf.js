@@ -1,6 +1,6 @@
 // PDF reports for the staff desk: a branded print page the browser saves as PDF
 // (Print → Save as PDF). No server software or PDF library needed.
-import { esc, fmtDate, fmtDT, prio, st, typesText, slotLabel, COMPANY, toDate, clientMessage, prefText, faultLabel } from './sd.js?v=16';
+import { esc, fmtDate, fmtDT, prio, st, typesText, slotLabel, COMPANY, toDate, clientMessage, prefText, faultLabel } from './sd.js?v=17';
 
 // The logo is embedded in the PDF page (data URL), so it always prints.
 let logoData = '';
