@@ -1,4 +1,4 @@
-import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, ROLE_LABEL } from './fb.js';
+import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, canPushBoq, ROLE_LABEL } from './fb.js';
 import { esc, icon, avatar, friendlyError } from './util.js';
 import { startServiceAlerts, stopServiceAlerts, svcNewCount, onSvcChange } from './svcalert.js';
 import * as dashboard from './pages/dashboard.js';
@@ -20,6 +20,7 @@ import * as accounts from './pages/accounts.js';
 import * as backup from './pages/backup.js';
 import * as company from './pages/company.js';
 import * as svcreports from './pages/svcreports.js';
+import * as boq from './pages/boq.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -30,6 +31,7 @@ const NAV_ICONS = {
   working: '<circle cx="9" cy="8" r="3.6"/><path d="M2.6 20.2c.8-3.6 3.3-5.6 6.4-5.6s5.6 2 6.4 5.6"/><path d="m15.6 10.6 2.1 2.1 4.1-4.2"/>',
   map: '<path d="M9 4 3.5 6.2v13.6L9 17.6l6 2.4 5.5-2.2V4.2L15 6.4z"/><path d="M9 4v13.6M15 6.4V20"/>',
   projects: '<rect x="3" y="7" width="18" height="13.5" rx="2.2"/><path d="M8.5 7V5.6A1.6 1.6 0 0 1 10.1 4h3.8a1.6 1.6 0 0 1 1.6 1.6V7"/><path d="M3 12.8h18"/><path d="M10.5 12.8v1.6h3v-1.6"/>',
+  boq: '<rect x="4.5" y="3" width="15" height="18" rx="2.2"/><path d="M9 3v2.2h6V3"/><path d="m8 10.2 1.3 1.3 2.2-2.3M8 15.4l1.3 1.3 2.2-2.3M13.6 10.4H16.5M13.6 15.6H16.5"/>',
   sites: '<path d="M3.5 21V8.6l6-4.1V21"/><path d="M9.5 21V10.5h11V21"/><path d="M2 21h20"/><path d="M13.2 14h3.6M13.2 17.5h3.6M6 11.5h.9M6 15h.9"/>',
   schedule: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.2"/><path d="M3 9.5h18M8 2.8v3.6M16 2.8v3.6"/><path d="M7.5 13.5h2M11 13.5h2M14.5 13.5h2M7.5 17h2M11 17h2"/>',
   updates: '<path d="M4.2 7.6h2.9l1.5-2.2a1.4 1.4 0 0 1 1.2-.6h4.4a1.4 1.4 0 0 1 1.2.6l1.5 2.2h2.9A1.2 1.2 0 0 1 21 8.8v10a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 18.8v-10a1.2 1.2 0 0 1 1.2-1.2z"/><circle cx="12" cy="13.4" r="3.6"/>',
@@ -53,6 +55,7 @@ const NAV = [
   { path: 'map', label: 'Live map', icon: 'map', page: livemap },
   { sep: 'Work' },
   { path: 'projects', label: 'Projects', icon: 'projects', page: projects },
+  { path: 'boq', label: 'BOQ', icon: 'boq', page: boq, boq: true },
   { path: 'sites', label: 'Sites', icon: 'sites', page: sites },
   { path: 'schedule', label: 'Schedule', icon: 'schedule', page: schedule },
   { path: 'updates', label: 'Site updates', icon: 'updates', page: updates },
@@ -197,7 +200,7 @@ function renderWarn() {
 
 /** Which menu items this person sees: managers everything but admin pages; Accounts also for people allowed to view it. */
 function navAllowed(n) {
-  if (isLimited()) return !!n.accounts && canSeeAccounts();
+  if (isLimited()) return (!!n.accounts && canSeeAccounts()) || (!!n.boq && canPushBoq()) || (n.sep === 'Work' && canPushBoq());
   if (n.accounts) return canSeeAccounts();
   return !n.adminOnly || isAdmin();
 }
@@ -252,7 +255,7 @@ onAuthStateChanged(auth, async (user) => {
       await logout();
       return;
     }
-    const viewer = me.active && (me.canViewAccounts === true || me.canEditAccounts === true);
+    const viewer = me.active && (me.canViewAccounts === true || me.canEditAccounts === true || me.canPushBoq === true);
     if ((!['admin', 'manager'].includes(me.role) || !me.active) && !viewer) {
       loginError = me.role === 'docs' ? 'Document clerks use the Documents Portal: open portal.html on this site.' : 'This dashboard is for managers only. Staff should use the mobile app.';
       await logout();
@@ -261,7 +264,11 @@ onAuthStateChanged(auth, async (user) => {
     store.me = me;
     // Staff with only the Accounts permission get just that page (no other dashboard data).
     if (['admin', 'manager'].includes(me.role)) { store.start(); startServiceAlerts(); }
-    else if (!location.hash.startsWith('#/accounts')) location.hash = '#/accounts';
+    else {
+      // Staff with only the Accounts and/or BOQ permission get just those pages.
+      const pages = [me.canViewAccounts || me.canEditAccounts ? '#/accounts' : '', me.canPushBoq ? '#/boq' : ''].filter(Boolean);
+      if (!pages.some((h) => location.hash.startsWith(h))) location.hash = pages[0];
+    }
     renderShell();
   } catch (e) {
     loginError = friendlyError(e);

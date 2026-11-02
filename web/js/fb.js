@@ -54,6 +54,7 @@ export function mapUser(d) {
     violationsClearedAt: toDate(m.violationsClearedAt),
     isDriver: m.isDriver === true,
     canViewIds: m.canViewIds === true,
+    canPushBoq: m.canPushBoq === true,
     canViewAccounts: m.canViewAccounts === true,
     canEditAccounts: m.canEditAccounts === true,
     vehicle: m.vehicle || '',
@@ -581,6 +582,8 @@ export const canSeeAccounts = () => isAdmin() || store.me?.canViewAccounts === t
 /** 'admin' (full), 'editor' (changes wait for admin approval) or 'viewer' (read-only). */
 export const acctMode = () => (isAdmin() ? 'admin' : store.me?.canEditAccounts ? 'editor' : 'viewer');
 /** An employee who only has the Accounts permission (no other dashboard pages). */
+/** Admin, or someone admin allowed to push BOQs to projects / sites. */
+export const canPushBoq = () => isAdmin() || store.me?.canPushBoq === true;
 export const isLimited = () => !['admin', 'manager'].includes(store.me?.role);
 export const isManagerOrAdmin = () => ['admin', 'manager'].includes(store.me?.role);
 export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Employee', docs: 'Document clerk' };
@@ -1207,4 +1210,52 @@ export async function deleteCompanyFile(f) {
 export async function deleteCompanyDoc(id, files) {
   for (const f of files.filter((x) => x.docId === id)) await deleteCompanyFile(f);
   await deleteDoc(doc(db, 'companyDocs', id));
+}
+
+// ------------------------------------------------------------------ BOQs (bill of quantities) pushed to projects / sites
+// boqs/{id}: { title, ref, projectId, projectName, client, clientId, clientSnap, siteIds[] (empty = every site of the project),
+//   siteNames[], items: [{ section, name, desc, qty, unit }], notes, source, updatedAt, updatedBy, createdAt, createdBy }
+// Staff see the BOQs for their site in the phone app, print them and load the lines into a service report / delivery note.
+export function mapBoq(d) {
+  const m = d.data() || {};
+  const items = Array.isArray(m.items) ? m.items.map((i) => ({
+    section: String(i?.section || ''), name: String(i?.name || ''), desc: String(i?.desc || ''),
+    qty: Number(i?.qty) || 0, unit: String(i?.unit || ''),
+  })) : [];
+  return {
+    id: d.id, title: m.title || 'BOQ', ref: m.ref || '', projectId: m.projectId || '', projectName: m.projectName || '',
+    client: m.client || '', clientId: m.clientId || '', clientSnap: m.clientSnap || null,
+    siteIds: Array.isArray(m.siteIds) ? m.siteIds : [], siteNames: Array.isArray(m.siteNames) ? m.siteNames : [],
+    items, notes: m.notes || '', source: m.source || '',
+    updatedAt: toDate(m.updatedAt), updatedBy: m.updatedBy || '', createdAt: toDate(m.createdAt), createdBy: m.createdBy || '',
+  };
+}
+export const watchBoqs = (cb) => onSnapshot(C('boqs'), (s) => cb(s.docs.map(mapBoq)
+  .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))), (e) => { console.error(e); cb(null, e); });
+export const watchProjectsOnly = (cb) => onSnapshot(C('projects'), (s) => cb(s.docs.map(mapProject).sort((a, b) => a.name.localeCompare(b.name))),
+  (e) => { console.error(e); cb(null, e); });
+export const watchSitesOnly = (cb) => onSnapshot(C('sites'), (s) => cb(s.docs.map(mapSite).sort((a, b) => a.name.localeCompare(b.name))),
+  (e) => { console.error(e); cb(null, e); });
+export async function saveBoq(id, data) {
+  const items = (data.items || []).map((i) => ({
+    section: String(i.section || '').trim(), name: String(i.name || '').trim(), desc: String(i.desc || '').trim(),
+    qty: Math.round((Number(i.qty) || 0) * 1000) / 1000, unit: String(i.unit || '').trim(),
+  })).filter((i) => i.name || i.desc || i.section);
+  const ref = id ? doc(db, 'boqs', id) : doc(C('boqs'));
+  await setDoc(ref, {
+    ...data, items, updatedAt: serverTimestamp(), updatedBy: store.me?.name || '',
+    ...(id ? {} : { createdAt: serverTimestamp(), createdBy: store.me?.name || '' }),
+  }, { merge: true });
+  return ref.id;
+}
+export const deleteBoq = (id) => deleteDoc(doc(db, 'boqs', id));
+/** Quotations from LLCT Invoicing to start a BOQ from (all of them for people who see every document, else their own). */
+export async function listQuotations() {
+  const map = (d) => ({ id: d.id, ...d.data() });
+  try {
+    return (await getDocs(query(C('inv_docs'), where('type', '==', 'quotation')))).docs.map(map);
+  } catch (e) {
+    const s = await getDocs(query(C('inv_docs'), where('type', '==', 'quotation'), where('createdBy', '==', auth.currentUser?.uid || '')));
+    return s.docs.map(map);
+  }
 }

@@ -123,6 +123,9 @@ export function editPerson(u) {
       <label class="f row full" id="ef-ids" style="gap:8px;align-items:flex-start;background:#fff4e2;border-radius:10px;padding:10px 12px">
         <input type="checkbox" name="canIds" ${u?.canViewIds ? 'checked' : ''} style="margin-top:3px">
         <span><b>Can view &amp; download ID documents</b><br><span class="small muted">Sees everyone's passport, Emirates ID, visa, SIRA and MCC copies in the phone app and can share / download them and the ID sheet PDF. Admins always can.</span></span></label>
+      <label class="f row full" id="ef-boq" style="gap:8px;align-items:flex-start;background:#eef7f1;border-radius:10px;padding:10px 12px">
+        <input type="checkbox" name="canBoq" ${u?.canPushBoq ? 'checked' : ''} style="margin-top:3px">
+        <span><b>Can push BOQs to projects &amp; sites</b><br><span class="small muted">Creates and edits the BOQ (from Excel, paste or a quotation) that staff see on site, print, and load into their service report / delivery note. Admins always can.</span></span></label>
       <div class="full" id="ef-acc" style="background:#eef3fb;border-radius:10px;padding:10px 12px">
         <b>Accounts</b> <span class="small muted">— admins always have full access</span>
         <div class="row" style="gap:16px;margin-top:6px;flex-wrap:wrap">
@@ -143,6 +146,7 @@ export function editPerson(u) {
         m.querySelector('#ef-drv').style.display = drv ? 'grid' : 'none';
         m.querySelector('#ef-off').style.display = drv ? 'none' : '';
         m.querySelector('#ef-ids').style.display = f.role.value === 'admin' ? 'none' : '';
+        m.querySelector('#ef-boq').style.display = f.role.value === 'admin' ? 'none' : '';
         m.querySelector('#ef-acc').style.display = f.role.value === 'admin' ? 'none' : '';
       };
       f.role.addEventListener('change', syncProfile);
@@ -164,6 +168,7 @@ export function editPerson(u) {
           isDriver: f.role.value === 'employee' && f.profile.value === 'driver', vehicle: f.vehicle.value.trim(),
           tripRatePerKm: f.tripRate.value === '' ? null : Number(f.tripRate.value),
           canViewIds: f.role.value !== 'admin' && f.canIds.checked,
+          canPushBoq: f.role.value !== 'admin' && f.canBoq.checked,
           canViewAccounts: f.role.value !== 'admin' && ['view', 'edit'].includes(f.accPerm.value),
           canEditAccounts: f.role.value !== 'admin' && f.accPerm.value === 'edit',
         };

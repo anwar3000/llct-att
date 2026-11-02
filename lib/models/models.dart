@@ -94,6 +94,9 @@ class AppUser {
   final DateTime? violationsClearedAt;
   /// Admin gave this person access to everyone's ID documents in the app.
   final bool canViewIds;
+  /// Admin let this person push BOQs to projects / sites.
+  final bool canPushBoq;
+  bool get pushesBoq => isAdmin || canPushBoq;
   /// Accounts permission: view (read-only) / edit (changes wait for admin approval).
   final bool canViewAccounts;
   final bool canEditAccounts;
@@ -125,6 +128,7 @@ class AppUser {
     this.forceLogoutAt,
     this.violationsClearedAt,
     this.canViewIds = false,
+    this.canPushBoq = false,
     this.canViewAccounts = false,
     this.canEditAccounts = false,
     this.canAssignService = false,
@@ -165,6 +169,7 @@ class AppUser {
       forceLogoutAt: _ts(m['forceLogoutAt']),
       violationsClearedAt: _ts(m['violationsClearedAt']),
       canViewIds: m['canViewIds'] == true,
+      canPushBoq: m['canPushBoq'] == true,
       canViewAccounts: m['canViewAccounts'] == true,
       canEditAccounts: m['canEditAccounts'] == true,
       canAssignService: m['canAssignService'] == true,

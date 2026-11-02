@@ -5,6 +5,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/inv_reports.dart';
 import '../../widgets/common.dart';
+import 'boq_screen.dart';
 import 'report_editor.dart';
 import 'report_view.dart';
 
@@ -45,6 +46,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Service & delivery reports'),
+          actions: [
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => BoqListScreen(me: widget.me, session: widget.session))),
+              icon: const Icon(Icons.checklist_rtl, size: 18),
+              label: const Text('BOQ'),
+            ),
+          ],
           bottom: const TabBar(
             labelColor: AppColors.primaryDark,
             indicatorColor: AppColors.accent,

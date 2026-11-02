@@ -10,6 +10,9 @@ import '../../services/location_service.dart';
 import '../../services/service_desk.dart';
 import '../../widgets/barcode_scanner.dart';
 import '../../widgets/common.dart';
+import '../../widgets/trip_card.dart' show kDialogButton;
+import '../../services/boq.dart';
+import 'boq_screen.dart';
 import 'report_view.dart';
 import 'report_widgets.dart';
 
@@ -22,7 +25,9 @@ class ReportEditor extends StatefulWidget {
   final ServiceTicket? ticket;
   /// Start the new report as a copy of this old one (content only — new number, date and signature).
   final InvReport? copyFrom;
-  const ReportEditor({super.key, required this.me, required this.kind, this.existing, this.session, this.ticket, this.copyFrom});
+  /// Start the new report with the lines of this project BOQ.
+  final Boq? boq;
+  const ReportEditor({super.key, required this.me, required this.kind, this.existing, this.session, this.ticket, this.copyFrom, this.boq});
 
   @override
   State<ReportEditor> createState() => _ReportEditorState();
@@ -57,6 +62,7 @@ class _ReportEditorState extends State<ReportEditor> {
     d['items'] = ((d['items'] as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     d['attachments'] = ((d['attachments'] as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     if (_isNew && widget.copyFrom != null) InvReports.copyInto(d, widget.copyFrom!, widget.kind);
+    if (_isNew && widget.boq != null) Boqs.applyToDraft(d, widget.boq!, widget.kind, replace: true);
     final s = widget.session;
     if (_isNew && s != null) {
       d['attSiteId'] = s.siteId;
@@ -250,6 +256,36 @@ class _ReportEditorState extends State<ReportEditor> {
     showSnack(context, 'Copied from ${picked.number} — check and change what is different, then Save.');
   }
 
+  /// Put the lines of a project BOQ into this report (the BOQ for the checked-in site is listed first).
+  Future<void> _loadBoq() async {
+    final s = widget.session;
+    final b = await pickBoq(context, siteId: s?.siteId ?? '', siteName: s?.siteName ?? '');
+    if (b == null || !mounted) return;
+    final d = _d!;
+    final has = ((d['items'] as List?) ?? const []).whereType<Map>().any((i) => '${i['name']}'.trim().isNotEmpty);
+    var replace = true;
+    if (has) {
+      final r = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('This report already has items'),
+          content: Text('Replace them with the ${b.lines.length} BOQ lines, or add the BOQ lines after them?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Add after')),
+            FilledButton(style: kDialogButton, onPressed: () => Navigator.pop(c, true), child: const Text('Replace')),
+          ],
+        ),
+      );
+      if (r == null || !mounted) return;
+      replace = r;
+    }
+    setState(() {
+      Boqs.applyToDraft(d, b, _kind, replace: replace);
+      _gen++;
+    });
+    showSnack(context, '${b.lines.length} lines from “${b.title}” — set the status of each line, then Save.');
+  }
+
   void _changeKind(ReportKind k) {
     final d = _d!;
     setState(() {
@@ -410,12 +446,25 @@ class _ReportEditorState extends State<ReportEditor> {
             },
           ),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
-            onPressed: _copyFromOld,
-            icon: const Icon(Icons.content_copy, size: 18),
-            label: Text(d['copiedFrom'] != null ? 'Copied from ${d['copiedFrom']} — copy another' : 'Copy from an old report'),
-          ),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                onPressed: _copyFromOld,
+                icon: const Icon(Icons.content_copy, size: 18),
+                label: Text(d['copiedFrom'] != null ? 'Copied ${d['copiedFrom']}' : 'Copy old report', overflow: TextOverflow.ellipsis),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                onPressed: _loadBoq,
+                icon: const Icon(Icons.checklist_rtl, size: 18),
+                label: Text(d['boqTitle'] != null ? 'BOQ: ${d['boqTitle']}' : 'Load project BOQ', overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ]),
         ],
         if (d['ticketNo'] != null && '${d['ticketNo']}'.isNotEmpty)
           Padding(

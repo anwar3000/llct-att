@@ -142,6 +142,7 @@ function detail(el, id, { setHeader }) {
     }
     setHeader(p.name, `${p.code ? `${esc(p.code)} · ` : ''}${esc(p.client || 'No client')}${p.manager ? ` · PM ${esc(p.manager)}` : ''}`,
       `<a class="btn ghost" href="#/projects">← All projects</a>
+       <a class="btn ghost" href="#/boq/p:${p.id}">${icon('report', 16)} BOQ</a>
        <button class="btn ghost" id="pd-xlsx">${icon('download', 16)} Excel</button>
        <button class="btn ghost" id="pd-pdf">${icon('download', 16)} PDF</button>
        <button class="btn" id="pd-edit">${icon('edit', 16)} Edit</button>`);

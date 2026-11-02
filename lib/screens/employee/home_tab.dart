@@ -18,6 +18,7 @@ import '../../widgets/service_calls_card.dart';
 import '../../services/inv_reports.dart';
 import '../reports/report_editor.dart';
 import '../reports/reports_screen.dart';
+import '../reports/boq_screen.dart';
 import 'worker_picker_screen.dart';
 
 class HomeTab extends StatefulWidget {
@@ -721,6 +722,17 @@ class _HomeTabState extends State<HomeTab> {
               ),
             ),
           ]),
+          const SizedBox(height: 6),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 38),
+                backgroundColor: Colors.white.withValues(alpha: 0.6),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                textStyle: btn),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => BoqListScreen(me: widget.me, session: open))),
+            icon: const Icon(Icons.checklist_rtl, size: 18),
+            label: Text(open != null ? 'Project BOQ for this site — print / make report' : 'Project BOQ — print / make report'),
+          ),
         ]),
       ),
     );

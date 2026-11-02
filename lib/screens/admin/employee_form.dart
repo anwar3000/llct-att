@@ -29,6 +29,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
   late bool _active = widget.existing?.active ?? true;
   late bool _driver = widget.existing?.isDriver ?? false;
   late bool _ids = widget.existing?.canViewIds ?? false;
+  late bool _boq = widget.existing?.canPushBoq ?? false;
   late String _acc = (widget.existing?.canEditAccounts ?? false) ? 'edit' : ((widget.existing?.canViewAccounts ?? false) ? 'view' : 'none');
   late final _vehicle = TextEditingController(text: widget.existing?.vehicle);
   late final _rate = TextEditingController(
@@ -62,6 +63,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           'active': _active,
           'isDriver': _role == 'employee' && _driver,
           'canViewIds': _role != 'admin' && _ids,
+          'canPushBoq': _role != 'admin' && _boq,
           'canViewAccounts': _role != 'admin' && _acc != 'none',
           'canEditAccounts': _role != 'admin' && _acc == 'edit',
           'vehicle': _vehicle.text.trim(),
@@ -80,6 +82,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
         );
         if (_email.text.trim().isNotEmpty) await Db.updateUser(uid, {'contactEmail': _email.text.trim()});
         if (_role != 'admin' && _ids) await Db.updateUser(uid, {'canViewIds': true});
+        if (_role != 'admin' && _boq) await Db.updateUser(uid, {'canPushBoq': true});
         if (_role != 'admin' && _acc != 'none') await Db.updateUser(uid, {'canViewAccounts': true, 'canEditAccounts': _acc == 'edit'});
         if (_role == 'employee' && _driver) {
           await Db.updateUser(uid, {
@@ -294,6 +297,16 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
                       'Sees everyone\'s passport, Emirates ID, visa, SIRA and MCC copies in the app and can share / download them and the ID sheet PDF.'),
                   value: _ids,
                   onChanged: (v) => setState(() => _ids = v),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.checklist_rtl),
+                  title: const Text('Can push BOQs to projects & sites'),
+                  subtitle: const Text('Creates and edits the BOQ that staff see on site, print, and load into their service report / delivery note.'),
+                  value: _boq,
+                  onChanged: (v) => setState(() => _boq = v),
                 ),
               ),
               const SizedBox(height: 8),
