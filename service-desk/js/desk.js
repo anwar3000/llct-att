@@ -9,8 +9,8 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus, DEVICE_LISTS, listOfOther,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=17';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=17';
+} from './sd.js?v=18';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=18';
 window.__sdStarted = true;
 
 const auth = getAuth(app);

@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=17';
+} from './sd.js?v=18';
 
 window.__sdStarted = true;
 
@@ -177,7 +177,7 @@ function formHtml() {
     siteBody = `<select id="f-site" aria-label="Site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === f.siteId ? 'selected' : ''}>${esc(x.name)}${x.address ? ' — ' + esc(addr1(x)) : ''}</option>`).join('')}<option value="_other">Another location (not in the list)</option></select>`;
   } else {
     siteBody = `<div class="srows" role="radiogroup">${sites.map((x) => `<button type="button" class="srow ${x.id === f.siteId ? 'on' : ''}" data-site="${esc(x.id)}" role="radio" aria-checked="${x.id === f.siteId}">
-        <span class="srad" aria-hidden="true"></span><span class="sth" data-sphoto="${esc(x.id)}"></span><span class="sname">${esc(x.name)}</span><span class="saddr">${esc(addr1(x))}</span></button>`).join('')}</div>`;
+        <span class="sth" data-sphoto="${esc(x.id)}"><span class="sini">${esc((x.name || '?').trim().charAt(0).toUpperCase())}</span></span><span class="stx"><span class="sname">${esc(x.name)}</span>${addr1(x) ? `<span class="saddr">${esc(addr1(x))}</span>` : ''}${hasGPS(x) ? '<span class="sgps">📍 Location on file</span>' : ''}</span><span class="srad" aria-hidden="true"></span></button>`).join('')}</div>`;
   }
   const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><div class="shead"><h2>Site</h2>${!other ? '<button type="button" class="linkbtn sm" data-site="_other">Different location?</button>' : ''}</div>${siteBody}</div></div>`;
 
