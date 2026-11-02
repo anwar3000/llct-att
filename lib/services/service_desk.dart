@@ -83,10 +83,16 @@ Color svcResultColor(String r) => switch (r) {
 /// "NVR 1 – Main office" / "Camera 05 – Main gate (NVR 1, ch 5)"
 String svcFaultLabel(Map f) {
   String v(String k) => '${f[k] ?? ''}'.trim();
-  if (v('kind') == 'nvr') return 'NVR ${v('no')}${v('name').isEmpty ? '' : ' – ${v('name')}'}'.trim();
-  if (v('kind') == 'other') return '${v('type').isEmpty ? 'Device' : v('type')}${v('name').isEmpty ? '' : ' – ${v('name')}'}'.trim();
+  final name = v('name'), no = v('no');
+  if (v('kind') == 'nvr') return no.isNotEmpty ? 'NVR $no${name.isEmpty ? '' : ' – $name'}' : (RegExp(r'^(nvr|dvr|xvr)', caseSensitive: false).hasMatch(name) ? name : 'NVR – $name');
+  if (v('kind') == 'other') {
+    final ty = v('type');
+    if (ty.isEmpty || ty == 'Other' || name.toLowerCase().startsWith(ty.toLowerCase().split(RegExp(r'[ /]')).first)) return name.isNotEmpty ? name : (ty.isNotEmpty ? ty : 'Device');
+    return '$ty${name.isEmpty ? '' : ' – $name'}';
+  }
   final where = v('nvr').isEmpty ? '' : ' (NVR ${v('nvr')}${v('ch').isEmpty ? '' : ', ch ${v('ch')}'})';
-  return 'Camera ${v('no')}${v('name').isEmpty ? '' : ' – ${v('name')}'}$where'.trim();
+  final base = no.isNotEmpty ? 'Camera $no${name.isEmpty ? '' : ' – $name'}' : (RegExp(r'^(cam|camera)\b', caseSensitive: false).hasMatch(name) ? name : 'Camera – $name');
+  return '$base$where'.trim();
 }
 
 /// AMC contract line for a client, e.g. "AMC active until 31 Dec 2026" (empty when none).

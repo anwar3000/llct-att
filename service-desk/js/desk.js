@@ -6,11 +6,11 @@ import {
 import {
   app, db, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField, deleteDoc,
-  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus,
+  SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus, DEVICE_LISTS, listOfOther,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=13';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=13';
+} from './sd.js?v=14';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=14';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -102,7 +102,7 @@ function startData() {
       refresh();
     }, (e) => console.warn('users', e)));
     S.profiles = {};
-    S.unsub.push(onSnapshot(collection(db, 'svcClients'), (q) => { S.profiles = {}; q.docs.forEach((d) => { S.profiles[d.id] = d.data(); }); if (S.view === 'clients') render(); }, () => {}));
+    S.unsub.push(onSnapshot(collection(db, 'svcClients'), (q) => { S.profiles = {}; q.docs.forEach((d) => { S.profiles[d.id] = d.data(); }); S.profilesLoaded = true; syncPortalSites(); if (S.view === 'clients') render(); }, () => { S.profilesLoaded = true; syncPortalSites(); }));
     S.unsub.push(onSnapshot(collection(db, 'svcPortals'), (q) => {
       S.portals = q.docs.map((d) => ({ id: d.id, ...d.data() })); refresh(); syncPortalSites();
     }, (e) => console.warn('portals', e)));
@@ -133,10 +133,10 @@ const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]`
   : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v ?? null));
 const synced = new Map(); // portal id → last value written (never write the same thing twice)
 function syncPortalSites() {
-  if (!canAssign() || !S.clients.length || !S.portals.length) return;
+  if (!canAssign() || !S.profilesLoaded || !S.clients.length || !S.portals.length) return;
   S.portals.filter((p) => p.active).forEach((p) => {
     const c = S.clients.find((x) => x.id === p.clientId); if (!c) return;
-    const sites = sitesFromPlaces(c);
+    const sites = linkSites(c);
     const name = c.name || p.clientName || '';
     const want = canon({ sites, name });
     if (canon({ sites: p.sites || [], name: p.clientName || '' }) === want || synced.get(p.id) === want) return;
@@ -784,165 +784,94 @@ async function syncAllSitePhotos(clientId, siteIds) {
   await Promise.all(siteIds.map((sid) => getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid))
     .then((d) => syncSitePhoto(clientId, sid, d.exists() && d.data().data ? d.data().data : null)).catch(() => {})));
 }
-// ------------------------------------------------------------------ Excel import of equipment
-let XLSX = null;
-async function xlsxLib() {
-  if (XLSX) return XLSX;
-  for (const u of ['https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs', './vendor/xlsx.mjs']) {
-    try { XLSX = await import(u); return XLSX; } catch (_) { /* try next */ }
-  }
-  throw new Error('Could not load the Excel reader. Check the internet connection, or save the sheet as CSV and try again.');
+// ------------------------------------------------------------------ customer service profile
+const IP_RE = /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/;
+/** One line of a device list → { name, ip }. Lines pasted from Excel keep their columns (tab-separated): an IP column is recognised. */
+function parseDeviceLine(line) {
+  const cells = String(line).split('\t').map((x) => x.trim()).filter(Boolean);
+  const ipCell = cells.find((x) => IP_RE.test(x));
+  const name = cells.filter((x) => x !== ipCell).join(' ').replace(/\s+/g, ' ').trim();
+  return { name: name || ipCell || '', ip: ipCell || '' };
 }
-const normH = (h) => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const HEAD = {
-  type: ['type', 'device', 'devicetype', 'category', 'equipment', 'item', 'kind'],
-  no: ['no', 'number', 'sr', 'srno', 'sno', 'slno', 'cameraNo', 'camno', 'camerano', 'nvrno', 'id', 'num'],
-  name: ['name', 'location', 'cameraname', 'description', 'desc', 'label', 'area', 'position', 'title'],
-  nvr: ['nvr', 'nvrno', 'recorder', 'dvr', 'connectedto', 'nvrdvr'],
-  ch: ['ch', 'channel', 'channelno', 'chno', 'port'],
-  ip: ['ip', 'ipaddress', 'ipaddr', 'address'],
-  model: ['model', 'modelno', 'make', 'brandmodel', 'partno'],
-  serial: ['serial', 'serialno', 'sn', 'serialnumber', 'snno'],
-  channels: ['channels', 'totalchannels', 'noofchannels', 'channelcount'],
-  qty: ['qty', 'quantity', 'count', 'nos'],
-};
-function kindFrom(text) {
-  const t = String(text || '').toLowerCase();
-  if (/\b(nvr|dvr|recorder|xvr)\b/.test(t)) return 'nvr';
-  if (/\b(cam|camera|cameras|ipc|bullet|dome|ptz|turret)\b/.test(t)) return 'camera';
-  return '';
-}
-function otherType(text) {
-  const t = String(text || '').toLowerCase();
-  const map = [[/switch|poe/, 'Network switch'], [/hdd|hard ?dis[kc]|storage/, 'Hard disk'], [/monitor|tv|screen|display/, 'Monitor / TV'], [/ups|battery/, 'UPS'],
-    [/router|wi-?fi|access point|\bap\b/, 'Router / Wi-Fi'], [/access|door|biometric|card reader/, 'Access control'], [/intercom|vdp|door phone/, 'Intercom'],
-    [/fire|smoke/, 'Fire alarm panel'], [/o2iot|iot/, 'O2IOT switch'], [/o2|oxygen/, 'Oxygen O2 device']];
-  const m = map.find(([re]) => re.test(t)); return m ? m[1] : (text ? String(text).trim() : 'Other');
-}
-async function readEquipmentFile(file) {
-  const L = await xlsxLib();
-  const wb = L.read(await file.arrayBuffer(), { type: 'array' });
-  const out = { nvrs: [], cameras: [], others: [], skipped: 0 };
-  wb.SheetNames.forEach((sn) => {
-    const rows = L.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false });
-    // first row that looks like headings
-    let hi = rows.findIndex((r) => r.filter((c) => Object.values(HEAD).some((l) => l.map(normH).includes(normH(c)))).length >= 2);
-    if (hi < 0) return;
-    const col = {}; rows[hi].forEach((c, i) => { const h = normH(c); Object.entries(HEAD).forEach(([k, l]) => { if (col[k] === undefined && l.map(normH).includes(h)) col[k] = i; }); });
-    const sheetKind = kindFrom(sn) || (/other|device|misc|network|access/i.test(sn) ? 'other' : '');
-    rows.slice(hi + 1).forEach((r) => {
-      const g = (k) => (col[k] === undefined ? '' : String(r[col[k]] ?? '').trim());
-      if (!r.some((c) => String(c).trim())) return;
-      const typ = g('type');
-      const kind = kindFrom(typ) || (typ ? 'other' : '') || sheetKind || (g('nvr') || g('ch') ? 'camera' : '');
-      const rec = { id: newId() + Math.random().toString(36).slice(2, 5), no: g('no'), name: g('name'), model: g('model'), serial: g('serial'), ip: g('ip') };
-      if (!rec.no && !rec.name && !rec.ip && !rec.serial && !rec.model) { out.skipped++; return; }
-      if (kind === 'nvr') out.nvrs.push({ ...rec, no: rec.no || String(out.nvrs.length + 1), channels: g('channels') });
-      else if (kind === 'camera') out.cameras.push({ ...rec, no: rec.no || String(out.cameras.length + 1).padStart(2, '0'), nvr: g('nvr').replace(/^nvr\s*/i, ''), ch: g('ch') });
-      else if (kind === 'other') out.others.push({ id: rec.id, type: otherType(typ || sn), name: rec.name, model: rec.model, serial: rec.serial, ip: rec.ip, qty: g('qty') || '1' });
-      else out.skipped++;
-    });
-  });
+/** A site's equipment → the text of each device list. */
+function listsText(e) {
+  const out = {}; DEVICE_LISTS.forEach((l) => { out[l.k] = []; });
+  const line = (x) => `${[x.no && !String(x.name || '').startsWith(x.no) ? x.no : '', x.name].filter(Boolean).join(' ')}${x.ip ? `\t${x.ip}` : ''}`;
+  (e.cameras || []).forEach((x) => out.cameras.push(line(x)));
+  (e.nvrs || []).forEach((x) => out.nvrs.push(line(x)));
+  (e.others || []).forEach((x) => { const k = listOfOther(x); const pre = k === 'other' && x.type && x.type !== 'Other' && !String(x.name || '').startsWith(x.type) ? `${x.type} – ` : ''; out[k].push(`${pre}${line(x)}`); });
+  Object.keys(out).forEach((k) => { out[k] = out[k].join('\n'); });
   return out;
 }
-async function equipmentTemplate() {
-  const L = await xlsxLib();
-  const wb = L.utils.book_new();
-  const add = (name, rows, w) => { const ws = L.utils.aoa_to_sheet(rows); ws['!cols'] = w.map((x) => ({ wch: x })); L.utils.book_append_sheet(wb, ws, name); };
-  add('NVR', [['No', 'Name', 'Model', 'Serial', 'IP', 'Channels'], ['1', 'Main office rack', 'Hikvision DS-7616NI', 'DS7616-001', '192.168.1.64', '16']], [6, 24, 22, 18, 16, 10]);
-  add('Cameras', [['No', 'Name', 'NVR', 'Channel', 'IP', 'Model', 'Serial'], ['01', 'Main gate', '1', '1', '192.168.1.101', 'DS-2CD2043G2', 'CAM-0001'], ['02', 'Cash counter', '1', '2', '192.168.1.102', 'DS-2CD2143G2', 'CAM-0002']], [6, 24, 6, 9, 16, 20, 16]);
-  add('Other', [['Type', 'Name', 'Model', 'Serial', 'IP', 'Qty'], ['Network switch', 'Rack PoE switch', 'TP-Link TL-SG1016PE', 'SW-01', '192.168.1.2', '1'], ['Hard disk', 'NVR 1 storage', 'WD Purple 4TB', 'WX12AB345', '', '2'], ['UPS', 'Server room', 'APC 3kVA', 'UPS-01', '', '1']], [18, 22, 22, 16, 16, 6]);
-  L.writeFile(wb, 'equipment-template.xlsx');
+/** The text of each device list → a site's equipment. Devices that were there before keep their id (and model / serial). */
+function listsToEquipment(texts, prev) {
+  const old = [...(prev.cameras || []).map((x) => ({ ...x, _k: 'cameras' })), ...(prev.nvrs || []).map((x) => ({ ...x, _k: 'nvrs' })), ...(prev.others || []).map((x) => ({ ...x, _k: listOfOther(x) }))];
+  const used = new Set();
+  const findOld = (k, name) => old.find((x) => !used.has(x.id) && x._k === k && [x.name, `${x.no || ''} ${x.name || ''}`.trim(), `${x.type || ''} – ${x.name || ''}`].includes(name));
+  const e = { cameras: [], nvrs: [], others: [] };
+  DEVICE_LISTS.forEach((l) => {
+    String(texts[l.k] || '').split('\n').map((x) => x.replace(/\r/g, '')).filter((x) => x.trim()).forEach((ln) => {
+      const { name, ip } = parseDeviceLine(ln); if (!name) return;
+      const o = findOld(l.k, name); if (o) used.add(o.id);
+      const base = { ...(o || {}), id: o ? o.id : newId() + Math.random().toString(36).slice(2, 5), no: '', name, ip: ip || (o && o.ip) || '' };
+      delete base._k;
+      if (l.k === 'cameras') e.cameras.push(base);
+      else if (l.k === 'nvrs') e.nvrs.push(base);
+      else e.others.push({ ...base, type: l.type, qty: (o && o.qty) || '1' });
+    });
+  });
+  return e;
 }
+const countLines = (t) => String(t || '').split('\n').filter((x) => x.trim()).length;
+/** Sites on the client's link: all the client's sites except those hidden in the profile. */
+const linkSites = (c) => { const hide = ((S.profiles || {})[c.id] || {}).hiddenSites || []; const l = sitesFromPlaces(c); const v = l.filter((x) => !hide.includes(x.id)); return v.length ? v : l; };
 
-/** Service profile of a client: trade licence, and per site the building photo and the equipment we maintain. */
+/** Service profile of a client: AMC, trade licence, sites on the link, and per site the building photo and the device lists. */
 async function profileModal(clientId) {
   const c = S.clients.find((x) => x.id === clientId); if (!c) return;
   const sites = sitesFromPlaces(c);
-  let prof = { tradeLicense: '', sites: {}, services: [], amc: {} };
-  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, services: [], amc: {}, ...d.data() }; } catch (e) { return toast(friendly(e), true); }
+  let prof = { tradeLicense: '', sites: {}, services: [], amc: {}, hiddenSites: [] };
+  try { const d = await getDoc(doc(db, 'svcClients', clientId)); if (d.exists()) prof = { tradeLicense: '', sites: {}, services: [], amc: {}, hiddenSites: [], ...d.data() }; } catch (e) { return toast(friendly(e), true); }
   let sid = sites[0] ? sites[0].id : '';
-  const eqOf = (id) => { const e = prof.sites[id] = prof.sites[id] || {}; e.nvrs = e.nvrs || []; e.cameras = e.cameras || []; e.others = e.others || []; return e; };
+  const texts = {}; // site id → { list key → text }
+  const textsOf = (id) => (texts[id] = texts[id] || listsText(prof.sites[id] || {}));
   const o = modal(`<h2 class="grow">${esc(c.name)} — service profile</h2>`, '<div id="pf"></div>',
     `<button class="btn" data-x>Close</button><button class="btn primary" id="pf-save">Save profile</button>`, { wide: true });
   const keep = () => {
     const tl = $('#pf-tl', o); if (tl) prof.tradeLicense = tl.value.trim();
     if ($('#pf-amc', o)) { prof.amc = prof.amc || {}; $$('[data-amc]', o).forEach((i) => { prof.amc[i.dataset.amc] = i.value.trim(); }); }
     if ($('#pf-svc', o)) prof.services = $$('[data-svc]', o).filter((i) => i.checked).map((i) => i.dataset.svc);
-    if (!sid) return; const e = eqOf(sid);
-    $$('[data-nf]', o).forEach((i) => { const [k, f] = i.dataset.nf.split(':'); e.nvrs[+k][f] = i.value.trim(); });
-    $$('[data-cf]', o).forEach((i) => { const [k, f] = i.dataset.cf.split(':'); e.cameras[+k][f] = i.value.trim(); });
-    $$('[data-of]', o).forEach((i) => { const [k, f] = i.dataset.of.split(':'); e.others[+k][f] = i.value.trim(); });
+    if ($('#pf-vis', o)) prof.hiddenSites = $$('[data-vis]', o).filter((i) => !i.checked).map((i) => i.dataset.vis);
+    if (sid) { const t = textsOf(sid); $$('[data-dl]', o).forEach((a) => { t[a.dataset.dl] = a.value; }); }
   };
   const draw = () => {
-    const e = sid ? eqOf(sid) : { nvrs: [], cameras: [], others: [] };
-    const am = prof.amc || {};
-    const nvrOpts = (v) => `<option value="">—</option>${v && !e.nvrs.some((n) => String(n.no) === String(v)) ? `<option value="${esc(v)}" selected>NVR ${esc(v)}</option>` : ''}${e.nvrs.map((n) => `<option value="${esc(n.no)}" ${String(v) === String(n.no) ? 'selected' : ''}>NVR ${esc(n.no)}</option>`).join('')}`;
+    const am = prof.amc || {}; const t = sid ? textsOf(sid) : {};
+    const total = DEVICE_LISTS.reduce((n, l) => n + countLines(t[l.k]), 0);
     $('#pf', o).innerHTML = `
       <div class="grid2"><label class="field"><span>Trade licence number</span><input id="pf-tl" value="${esc(prof.tradeLicense || '')}" placeholder="e.g. 123456"></label>
-        <label class="field"><span>Site</span><select id="pf-site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === sid ? 'selected' : ''}>${esc(x.name)}</option>`).join('') || '<option value="">Add sites to this client in LLCT Invoicing first</option>'}</select></label></div>
-      <div id="pf-amc" class="pfsec"><b>AMC contract</b>
-        <div class="grid4"><label class="field"><span>Contract no.</span><input data-amc="no" value="${esc(am.no || '')}" placeholder="e.g. AMC-2026-014"></label>
-          <label class="field"><span>Start</span><input type="date" data-amc="start" value="${esc(am.start || '')}"></label>
-          <label class="field"><span>End</span><input type="date" data-amc="end" value="${esc(am.end || '')}"></label>
-          <label class="field"><span>Visits / year</span><input type="number" min="0" data-amc="visits" value="${esc(am.visits || '')}" placeholder="4"></label></div>
-        <label class="field" style="margin-top:8px"><span>Covered products &amp; services</span><input data-amc="covered" value="${esc(am.covered || '')}" placeholder="e.g. Preventive maintenance, labour, breakdown calls 24/7 — spare parts chargeable"></label></div>
-      <div id="pf-svc" style="margin-top:14px"><b>Service options this client sees</b><span class="small muted"> — tick only what they have (e.g. CCTV only). None ticked = show all. "Other" always shows.</span>
-        <div class="svcpick">${activeTypes().filter((t) => t.k !== 'other').map((t) => `<label><input type="checkbox" data-svc="${esc(t.k)}" ${(prof.services || []).includes(t.k) ? 'checked' : ''}>${esc(t.t)}</label>`).join('')}</div></div>
-      ${sid ? `<div class="row" style="margin-top:14px;align-items:flex-start;gap:14px">
-        <div id="pf-ph" class="pfph"><span class="small muted">Loading photo…</span></div>
-        <div class="grow"><b>Building photo</b><p class="small muted" style="margin:2px 0 8px">Shown to the client on their request page and to the technician.</p>
-          <label class="btn sm">Upload photo<input type="file" accept="image/*" hidden id="pf-up"></label> <button class="btn sm bad" id="pf-rm" type="button">Remove</button></div></div>
-      <div class="pfsec impbox"><div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><div class="grow"><b>Import from Excel</b><div class="small muted">NVRs, cameras (with IPs) and other equipment for <b>${esc((sites.find((x) => x.id === sid) || {}).name || '')}</b> — .xlsx, .xls or .csv.</div></div>
-        <button class="btn sm" id="pf-tpl" type="button">Download template</button><label class="btn sm primary">Choose Excel file<input type="file" hidden id="pf-xls" accept=".xlsx,.xls,.csv"></label></div><div id="pf-imp"></div></div>
-      <h3 style="margin-top:18px">NVR / DVR <span class="muted small">(${e.nvrs.length})</span></h3>
-      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th>Model</th><th>Serial</th><th>IP</th><th style="width:80px">Channels</th><th style="width:40px"></th></tr></thead><tbody>
-        ${e.nvrs.map((n, k) => `<tr>${['no', 'name', 'model', 'serial', 'ip', 'channels'].map((f) => `<td><input data-nf="${k}:${f}" value="${esc(n[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-nrm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No NVR yet.</td></tr>'}
-      </tbody></table></div>
-      <button class="btn sm" id="pf-addn" type="button" style="margin-top:6px">+ NVR</button>
-      <h3 style="margin-top:18px">Cameras <span class="muted small">(${e.cameras.length})</span></h3>
-      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:70px">No.</th><th>Name / location</th><th style="width:100px">NVR</th><th style="width:70px">Ch.</th><th>IP</th><th>Model</th><th>Serial</th><th style="width:40px"></th></tr></thead><tbody>
-        ${e.cameras.map((cm, k) => `<tr><td><input data-cf="${k}:no" value="${esc(cm.no || '')}"></td><td><input data-cf="${k}:name" value="${esc(cm.name || '')}"></td>
-          <td><select data-cf="${k}:nvr">${nvrOpts(cm.nvr)}</select></td><td><input data-cf="${k}:ch" value="${esc(cm.ch || '')}"></td><td><input data-cf="${k}:ip" value="${esc(cm.ip || '')}"></td>
-          <td><input data-cf="${k}:model" value="${esc(cm.model || '')}"></td><td><input data-cf="${k}:serial" value="${esc(cm.serial || '')}"></td><td><button class="btn sm bad" data-crm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">No cameras yet.</td></tr>'}
-      </tbody></table></div>
-      <div class="row" style="margin-top:6px"><button class="btn sm" id="pf-addc" type="button">+ Camera</button><button class="btn sm" id="pf-addmany" type="button">+ Several cameras…</button></div>
-      <h3 style="margin-top:18px">Other equipment under maintenance <span class="muted small">(${e.others.length})</span></h3>
-      <div style="overflow:auto"><table class="tbl eqt"><thead><tr><th style="width:170px">Type</th><th>Name / location</th><th>Model</th><th>Serial</th><th>IP</th><th style="width:70px">Qty</th><th style="width:40px"></th></tr></thead><tbody>
-        ${e.others.map((x, k) => `<tr><td><select data-of="${k}:type">${OTHER_TYPES.map((t) => `<option ${x.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></td>
-          ${['name', 'model', 'serial', 'ip', 'qty'].map((f) => `<td><input data-of="${k}:${f}" value="${esc(x[f] || '')}"></td>`).join('')}<td><button class="btn sm bad" data-orm="${k}" type="button">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Switches, hard disks, UPS, monitors, access control, O2 devices…</td></tr>'}
-      </tbody></table></div>
-      <button class="btn sm" id="pf-addo" type="button" style="margin-top:6px">+ Other equipment</button>` : ''}`;
+        <div class="field"><span>AMC contract</span><div class="row" style="gap:6px"><input data-amc="no" value="${esc(am.no || '')}" placeholder="Contract no." style="flex:1.2"><input type="date" data-amc="start" value="${esc(am.start || '')}" title="Start" style="flex:1"><input type="date" data-amc="end" value="${esc(am.end || '')}" title="End" style="flex:1"></div></div></div>
+      <div id="pf-amc" class="grid2" style="margin-top:10px"><label class="field"><span>Covered products &amp; services</span><input data-amc="covered" value="${esc(am.covered || '')}" placeholder="e.g. PPM 4 visits/yr, breakdown calls — parts chargeable"></label>
+        <label class="field"><span>Visits per year</span><input type="number" min="0" data-amc="visits" value="${esc(am.visits || '')}" placeholder="4"></label></div>
+      <details class="pfmore"><summary>Service options this client sees${(prof.services || []).length ? ` (${prof.services.length})` : ' (all)'}</summary>
+        <div id="pf-svc" class="svcpick">${activeTypes().filter((x) => x.k !== 'other').map((x) => `<label><input type="checkbox" data-svc="${esc(x.k)}" ${(prof.services || []).includes(x.k) ? 'checked' : ''}>${esc(x.t)}</label>`).join('')}</div></details>
+      ${sites.length > 1 ? `<div class="pfsec" id="pf-vis"><b>Sites on the client's link</b> <span class="small muted">— untick a site the client should not see (e.g. one added automatically from a delivery GPS).</span>
+        <div class="svcpick">${sites.map((x) => `<label><input type="checkbox" data-vis="${esc(x.id)}" ${(prof.hiddenSites || []).includes(x.id) ? '' : 'checked'}>${esc(x.name)}${x.address ? ` <span class="muted small">· ${esc(String(x.address).split('\n')[0])}</span>` : ''}</label>`).join('')}</div></div>` : ''}
+      ${sid ? `<div class="pfsite">
+        <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap">
+          ${sites.length > 1 ? `<label class="field" style="min-width:220px;flex:1"><span>Equipment for site</span><select id="pf-site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === sid ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : `<div style="flex:1"><b>${esc(sites[0].name)}</b><div class="small muted">${esc(String(sites[0].address || '').split('\n')[0])}</div></div>`}
+          <div id="pf-ph" class="pfph sm"><span class="small muted">…</span></div>
+          <div><label class="btn sm">Building photo<input type="file" accept="image/*" hidden id="pf-up"></label> <button class="btn sm bad" id="pf-rm" type="button">Remove</button></div>
+        </div>
+        <p class="small muted" style="margin:12px 0 6px">One device per line — type or paste a list (columns copied from Excel are fine; an IP column is picked up). <b id="pf-total">${total} devices</b> at this site.</p>
+        <div class="dlists">${DEVICE_LISTS.map((l) => `<label class="field dlist"><span>${esc(l.t)} <em data-cnt="${l.k}">${countLines(t[l.k])}</em></span>
+          <textarea data-dl="${l.k}" rows="${l.k === 'cameras' ? 8 : 4}" placeholder="${esc(l.ph)}" spellcheck="false">${esc(t[l.k] || '')}</textarea></label>`).join('')}</div>
+      </div>` : '<p class="muted">Add sites to this client in LLCT Invoicing first.</p>'}`;
     const ss = $('#pf-site', o); if (ss) ss.onchange = () => { keep(); sid = ss.value; draw(); };
+    $$('[data-dl]', o).forEach((a) => (a.oninput = () => {
+      $(`[data-cnt="${a.dataset.dl}"]`, o).textContent = countLines(a.value);
+      $('#pf-total', o).textContent = `${$$('[data-dl]', o).reduce((n, x) => n + countLines(x.value), 0)} devices`;
+    }));
     if (!sid) return;
-    $('#pf-addn', o).onclick = () => { keep(); e.nvrs.push({ id: newId(), no: String(e.nvrs.length + 1), name: '', model: '', serial: '', ip: '', channels: '' }); draw(); };
-    $('#pf-addc', o).onclick = () => { keep(); e.cameras.push({ id: newId(), no: String(e.cameras.length + 1).padStart(2, '0'), name: '', nvr: e.nvrs[0] ? e.nvrs[0].no : '', ch: String(e.cameras.length + 1), model: '', serial: '' }); draw(); };
-    $('#pf-addmany', o).onclick = () => {
-      keep(); const n = parseInt(prompt('How many cameras to add?', '8'), 10); if (!(n > 0 && n <= 128)) return;
-      const nv = e.nvrs[0] ? e.nvrs[0].no : '';
-      for (let i = 0; i < n; i++) { const k = e.cameras.length + 1; e.cameras.push({ id: newId(), no: String(k).padStart(2, '0'), name: '', nvr: nv, ch: String(k), model: '', serial: '' }); }
-      draw();
-    };
-    $$('[data-nrm]', o).forEach((b) => (b.onclick = () => { keep(); e.nvrs.splice(+b.dataset.nrm, 1); draw(); }));
-    $$('[data-crm]', o).forEach((b) => (b.onclick = () => { keep(); e.cameras.splice(+b.dataset.crm, 1); draw(); }));
-    $('#pf-tpl', o).onclick = () => equipmentTemplate().catch((er) => toast(er.message || 'Could not make the template', true));
-    $('#pf-xls', o).onchange = async (ev) => {
-      const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
-      const box = $('#pf-imp', o); box.innerHTML = '<p class="small muted">Reading file…</p>';
-      let got; try { got = await readEquipmentFile(file); } catch (er) { box.innerHTML = `<p class="small" style="color:var(--danger)">${esc(er.message || 'Could not read this file')}</p>`; return; }
-      const n = got.nvrs.length + got.cameras.length + got.others.length;
-      if (!n) { box.innerHTML = '<p class="small" style="color:var(--danger)">No equipment rows found. Use the template, or make sure the first row has headings like Type, No, Name, NVR, Channel, IP, Model, Serial.</p>'; return; }
-      const cur = e.nvrs.length + e.cameras.length + e.others.length;
-      box.innerHTML = `<div class="impres"><b>Found ${got.nvrs.length} NVR, ${got.cameras.length} cameras, ${got.others.length} other devices</b>${got.skipped ? `<span class="small muted"> · ${got.skipped} empty / unreadable rows skipped</span>` : ''}
-        <div class="small muted" style="margin:4px 0 8px">${got.cameras.slice(0, 4).map((c) => `Cam ${esc(c.no)} ${esc(c.name)}${c.ip ? ' · ' + esc(c.ip) : ''}`).join(' — ')}${got.cameras.length > 4 ? ' …' : ''}</div>
-        <div class="row">${cur ? `<button class="btn sm primary" id="pi-rep" type="button">Replace current list (${cur})</button><button class="btn sm" id="pi-add" type="button">Add to current list</button>` : '<button class="btn sm primary" id="pi-add" type="button">Add to this site</button>'}<button class="btn sm" id="pi-x" type="button">Cancel</button></div></div>`;
-      const apply = (replace) => { keep(); if (replace) { e.nvrs = []; e.cameras = []; e.others = []; } e.nvrs.push(...got.nvrs); e.cameras.push(...got.cameras); e.others.push(...got.others); prof.sites[sid] = e; draw(); toast(`Imported ${n} items — press Save profile to keep them`); };
-      const r = $('#pi-rep', box); if (r) r.onclick = () => apply(true);
-      $('#pi-add', box).onclick = () => apply(false);
-      $('#pi-x', box).onclick = () => { box.innerHTML = ''; };
-    };
-    $$('[data-orm]', o).forEach((b) => (b.onclick = () => { keep(); e.others.splice(+b.dataset.orm, 1); draw(); }));
-    $('#pf-addo', o).onclick = () => { keep(); e.others.push({ id: newId(), type: OTHER_TYPES[0], name: '', model: '', serial: '', qty: '1' }); draw(); };
     const box = $('#pf-ph', o), here = sid;
     getDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).then((d) => { if (sid === here && box) box.innerHTML = d.exists() && d.data().data ? `<img src="${d.data().data}" alt="Building">` : '<span class="small muted">No photo</span>'; }).catch(() => { if (box) box.innerHTML = '<span class="small muted">—</span>'; });
     $('#pf-up', o).onchange = async (ev) => {
@@ -955,15 +884,16 @@ async function profileModal(clientId) {
   draw();
   $('#pf-save', o).onclick = async () => {
     keep();
-    // tidy: drop empty rows
-    Object.values(prof.sites).forEach((e) => { e.nvrs = (e.nvrs || []).filter((n) => n.no || n.name); e.cameras = (e.cameras || []).filter((x) => x.no || x.name); e.others = (e.others || []).filter((x) => x.name || x.model || x.serial || x.type); });
+    Object.entries(texts).forEach(([id, t]) => { prof.sites[id] = listsToEquipment(t, prof.sites[id] || {}); });
     $('#pf-save', o).disabled = true;
     try {
-      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], amc: prof.amc || {}, clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
+      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], amc: prof.amc || {}, hiddenSites: prof.hiddenSites || [], clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
+      S.profiles = S.profiles || {}; S.profiles[clientId] = { ...prof };
       const extra = clientProfileForLink(prof);
-      await Promise.all(S.portals.filter((p) => p.clientId === clientId).map((p) => updateDoc(doc(db, 'svcPortals', p.id), extra).catch(() => {})));
+      const vis = linkSites(c);
+      await Promise.all(S.portals.filter((p) => p.clientId === clientId).map((p) => updateDoc(doc(db, 'svcPortals', p.id), { ...extra, sites: vis }).catch(() => {})));
       await syncAllSitePhotos(clientId, sites.map((x) => x.id));
-      toast('Service profile saved — the client can now pick this equipment'); close(o);
+      toast('Service profile saved'); close(o);
     } catch (e) { toast(friendly(e), true); $('#pf-save', o).disabled = false; }
   };
 }
@@ -974,7 +904,7 @@ async function makePortal(c, btn) {
   try {
     let extra = {};
     try { const pr = await getDoc(doc(db, 'svcClients', c.id)); if (pr.exists()) extra = clientProfileForLink(pr.data()); } catch (_) { /* no profile yet */ }
-    await setDoc(doc(db, 'svcPortals', token), { active: true, clientId: c.id, clientName: c.name || '', contact: c.contact || '', phone: c.phone || '', sites: sitesFromPlaces(c), ...extra, createdAt: serverTimestamp(), createdBy: S.me.id, createdByName: S.me.name || '', updatedAt: serverTimestamp() });
+    await setDoc(doc(db, 'svcPortals', token), { active: true, clientId: c.id, clientName: c.name || '', contact: c.contact || '', phone: c.phone || '', sites: linkSites(c), ...extra, createdAt: serverTimestamp(), createdBy: S.me.id, createdByName: S.me.name || '', updatedAt: serverTimestamp() });
     await Promise.all(sitesFromPlaces(c).map((x) => getDoc(doc(db, 'svcClients', c.id, 'sitePhotos', x.id)).then((d) => (d.exists() && d.data().data ? setDoc(doc(db, 'svcPortals', token, 'sitePhotos', x.id), { data: d.data().data, at: serverTimestamp() }) : null)).catch(() => {})));
     toast('Link created'); copy(portalUrl(token));
   } catch (e) { toast(friendly(e), true); if (btn) btn.disabled = false; }

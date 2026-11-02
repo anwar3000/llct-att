@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=13';
+} from './sd.js?v=14';
 
 window.__sdStarted = true;
 
@@ -156,87 +156,72 @@ function bindInstall() {
 // ------------------------------------------------------------------ form
 function formHtml() {
   const f = S.form, sites = S.portal.sites || [];
+  if (!S.portal.walkin && !f.siteId && sites.length) f.siteId = sites[0].id; // a site is always chosen
   const other = f.siteId === '_other';
-  const asap = f.preferredSlot === 'asap';
-  const dateSel = asap ? 'asap' : f.preferredDate === dateKey() ? 'today' : f.preferredDate === tomorrow() ? 'tomorrow' : 'pick';
-  const step1 = S.portal.walkin ? `<div class="step"><span class="sn">1</span><div class="sb"><h2>Your business</h2><p class="hint">Who and where is the visit for?</p>
+  const addr1 = (x) => String(x.address || '').split('\n')[0];
+  const gpsRow = (hint) => `<div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : hint}</span></div>`;
+  const step1 = S.portal.walkin ? `<div class="step"><span class="sn">1</span><div class="sb"><h2>Your business</h2>
     <div class="grid2"><label class="field"><span>Brand or company name <b>*</b></span><input id="f-brand" autocomplete="organization" value="${esc(f.brand)}" placeholder="e.g. Al Noor Pharmacy"></label>
       <label class="field"><span>Store or location <b>*</b></span><input id="f-store" value="${esc(f.store)}" placeholder="e.g. Dubai Mall branch"></label></div>
     <label class="field" style="margin-top:12px"><span>Address or area</span><input id="f-area" autocomplete="street-address" value="${esc(f.area)}" placeholder="Building, street, area, emirate"></label>
-    <div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Helps the technician find you — only if you are at the store now.'}</span></div>
+    ${gpsRow('Helps the technician find you — only if you are at the store now.')}
   </div></div>` : '';
+
+  // ---- site: compact rows, name left, address right
+  let siteBody;
+  if (other) {
+    siteBody = `<div class="row" style="justify-content:space-between"><b>Another location</b>${sites.length ? `<button type="button" class="linkbtn" data-site="${esc(sites[0].id)}">Back to my site${sites.length > 1 ? 's' : ''}</button>` : ''}</div>
+      <div class="stack" style="margin-top:10px"><label class="field"><span>Location name <b>*</b></span><input id="f-oname" value="${esc(f.otherName)}" placeholder="e.g. Warehouse 3, Al Quoz"></label>
+      <label class="field"><span>Address or landmark</span><input id="f-oaddr" value="${esc(f.otherAddress)}" placeholder="Building, street, area"></label></div>${gpsRow('Only if you are at the site now.')}`;
+  } else if (sites.length > 8) {
+    siteBody = `<select id="f-site" aria-label="Site">${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === f.siteId ? 'selected' : ''}>${esc(x.name)}${x.address ? ' — ' + esc(addr1(x)) : ''}</option>`).join('')}<option value="_other">Another location (not in the list)</option></select>`;
+  } else {
+    siteBody = `<div class="srows" role="radiogroup">${sites.map((x) => `<button type="button" class="srow ${x.id === f.siteId ? 'on' : ''}" data-site="${esc(x.id)}" role="radio" aria-checked="${x.id === f.siteId}">
+        <span class="srad" aria-hidden="true"></span><span class="sth" data-sphoto="${esc(x.id)}"></span><span class="sname">${esc(x.name)}</span><span class="saddr">${esc(addr1(x))}</span></button>`).join('')}</div>`;
+  }
+  const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><div class="shead"><h2>Site</h2>${!other ? '<button type="button" class="linkbtn sm" data-site="_other">Different location?</button>' : ''}</div>${siteBody}</div></div>`;
+
+  // ---- faulty devices: one dropdown, picked devices listed one per line
   const eqSite = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
   const EQ = eqSite ? eqModel(eqSite) : null;
-  let eqHtml = '';
-  if (EQ && EQ.groups.length) {
-    const g = EQ.groups.find((x) => x.k === f.eqGroup) || EQ.groups[0];
-    const picked = f.eq.map((id) => EQ.byId[id]).filter(Boolean);
-    eqHtml = `<div class="eqsel"><h4>Which equipment has the problem? <span class="muted">(optional)</span></h4>
-      <div class="eqdd">${EQ.groups.length > 1 ? `<label class="field"><span>Recorder / group</span><select id="f-eqg">${EQ.groups.map((x) => `<option value="${esc(x.k)}" ${x.k === g.k ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select></label>` : ''}
-        <label class="field"><span>${g.k === 'o' ? 'Device' : 'Camera or recorder'}</span><select id="f-eqi"><option value="">Choose to add…</option>
-          ${g.items.map((it) => `<option value="${esc(it.v)}" ${it.v.startsWith('all:') ? '' : f.eq.includes(it.v) ? 'disabled' : ''}>${f.eq.includes(it.v) ? '✓ ' : ''}${esc(it.text)}</option>`).join('')}</select></label></div>
-      ${picked.length ? `<div class="eqpicked">${picked.map((x) => `<span class="eqtag">${esc(x.label)}<button type="button" data-eqrm="${esc(x.id)}" aria-label="Remove ${esc(x.label)}">✕</button></span>`).join('')}</div>
-        <p class="small muted" style="margin:6px 0 0">${picked.length} selected — describe each one in the box below.</p>` : ''}</div>`;
-  }
-  const cur = sites.find((x) => x.id === f.siteId);
-  const one = sites.length === 1;
-  const addr1 = (x) => String(x.address || '').split('\n')[0];
-  const otherForm = `<div class="stack" style="margin-top:12px"><label class="field"><span>Location name <b>*</b></span><input id="f-oname" value="${esc(f.otherName)}" placeholder="e.g. Warehouse 3, Al Quoz"></label>
-      <label class="field"><span>Address or landmark</span><input id="f-oaddr" value="${esc(f.otherAddress)}" placeholder="Building, street, area"></label>
-      <div class="row"><button type="button" class="btn sm" id="f-gps">${f.gps ? 'Update my location' : 'Use my current location'}</button><span class="small muted" id="f-gpst">${f.gps ? `Location captured (±${Math.round(f.gps.acc || 0)} m)` : 'Only if you are at the site now.'}</span></div></div>`;
-  let siteBody;
-  if (cur) {
-    siteBody = `<div class="shero" data-sphoto="${esc(cur.id)}">
-        <div class="shero-in"><span class="shero-k">Service location</span><span class="shero-n">${esc(cur.name)}</span>${addr1(cur) ? `<span class="shero-a">${esc(addr1(cur))}</span>` : ''}
-          <span class="shero-tags"><span class="stag ok">✓ Selected</span>${hasGPS(cur) ? '<span class="stag">📍 Location on file</span>' : ''}</span></div></div>
-      <div class="shero-act">${one ? '<button type="button" class="linkbtn" data-site="_other">Request for a different location instead</button>' : '<button type="button" class="btn sm" data-site="">Change site</button>'}</div>`;
-  } else if (other) {
-    siteBody = `<div class="row" style="justify-content:space-between"><b>Another location</b><button type="button" class="linkbtn" data-site="${one ? esc(sites[0].id) : ''}">${one ? `Back to ${esc(sites[0].name)}` : 'Back to my sites'}</button></div>${otherForm}`;
-  } else if (sites.length <= 8) {
-    siteBody = `<div class="scards" role="radiogroup">${sites.map((x) => `<button type="button" class="scard" data-site="${esc(x.id)}" role="radio" aria-checked="false">
-        <span class="scard-ph" data-sphoto="${esc(x.id)}"><span class="scard-ic">${esc((x.name || '?').trim().charAt(0).toUpperCase())}</span></span>
-        <span class="scard-t"><b>${esc(x.name)}</b>${addr1(x) ? `<small>${esc(addr1(x))}</small>` : ''}</span></button>`).join('')}</div>
-      <div class="shero-act"><button type="button" class="linkbtn" data-site="_other">Another location, not in this list</button></div>`;
-  } else {
-    siteBody = `<select id="f-site" aria-label="Site"><option value="">Choose the site…</option>${sites.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}${x.address ? ' — ' + esc(addr1(x)) : ''}</option>`).join('')}<option value="_other">Another location (not in the list)</option></select>`;
-  }
-  const siteStep = `<div class="step"><span class="sn">1</span><div class="sb"><h2>Site</h2><p class="hint">${cur ? (one ? 'Your registered site.' : 'Site selected.') : other ? 'Tell us where the visit is.' : 'Which of your sites needs the visit?'}</p>
-    ${siteBody}
-  </div></div>`;
+  const picked = EQ ? f.eq.map((id) => EQ.byId[id]).filter(Boolean) : [];
+  const devHtml = EQ && EQ.count ? `<label class="field"><span>Faulty device${picked.length ? ` — <b>${picked.length} selected</b>` : ''}</span>
+      <select id="f-eqi"><option value="">Select a device to add…</option>${EQ.groups.map((g) => {
+        const left = g.items.filter((it) => !f.eq.includes(it.id));
+        return left.length ? `<optgroup label="${esc(g.label)} (${g.items.length})">${left.map((it) => `<option value="${esc(it.id)}">${esc(it.name)}</option>`).join('')}</optgroup>` : '';
+      }).join('')}</select></label>
+      ${picked.length ? `<div class="devlist">${picked.map((x) => `<div class="devrow"><span class="dk">${esc(x.group)}</span><span class="dn">${esc(x.name)}</span><button type="button" data-eqrm="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">✕</button></div>`).join('')}</div>` : ''}` : '';
+  const types = clientTypes();
+  const typeSel = `<label class="field"><span>Type of problem${EQ && EQ.count ? ' <span class="muted">(optional)</span>' : ' <b>*</b>'}</span><select id="f-type"><option value="">${EQ && EQ.count ? 'Same as the devices selected' : 'Choose…'}</option>${types.map((x) => `<option value="${esc(x.k)}" ${f.cats[0] === x.k ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>`;
+
+  // ---- preferred visit: one row
+  const when = f.preferredSlot === 'asap' ? 'asap' : f.preferredSlot === 'exact' ? 'pick' : f.preferredDate === tomorrow() ? 'tomorrow' : 'pick';
+  const dtVal = `${f.preferredDate || tomorrow()}T${f.preferredTime || '10:00'}`;
+  const now = new Date(); const minDt = `${dateKey()}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const pr = PRIORITIES.slice().reverse(); // Low → Critical
   return `<form id="f" novalidate><div class="sheet">
   ${step1}${S.portal.walkin ? '' : siteStep}
 
-  <div class="step"><span class="sn">2</span><div class="sb"><h2>What needs attention</h2><p class="hint">Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}</p>
-    ${eqHtml}
-    <div class="ctiles">${clientTypes().map((t) => `<button type="button" class="ctile ${f.cats.includes(t.k) ? 'on' : ''}" data-cat="${t.k}" aria-pressed="${f.cats.includes(t.k)}">${icon(t.i || t.k, 26)}<span>${esc(t.t)}</span><i class="ck" aria-hidden="true"></i></button>`).join('')}</div>
-    <label class="field" style="margin-top:16px"><span>Tell us more <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. Camera 4 at the main gate shows no picture since yesterday evening.">${esc(f.description)}</textarea></label>
-    <div class="row" style="margin-top:14px;gap:16px;align-items:flex-start">
-      <div class="field"><span>Cameras or devices affected</span><div class="stepper"><button type="button" data-cam="-1" aria-label="Fewer">−</button><output id="f-cams">${f.cameras || '–'}</output><button type="button" data-cam="1" aria-label="More">+</button></div></div>
-      <div class="field grow"><span>Photos, if they help</span><div class="photos">${S.photos.map((p, i) => `<div class="ph"><img src="${p}" alt=""><button type="button" data-rmph="${i}" aria-label="Remove photo">×</button></div>`).join('')}
-        ${S.photos.length < 3 ? `<label class="addph">${icon('camera', 22)}<span>Add</span><input type="file" accept="image/*" id="f-ph" hidden multiple></label>` : ''}</div></div>
+  <div class="step"><span class="sn">2</span><div class="sb"><h2>What is the problem?</h2>
+    ${devHtml}
+    <div class="grid2 gtight">${typeSel}</div>
+    <label class="field" style="margin-top:12px"><span>Description of the work <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. No picture since yesterday evening.">${esc(f.description)}</textarea></label>
+    <div class="photos sm" style="margin-top:10px">${S.photos.map((ph, k) => `<div class="ph"><img src="${ph}" alt=""><button type="button" data-rmph="${k}" aria-label="Remove photo">×</button></div>`).join('')}
+      ${S.photos.length < 3 ? `<label class="addph">${icon('camera', 18)}<span>Photo</span><input type="file" accept="image/*" id="f-ph" hidden multiple></label>` : ''}</div>
+  </div></div>
+
+  <div class="step"><span class="sn">3</span><div class="sb"><h2>Priority &amp; visit</h2>
+    <div class="seg" role="radiogroup" aria-label="Priority">${pr.map((x) => `<button type="button" class="${f.priority === x.k ? 'on' : ''}" data-prio="${x.k}" role="radio" aria-checked="${f.priority === x.k}" style="--pc:${x.c}">${x.t}</button>`).join('')}</div>
+    <p class="small muted" id="f-ph-hint" style="margin:6px 2px 0">${esc(prio(f.priority).s)}</p>
+    <div class="seg" role="radiogroup" aria-label="Preferred visit" style="margin-top:14px">
+      <button type="button" class="${when === 'asap' ? 'on' : ''}" data-day="asap">ASAP</button>
+      <button type="button" class="${when === 'tomorrow' ? 'on' : ''}" data-day="tomorrow">Tomorrow</button>
+      <button type="button" class="${when === 'pick' ? 'on' : ''}" data-day="pick">Date &amp; time</button>
     </div>
+    ${when === 'pick' ? `<input type="datetime-local" id="f-dt" class="dtin" min="${minDt}" value="${esc(dtVal)}" aria-label="Preferred date and time">` : ''}
   </div></div>
 
-  <div class="step"><span class="sn">3</span><div class="sb"><h2>Priority</h2><p class="hint">Choose Critical only when the system is down or there is a security risk.</p>
-    <div class="prios" role="radiogroup">${PRIORITIES.map((p) => `<button type="button" class="prio ${f.priority === p.k ? 'on' : ''}" data-prio="${p.k}" role="radio" aria-checked="${f.priority === p.k}" style="--pc:${p.c}"><span class="pd"></span><b>${p.t}</b><small>${esc(p.s)}</small></button>`).join('')}</div>
-  </div></div>
-
-  <div class="step"><span class="sn">4</span><div class="sb"><h2>Preferred visit</h2><p class="hint">We confirm the visit time when a technician is assigned. Pick a day, and a time, only if you need a particular one.</p>
-    <div class="chips" role="radiogroup" aria-label="When">
-      <button type="button" class="pchip ${dateSel === 'asap' ? 'on' : ''}" data-day="asap">As soon as possible</button>
-      <button type="button" class="pchip ${dateSel === 'today' ? 'on' : ''}" data-day="today">Today</button>
-      <button type="button" class="pchip ${dateSel === 'tomorrow' ? 'on' : ''}" data-day="tomorrow">Tomorrow</button>
-      <label class="pchip ${dateSel === 'pick' ? 'on' : ''}">${dateSel === 'pick' ? esc(fmtDate(f.preferredDate)) : 'Pick a date'}<input type="date" id="f-date" min="${dateKey()}" value="${esc(f.preferredDate)}"></label>
-    </div>
-    ${asap ? '' : `<div class="chips" role="radiogroup" aria-label="Time" style="margin-top:10px">${SLOTS.filter((s) => s.k !== 'asap').map((s) => `<button type="button" class="pchip ${f.preferredSlot === s.k ? 'on' : ''}" data-slot="${s.k}">${esc(s.t)}</button>`).join('')}
-      <button type="button" class="pchip ${f.preferredSlot === 'exact' ? 'on' : ''}" data-slot="exact">Exact time</button></div>
-      ${f.preferredSlot === 'exact' ? (() => { const [hh, mm] = (f.preferredTime || '10:00').split(':'); return `<div class="row" style="margin-top:10px;gap:6px" aria-label="Exact time, 24-hour">
-        <select id="f-hh" style="width:auto" aria-label="Hour">${Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((h) => `<option ${h === hh ? 'selected' : ''}>${h}</option>`).join('')}</select>
-        <b>:</b><select id="f-mm" style="width:auto" aria-label="Minutes">${['00', '15', '30', '45'].map((m) => `<option ${m === mm ? 'selected' : ''}>${m}</option>`).join('')}</select>
-        <span class="small muted">24-hour time</span></div>`; })() : ''}`}
-  </div></div>
-
-  <div class="step"><span class="sn">5</span><div class="sb"><h2>Contact at site</h2><p class="hint">Who should the technician ask for?</p>
+  <div class="step"><span class="sn">4</span><div class="sb"><h2>Contact at site</h2>
     <div class="grid2">
       <label class="field"><span>Name <b>*</b></span><input id="f-cname" autocomplete="name" value="${esc(f.contactName)}"></label>
       <label class="field"><span>Mobile <b>*</b></span><input id="f-cphone" type="tel" inputmode="tel" autocomplete="tel" value="${esc(f.contactPhone)}" placeholder="05X XXX XXXX"></label>
@@ -248,26 +233,19 @@ function formHtml() {
   </form>`;
 }
 
-/** Equipment of a site arranged for the dropdowns: groups (one per NVR, plus other devices), items, and a lookup by id. */
+/** Equipment of a site for the dropdown: groups in device-list order, and a lookup by id. */
 function eqModel(e) {
   const byId = {}, groups = [];
-  const nvrs = e.nvrs || [], cams = e.cameras || [], others = e.others || [];
-  const nvrLabel = (n) => `NVR ${n.no}${n.name ? ` – ${n.name}` : ''}`;
-  nvrs.forEach((n) => { byId[n.id] = { id: n.id, label: nvrLabel(n) }; });
-  cams.forEach((c) => { byId[c.id] = { id: c.id, label: `Cam ${c.no}${c.name ? ` – ${c.name}` : ''}` }; });
-  others.forEach((x) => { byId[x.id] = { id: x.id, label: `${x.type || 'Device'}${x.name ? ` – ${x.name}` : ''}` }; });
-  const keys = [...new Set([...nvrs.map((n) => String(n.no)), ...cams.map((c) => String(c.nvr || ''))])];
-  keys.forEach((no) => {
-    const n = nvrs.find((x) => String(x.no) === no);
-    const cs = cams.filter((c) => String(c.nvr || '') === no);
-    const items = [];
-    if (n) items.push({ v: n.id, text: `${nvrLabel(n)} (the recorder itself)` });
-    if (cs.length > 1) items.push({ v: `all:${no}`, text: `All ${cs.length} cameras${no ? ` on NVR ${no}` : ''}` });
-    cs.forEach((c) => items.push({ v: c.id, text: `Cam ${c.no}${c.name ? ` – ${c.name}` : ''}${c.ch ? `  (ch ${c.ch})` : ''}` }));
-    if (items.length) groups.push({ k: `n:${no}`, label: no ? (n ? nvrLabel(n) : `NVR ${no}`) : 'Cameras', items, cams: cs.map((c) => c.id) });
+  const all = [...(e.cameras || []).map((x) => ({ ...x, kind: 'camera', _k: 'cameras' })), ...(e.nvrs || []).map((x) => ({ ...x, kind: 'nvr', _k: 'nvrs' })), ...(e.others || []).map((x) => ({ ...x, kind: 'other', _k: listOfOther(x) }))];
+  DEVICE_LISTS.forEach((l) => {
+    const items = all.filter((x) => x._k === l.k).map((x) => {
+      const name = x.kind === 'camera' && x.no ? `${x.no}${x.name ? ' ' + x.name : ''}` : x.kind === 'nvr' && x.no ? `NVR ${x.no}${x.name ? ' ' + x.name : ''}` : (l.k === 'other' && x.type && x.type !== 'Other' ? `${x.type} – ${x.name || ''}` : (x.name || x.type || 'Device'));
+      const it = { ...x, name, group: l.s, cat: l.cat };
+      byId[x.id] = it; return it;
+    });
+    if (items.length) groups.push({ k: l.k, label: l.t, items });
   });
-  if (others.length) groups.push({ k: 'o', label: 'Other devices', items: others.map((x) => ({ v: x.id, text: byId[x.id].label })) });
-  return { groups, byId };
+  return { groups, byId, count: all.length };
 }
 
 /** Service options for this client: the ones the office ticked in the client's profile (all when none ticked). */
@@ -290,50 +268,29 @@ function readForm() {
 function bindForm() {
   const f = S.form;
   const redraw = () => { readForm(); const y = window.scrollY; render(); window.scrollTo(0, y); };
-  if ($('#f-site')) $('#f-site').onchange = () => { f.siteId = $('#f-site').value; redraw(); };
-  $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) { f.eq = []; f.eqGroup = ''; } f.siteId = b.dataset.site; redraw(); }));
+  if ($('#f-site')) $('#f-site').onchange = () => { readForm(); f.eq = []; f.siteId = $('#f-site').value; redraw(); };
+  $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) f.eq = []; f.siteId = b.dataset.site; redraw(); }));
   applyPhotos();
-  $$('[data-cat]').forEach((b) => (b.onclick = () => {
-    const k = b.dataset.cat; const i = f.cats.indexOf(k);
-    if (i >= 0) f.cats.splice(i, 1); else f.cats.push(k);
-    b.classList.toggle('on', i < 0); b.setAttribute('aria-pressed', String(i < 0));
-    const h = b.closest('.sb').querySelector('.hint'); h.innerHTML = `Tap everything that applies.${f.cats.length ? ` <b>${f.cats.length} selected</b>` : ''}`;
-  }));
+  const ty = $('#f-type'); if (ty) ty.onchange = () => { f.cats = ty.value ? [ty.value] : []; };
   const eqSiteB = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
-  if (eqSiteB) {
-    const EQ = eqModel(eqSiteB);
-    const note = (add, label) => {
-      const ta = $('#f-desc'); if (!ta) return;
-      let lines = ta.value.split('\n');
-      if (add) { if (!lines.some((l) => l.trim().startsWith(label + ':'))) { if (lines.length === 1 && !lines[0].trim()) lines = []; lines.push(`${label}: `); } }
-      else lines = lines.filter((l) => l.trim() !== `${label}:`);
-      f.description = lines.join('\n'); ta.value = f.description;
-    };
-    const g = $('#f-eqg'); if (g) g.onchange = () => { f.eqGroup = g.value; redraw(); };
-    const it = $('#f-eqi');
-    if (it) it.onchange = () => {
-      readForm();
-      const v = it.value; if (!v) return;
-      let ids = [v];
-      if (v.startsWith('all:')) { const grp = EQ.groups.find((x) => x.k === 'n:' + v.slice(4)); ids = grp ? grp.cams : []; }
-      ids.filter((id) => !f.eq.includes(id) && EQ.byId[id]).forEach((id) => { f.eq.push(id); note(true, EQ.byId[id].label); });
-      redraw();
-      const ta = $('#f-desc'); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); ta.style.height = 'auto'; ta.style.height = Math.min(320, ta.scrollHeight + 4) + 'px'; }
-    };
-    $$('[data-eqrm]').forEach((b) => (b.onclick = () => { readForm(); const id = b.dataset.eqrm; f.eq = f.eq.filter((x) => x !== id); if (EQ.byId[id]) note(false, EQ.byId[id].label); redraw(); }));
-  }
-  $$('[data-prio]').forEach((b) => (b.onclick = () => { f.priority = b.dataset.prio; $$('[data-prio]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }); }));
-  $$('[data-cam]').forEach((b) => (b.onclick = () => { f.cameras = Math.max(0, Math.min(999, (f.cameras || 0) + Number(b.dataset.cam))); $('#f-cams').textContent = f.cameras || '–'; }));
+  const it = $('#f-eqi');
+  if (it && eqSiteB) it.onchange = () => { readForm(); if (it.value && !f.eq.includes(it.value)) f.eq.push(it.value); redraw(); };
+  $$('[data-eqrm]').forEach((b) => (b.onclick = () => { readForm(); f.eq = f.eq.filter((x) => x !== b.dataset.eqrm); redraw(); }));
+  $$('[data-prio]').forEach((b) => (b.onclick = () => {
+    f.priority = b.dataset.prio;
+    $$('[data-prio]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); });
+    const h = $('#f-ph-hint'); if (h) h.textContent = prio(f.priority).s;
+  }));
   $$('[data-day]').forEach((b) => (b.onclick = () => {
     const d = b.dataset.day;
-    if (d === 'asap') { f.preferredDate = dateKey(); f.preferredSlot = 'asap'; }
-    else { f.preferredDate = d === 'today' ? dateKey() : tomorrow(); if (f.preferredSlot === 'asap') f.preferredSlot = 'any'; }
+    if (d === 'asap') { f.preferredDate = dateKey(); f.preferredSlot = 'asap'; f.preferredTime = ''; }
+    else if (d === 'tomorrow') { f.preferredDate = tomorrow(); f.preferredSlot = 'any'; f.preferredTime = ''; }
+    else { if (f.preferredSlot !== 'exact') { f.preferredDate = tomorrow(); f.preferredTime = '10:00'; } f.preferredSlot = 'exact'; }
     redraw();
+    if (d === 'pick') { const dt = $('#f-dt'); if (dt) { dt.focus(); try { dt.showPicker && dt.showPicker(); } catch (_) { /* some browsers only open on tap */ } } }
   }));
-  const di = $('#f-date'); if (di) di.onchange = () => { if (di.value) { f.preferredDate = di.value; if (f.preferredSlot === 'asap') f.preferredSlot = 'any'; redraw(); } };
-  $$('[data-slot]').forEach((b) => (b.onclick = () => { f.preferredSlot = b.dataset.slot; f.preferredTime = b.dataset.slot === 'exact' ? (f.preferredTime || '10:00') : ''; redraw(); }));
-  const setTime = () => { f.preferredTime = `${$('#f-hh').value}:${$('#f-mm').value}`; };
-  if ($('#f-hh')) { $('#f-hh').onchange = setTime; $('#f-mm').onchange = setTime; }
+  const dt = $('#f-dt');
+  if (dt) dt.onchange = () => { const v = dt.value; if (v && v.length >= 16) { f.preferredDate = v.slice(0, 10); f.preferredTime = v.slice(11, 16); f.preferredSlot = 'exact'; } };
   $$('[data-rmph]').forEach((b) => (b.onclick = () => { S.photos.splice(+b.dataset.rmph, 1); redraw(); }));
   const ph = $('#f-ph');
   if (ph) ph.onchange = async () => {
@@ -361,7 +318,12 @@ async function submit() {
   const miss = [];
   if (walk) { if (!f.brand) miss.push('brand or company name'); if (!f.store) miss.push('store or location'); }
   else if (!site && !(other && f.otherName)) miss.push('site');
-  if (!f.cats.length) miss.push('what needs attention');
+  const eqS = !walk && site && S.portal.equipment ? S.portal.equipment[site.id] : null;
+  const EQM = eqS ? eqModel(eqS) : null;
+  const devs = EQM ? f.eq.map((id) => EQM.byId[id]).filter(Boolean) : [];
+  const known = activeTypes().map((x) => x.k);
+  const cats = [...new Set([...f.cats, ...devs.map((d) => (known.includes(d.cat) ? d.cat : 'other'))])].filter(Boolean);
+  if (!cats.length) miss.push(EQM && EQM.count ? 'a faulty device or the type of problem' : 'the type of problem');
   if (f.description.trim().length < 4) miss.push('a short description');
   if (!f.contactName) miss.push('contact name');
   if (f.contactPhone.replace(/\D/g, '').length < 7) miss.push('mobile number');
@@ -376,20 +338,19 @@ async function submit() {
   };
   Object.assign(t, {
     contactName: f.contactName, contactPhone: f.contactPhone,
-    category: f.cats[0], categories: f.cats.slice(), categoryLabels: f.cats.map(typeLabel), description: f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(), priority: f.priority,
+    category: cats[0], categories: cats, categoryLabels: cats.map(typeLabel), description: f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(), priority: f.priority,
     preferredDate: f.preferredDate || dateKey(), preferredSlot: f.preferredSlot,
     status: 'new', open: true, source: walk ? 'walkin' : 'portal',
   });
   if (f.preferredSlot === 'exact' && f.preferredTime) t.preferredTime = f.preferredTime;
-  const eqSite = !walk && site && S.portal.equipment ? S.portal.equipment[site.id] : null;
-  if (eqSite && f.eq.length) {
-    const all = [...(eqSite.nvrs || []).map((n) => ({ ...n, kind: 'nvr' })), ...(eqSite.cameras || []).map((c) => ({ ...c, kind: 'camera' })), ...(eqSite.others || []).map((x) => ({ ...x, kind: 'other' }))];
-    t.faults = f.eq.map((id) => all.find((x) => x.id === id)).filter(Boolean).map((x) => ({ kind: x.kind, id: x.id, no: x.no || '', name: x.name || '', nvr: x.nvr || '', ch: x.ch || '', ...(x.type ? { type: x.type } : {}), result: '', note: '' }));
+  if (devs.length) {
+    const raw = [...(eqS.cameras || []), ...(eqS.nvrs || []), ...(eqS.others || [])];
+    t.faults = devs.map((x) => { const r = raw.find((y) => y.id === x.id) || x; return { kind: x.kind, id: x.id, no: r.no || '', name: r.name || '', nvr: r.nvr || '', ch: r.ch || '', ...(r.type ? { type: r.type } : {}), result: '', note: '' }; });
   }
   const gps = site && hasGPS(site) ? site : (other || walk) && f.gps ? f.gps : null;
   if (gps) { t.lat = +gps.lat; t.lng = +gps.lng; }
   if (f.contactEmail) t.contactEmail = f.contactEmail;
-  if (f.cameras > 0) t.cameras = f.cameras;
+  if (devs.length) t.cameras = devs.length;
   if (S.photos.length) t.photos = S.photos.slice(0, 3);
 
   S.busy = true; render();
@@ -400,7 +361,7 @@ async function submit() {
     if (!withCats) { // older rules without the 'categories' field: keep the extra choices in the description
       delete data.categories; delete data.categoryLabels; delete data.preferredTime;
       if (data.faults) { data.description = `${data.description}\nEquipment: ${data.faults.map(faultLabel).join(', ')}`; delete data.faults; }
-      if (t.categories.length > 1) data.description = `${t.description}\nAlso: ${t.categories.slice(1).map(typeLabel).join(', ')}`;
+      if (cats.length > 1) data.description = `${t.description}\nAlso: ${t.categories.slice(1).map(typeLabel).join(', ')}`;
     }
     const full = { ...data, number: id, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       log: [{ at: Timestamp.now(), byName: f.contactName, t: 'Request raised by client' }] };

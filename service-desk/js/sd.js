@@ -25,17 +25,17 @@ export const DEFAULT_TYPES = [
   { k: 'recording', t: 'NVR / DVR not recording', i: 'recording' },
   { k: 'remote', t: 'No remote / mobile view', i: 'remote' },
   { k: 'image', t: 'Image blurry, dark or no night vision', i: 'image' },
-  { k: 'hdd', t: 'Hard disk / storage error', i: 'hdd' },
+  { k: 'hdd', s: 'HDD', t: 'Hard disk / storage error', i: 'hdd' },
   { k: 'playback', t: 'Footage backup / playback needed', i: 'playback' },
   { k: 'power', t: 'Power, cable or PoE issue', i: 'power' },
-  { k: 'network', t: 'Network / Wi‑Fi / internet', i: 'network' },
+  { k: 'network', s: 'Network', t: 'Network / Wi‑Fi / internet', i: 'network' },
   { k: 'access', t: 'Access control / door / intercom', i: 'access' },
   { k: 'o2device', t: 'Oxygen O2 device not working', i: 'o2' },
   { k: 'o2switch', t: 'O2IOT switching issue', i: 'switch' },
   { k: 'o2connect', t: 'O2IOT device not connecting', i: 'signal' },
   { k: 'ppm', t: 'Preventive maintenance (AMC visit)', i: 'ppm' },
   { k: 'install', t: 'New camera / relocation', i: 'install' },
-  { k: 'other', t: 'Other', i: 'other' },
+  { k: 'other', s: 'Other', t: 'Other', i: 'other' },
 ];
 export let SERVICE_TYPES = DEFAULT_TYPES.map((x) => ({ ...x, on: true }));
 /** Options shown to customers, in the admin's order. */
@@ -204,11 +204,28 @@ export const RESULT_COLOR = { Rectified: '#1F8A5B', Working: '#1F8A5B', Replaced
 /** "NVR 1 – Main office" / "Camera 05 – Main gate (NVR 1, ch 5)" */
 export function faultLabel(f) {
   if (!f) return '';
-  if (f.kind === 'nvr') return `NVR ${f.no || ''}${f.name ? ` – ${f.name}` : ''}`.trim();
-  if (f.kind === 'other') return `${f.type || 'Device'}${f.name ? ` – ${f.name}` : ''}`.trim();
+  const name = String(f.name || '').trim();
+  if (f.kind === 'nvr') return f.no ? `NVR ${f.no}${name ? ` – ${name}` : ''}` : /^(nvr|dvr|xvr)/i.test(name) ? name : `NVR – ${name}`;
+  if (f.kind === 'other') {
+    const ty = String(f.type || '').trim();
+    if (!ty || ty === 'Other' || name.toLowerCase().startsWith(ty.toLowerCase().split(/[ /]/)[0])) return name || ty || 'Device';
+    return `${ty}${name ? ` – ${name}` : ''}`;
+  }
   const where = f.nvr ? ` (NVR ${f.nvr}${f.ch ? `, ch ${f.ch}` : ''})` : '';
-  return `Camera ${f.no || ''}${f.name ? ` – ${f.name}` : ''}${where}`.trim();
+  const base = f.no ? `Camera ${f.no}${name ? ` – ${name}` : ''}` : /^(cam|camera)\b/i.test(name) ? name : `Camera – ${name}`;
+  return `${base}${where}`.trim();
 }
+/** The device lists of a customer profile: one text box each, one device per line. */
+export const DEVICE_LISTS = [
+  { k: 'cameras', s: 'Camera', t: 'Cameras', ph: 'R01 C01 Entrance\nR01 C02 Reception\nR02 C03 Parking', cat: 'camera' },
+  { k: 'nvrs', s: 'NVR', t: 'NVR / DVR', ph: 'NVR 1 Main rack 32ch', cat: 'recording' },
+  { k: 'hdd', t: 'Hard disks (HDD)', type: 'Hard disk', ph: 'NVR 1 HDD 1 – 6TB\nNVR 1 HDD 2 – 6TB', cat: 'hdd' },
+  { k: 'ups', s: 'UPS', t: 'UPS', type: 'UPS', ph: 'Server room UPS 3kVA', cat: 'power' },
+  { k: 'network', t: 'Network – switches, routers', type: 'Network switch', ph: 'PoE switch 16 port – rack\nRouter – Etisalat', cat: 'network' },
+  { k: 'other', t: 'Other devices', type: 'Other', ph: 'Monitor 43" – security room\nAccess control – main door', cat: 'other' },
+];
+/** Which list an existing "other" device belongs to. */
+export const listOfOther = (x) => (x.type === 'Hard disk' ? 'hdd' : x.type === 'UPS' ? 'ups' : /switch|router|wi-?fi|network/i.test(x.type || '') ? 'network' : 'other');
 /** Other equipment covered by the AMC, besides NVRs and cameras. */
 export const OTHER_TYPES = ['Network switch', 'Hard disk', 'Monitor / TV', 'UPS', 'Router / Wi-Fi', 'Access control', 'Intercom', 'Fire alarm panel', 'Oxygen O2 device', 'O2IOT switch', 'Other'];
 /** Client-visible copy of a site's equipment (no serials / IPs). */
