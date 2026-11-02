@@ -508,3 +508,13 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sgps { font-size: 12px; color: var(--success); font-weight: 650; }
 .srow .srad { align-self: center; }
 @media (min-width: 1024px) { .sth { width: 110px; height: 110px; } .stx .sname { font-size: 19px; } }
+.qchecks { margin-top: 14px; border: 1px solid #E1E5EC; border-radius: 12px; padding: 4px 12px; background: #FAFBFD; }
+.qct { font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; color: var(--steel); padding: 8px 0 2px; }
+.qrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid #EDF0F5; }
+.qrow:nth-child(2) { border-top: 0; }
+.qrow > span { font-size: 14.5px; font-weight: 600; color: var(--night); }
+.seg.mini { flex: none; width: 116px; border-radius: 10px; }
+.seg.mini button { padding: 7px 4px; font-size: 13.5px; }
+.seg.mini button.on[data-v="Yes"] { background: var(--trim); }
+.seg.mini button.on[data-v="No"] { background: var(--success); }
+.phhint { margin-top: 14px; font-size: 14.5px; color: var(--night); }

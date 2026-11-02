@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=18';
+} from './sd.js?v=19';
 
 window.__sdStarted = true;
 
@@ -154,6 +154,12 @@ function bindInstall() {
 }
 
 // ------------------------------------------------------------------ form
+/** Quick yes / no checks the client answers; the answers are added to the description. */
+const QCHECKS = [
+  { k: 'noise', t: 'Any abnormal noise?' },
+  { k: 'wall', t: 'Any missing video on the video wall / display?' },
+  { k: 'ups', t: 'Any sound (beeping) from the UPS?' },
+];
 function formHtml() {
   const f = S.form, sites = S.portal.sites || [];
   if (!S.portal.walkin && !f.siteId && sites.length) f.siteId = sites[0].id; // a site is always chosen
@@ -206,8 +212,10 @@ function formHtml() {
     ${devHtml}
     <div class="gtight">${typeSel}</div>
     <label class="field" style="margin-top:12px"><span>Description of the work <b>*</b></span><textarea id="f-desc" rows="3" placeholder="e.g. No picture since yesterday evening.">${esc(f.description)}</textarea></label>
-    <div class="photos sm" style="margin-top:10px">${S.photos.map((ph, k) => `<div class="ph"><img src="${ph}" alt=""><button type="button" data-rmph="${k}" aria-label="Remove photo">×</button></div>`).join('')}
-      ${S.photos.length < 3 ? `<label class="addph">${icon('camera', 18)}<span>Photo</span><input type="file" accept="image/*" id="f-ph" hidden multiple></label>` : ''}</div>
+    <div class="qchecks"><div class="qct">Quick checks</div>${QCHECKS.map((q) => `<div class="qrow"><span>${esc(q.t)}</span><div class="seg mini" role="radiogroup" aria-label="${esc(q.t)}">${['Yes', 'No'].map((v) => `<button type="button" class="${(f.checks || {})[q.k] === v ? 'on' : ''}" data-qc="${q.k}" data-v="${v}">${v}</button>`).join('')}</div></div>`).join('')}</div>
+    <div class="phhint"><b>Please attach a photo of the screen</b><span class="small muted"> — NVR / video wall / monitor showing the problem. Up to 3 photos.</span></div>
+    <div class="photos sm" style="margin-top:8px">${S.photos.map((ph, k) => `<div class="ph"><img src="${ph}" alt=""><button type="button" data-rmph="${k}" aria-label="Remove photo">×</button></div>`).join('')}
+      ${S.photos.length < 3 ? `<label class="addph">${icon('camera', 18)}<span>Add photo</span><input type="file" accept="image/*" id="f-ph" hidden multiple></label>` : ''}</div>
   </div></div>
 
   <div class="step"><span class="sn">3</span><div class="sb"><h2>Priority &amp; visit</h2>
@@ -271,6 +279,11 @@ function bindForm() {
   if ($('#f-site')) $('#f-site').onchange = () => { readForm(); f.eq = []; f.siteId = $('#f-site').value; redraw(); };
   $$('[data-site]').forEach((b) => (b.onclick = () => { readForm(); if (f.siteId !== b.dataset.site) f.eq = []; f.siteId = b.dataset.site; redraw(); }));
   applyPhotos();
+  $$('[data-qc]').forEach((b) => (b.onclick = () => {
+    f.checks = f.checks || {}; const k = b.dataset.qc;
+    f.checks[k] = f.checks[k] === b.dataset.v ? '' : b.dataset.v;
+    $$(`[data-qc="${k}"]`).forEach((x) => x.classList.toggle('on', x.dataset.v === f.checks[k]));
+  }));
   const ty = $('#f-type'); if (ty) ty.onchange = () => { f.cats = ty.value ? [ty.value] : []; };
   const eqSiteB = !S.portal.walkin && f.siteId && S.portal.equipment ? S.portal.equipment[f.siteId] : null;
   const it = $('#f-eqi');
@@ -338,7 +351,8 @@ async function submit() {
   };
   Object.assign(t, {
     contactName: f.contactName, contactPhone: f.contactPhone,
-    category: cats[0], categories: cats, categoryLabels: cats.map(typeLabel), description: f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(), priority: f.priority,
+    category: cats[0], categories: cats, categoryLabels: cats.map(typeLabel), description: [f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(),
+      QCHECKS.filter((q) => (f.checks || {})[q.k]).map((q) => `${q.t.replace('?', '')}: ${f.checks[q.k]}`).join('\n')].filter(Boolean).join('\n\nQuick checks:\n'), priority: f.priority,
     preferredDate: f.preferredDate || dateKey(), preferredSlot: f.preferredSlot,
     status: 'new', open: true, source: walk ? 'walkin' : 'portal',
   });
