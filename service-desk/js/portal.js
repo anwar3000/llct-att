@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=19';
+} from './sd.js?v=20';
 
 window.__sdStarted = true;
 
@@ -258,11 +258,17 @@ function eqModel(e) {
 
 /** Service options for this client: the ones the office ticked in the client's profile (all when none ticked). */
 function clientTypes() {
-  const all = activeTypes(), want = S.portal && !S.portal.walkin && Array.isArray(S.portal.services) ? S.portal.services : [];
-  if (!want.length) return all;
-  const l = all.filter((t) => want.includes(t.k) || t.k === 'other');
-  return l.length ? l : all;
+  const all = activeTypes();
+  if (!S.portal || S.portal.walkin) return all;
+  const own = (Array.isArray(S.portal.customTypes) ? S.portal.customTypes : []).map((t) => ({ k: 'c_' + slugT(t), t, own: true }));
+  const want = Array.isArray(S.portal.services) ? S.portal.services : [];
+  const std = S.portal.hideStd && own.length ? [] : (want.length ? all.filter((t) => want.includes(t.k) && t.k !== 'other') : all.filter((t) => t.k !== 'other'));
+  const other = all.find((t) => t.k === 'other') || { k: 'other', t: 'Other' };
+  return [...own, ...std, other];
 }
+const slugT = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'x';
+/** Label of a problem type, including this client's own types. */
+const catLabel = (k) => { const c = clientTypes().find((x) => x.k === k); return c ? c.t : typeLabel(k); };
 
 function readForm() {
   const f = S.form, v = (id) => { const e = $(id); return e ? e.value.trim() : null; };
@@ -351,7 +357,7 @@ async function submit() {
   };
   Object.assign(t, {
     contactName: f.contactName, contactPhone: f.contactPhone,
-    category: cats[0], categories: cats, categoryLabels: cats.map(typeLabel), description: [f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(),
+    category: cats[0], categories: cats, categoryLabels: cats.map(catLabel), description: [f.description.split('\n').map((l) => l.trimEnd()).join('\n').trim(),
       QCHECKS.filter((q) => (f.checks || {})[q.k]).map((q) => `${q.t.replace('?', '')}: ${f.checks[q.k]}`).join('\n')].filter(Boolean).join('\n\nQuick checks:\n'), priority: f.priority,
     preferredDate: f.preferredDate || dateKey(), preferredSlot: f.preferredSlot,
     status: 'new', open: true, source: walk ? 'walkin' : 'portal',
@@ -375,7 +381,7 @@ async function submit() {
     if (!withCats) { // older rules without the 'categories' field: keep the extra choices in the description
       delete data.categories; delete data.categoryLabels; delete data.preferredTime;
       if (data.faults) { data.description = `${data.description}\nEquipment: ${data.faults.map(faultLabel).join(', ')}`; delete data.faults; }
-      if (cats.length > 1) data.description = `${t.description}\nAlso: ${t.categories.slice(1).map(typeLabel).join(', ')}`;
+      if (cats.length > 1) data.description = `${t.description}\nAlso: ${t.categories.slice(1).map(catLabel).join(', ')}`;
     }
     const full = { ...data, number: id, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       log: [{ at: Timestamp.now(), byName: f.contactName, t: 'Request raised by client' }] };

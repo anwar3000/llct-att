@@ -9,8 +9,8 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus, DEVICE_LISTS, listOfOther,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-} from './sd.js?v=19';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=19';
+} from './sd.js?v=20';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=20';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -771,7 +771,7 @@ function clientProfileForLink(prof) {
   const eq = {};
   Object.entries((prof && prof.sites) || {}).forEach(([sid, e]) => { const l = leanEquipment(e); if (l.nvrs.length || l.cameras.length || l.others.length) eq[sid] = l; });
   const a = (prof && prof.amc) || {};
-  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq, amc: { no: a.no || '', end: a.end || '' }, services: (prof && Array.isArray(prof.services)) ? prof.services : [] };
+  return { tradeLicense: (prof && prof.tradeLicense) || '', equipment: eq, amc: { no: a.no || '', end: a.end || '' }, services: (prof && Array.isArray(prof.services)) ? prof.services : [], customTypes: (prof && Array.isArray(prof.customTypes)) ? prof.customTypes : [], hideStd: !!(prof && prof.hideStd) };
 }
 /** Copy a site's building photo onto every service link of the client, so the client page can show it. */
 async function syncSitePhoto(clientId, sid, data) {
@@ -841,6 +841,8 @@ async function profileModal(clientId) {
     const tl = $('#pf-tl', o); if (tl) prof.tradeLicense = tl.value.trim();
     if ($('#pf-amc', o)) { prof.amc = prof.amc || {}; $$('[data-amc]', o).forEach((i) => { prof.amc[i.dataset.amc] = i.value.trim(); }); }
     if ($('#pf-svc', o)) prof.services = $$('[data-svc]', o).filter((i) => i.checked).map((i) => i.dataset.svc);
+    if ($('#pf-ctypes', o)) prof.customTypes = [...new Set($('#pf-ctypes', o).value.split('\n').map((x) => x.trim()).filter(Boolean))].slice(0, 40);
+    if ($('#pf-hidestd', o)) prof.hideStd = $('#pf-hidestd', o).checked;
     if ($('#pf-vis', o)) prof.hiddenSites = $$('[data-vis]', o).filter((i) => !i.checked).map((i) => i.dataset.vis);
     if (sid) { const t = textsOf(sid); $$('[data-dl]', o).forEach((a) => { t[a.dataset.dl] = a.value; }); }
   };
@@ -852,8 +854,13 @@ async function profileModal(clientId) {
         <div class="field"><span>AMC contract</span><div class="row" style="gap:6px"><input data-amc="no" value="${esc(am.no || '')}" placeholder="Contract no." style="flex:1.2"><input type="date" data-amc="start" value="${esc(am.start || '')}" title="Start" style="flex:1"><input type="date" data-amc="end" value="${esc(am.end || '')}" title="End" style="flex:1"></div></div></div>
       <div id="pf-amc" class="grid2" style="margin-top:10px"><label class="field"><span>Covered products &amp; services</span><input data-amc="covered" value="${esc(am.covered || '')}" placeholder="e.g. PPM 4 visits/yr, breakdown calls — parts chargeable"></label>
         <label class="field"><span>Visits per year</span><input type="number" min="0" data-amc="visits" value="${esc(am.visits || '')}" placeholder="4"></label></div>
-      <details class="pfmore"><summary>Service options this client sees${(prof.services || []).length ? ` (${prof.services.length})` : ' (all)'}</summary>
-        <div id="pf-svc" class="svcpick">${activeTypes().filter((x) => x.k !== 'other').map((x) => `<label><input type="checkbox" data-svc="${esc(x.k)}" ${(prof.services || []).includes(x.k) ? 'checked' : ''}>${esc(x.t)}</label>`).join('')}</div></details>
+      <div class="pfsec"><b>"Type of problem" list for this client</b>
+        <div class="grid2" style="margin-top:8px;align-items:start">
+          <label class="field"><span>This client's own problem types — one per line, shown first</span><textarea id="pf-ctypes" rows="5" placeholder="Lift camera not working\nCar park barrier camera\nVideo wall – missing screen">${esc((prof.customTypes || []).join('\n'))}</textarea></label>
+          <div><label class="pick" style="border:0;padding:4px 0"><input type="checkbox" id="pf-hidestd" ${prof.hideStd ? 'checked' : ''}> Show only this client's own types (hide the standard list)</label>
+            <div class="small muted" style="margin:6px 0 4px">Standard types shown to this client — none ticked = all:</div>
+            <div id="pf-svc" class="svcpick">${activeTypes().filter((x) => x.k !== 'other').map((x) => `<label><input type="checkbox" data-svc="${esc(x.k)}" ${(prof.services || []).includes(x.k) ? 'checked' : ''}>${esc(x.t)}</label>`).join('')}</div></div>
+        </div><div class="small muted" style="margin-top:6px">"Other" is always at the end of the list.</div></div>
       ${sites.length > 1 ? `<div class="pfsec" id="pf-vis"><b>Sites on the client's link</b> <span class="small muted">— untick a site the client should not see (e.g. one added automatically from a delivery GPS).</span>
         <div class="svcpick">${sites.map((x) => `<label><input type="checkbox" data-vis="${esc(x.id)}" ${(prof.hiddenSites || []).includes(x.id) ? '' : 'checked'}>${esc(x.name)}${x.address ? ` <span class="muted small">· ${esc(String(x.address).split('\n')[0])}</span>` : ''}</label>`).join('')}</div></div>` : ''}
       ${sid ? `<div class="pfsite">
@@ -887,7 +894,7 @@ async function profileModal(clientId) {
     Object.entries(texts).forEach(([id, t]) => { prof.sites[id] = listsToEquipment(t, prof.sites[id] || {}); });
     $('#pf-save', o).disabled = true;
     try {
-      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], amc: prof.amc || {}, hiddenSites: prof.hiddenSites || [], clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
+      await setDoc(doc(db, 'svcClients', clientId), { tradeLicense: prof.tradeLicense || '', sites: prof.sites, services: prof.services || [], customTypes: prof.customTypes || [], hideStd: !!prof.hideStd, amc: prof.amc || {}, hiddenSites: prof.hiddenSites || [], clientName: c.name || '', updatedAt: serverTimestamp(), updatedBy: S.me.name || '' });
       S.profiles = S.profiles || {}; S.profiles[clientId] = { ...prof };
       const extra = clientProfileForLink(prof);
       const vis = linkSites(c);
