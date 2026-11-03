@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=21';
+} from './sd.js?v=22';
 
 window.__sdStarted = true;
 
@@ -324,11 +324,15 @@ function eqModel(e) {
 function clientTypes() {
   const all = activeTypes();
   if (!S.portal || S.portal.walkin) return all;
-  const own = (Array.isArray(S.portal.customTypes) ? S.portal.customTypes : []).map((t) => ({ k: 'c_' + slugT(t), t, own: true }));
-  const want = Array.isArray(S.portal.services) ? S.portal.services : [];
-  const std = S.portal.hideStd && own.length ? [] : (want.length ? all.filter((t) => want.includes(t.k) && t.k !== 'other') : all.filter((t) => t.k !== 'other'));
   const other = all.find((t) => t.k === 'other') || { k: 'other', t: 'Other' };
-  return [...own, ...std, other];
+  const std = all.filter((t) => t.k !== 'other');
+  const ownL = Array.isArray(S.portal.customTypes) ? S.portal.customTypes : [];
+  // a line worded like a standard type keeps that type (so it matches the devices picked)
+  const own = ownL.map((t) => std.find((x) => x.t.toLowerCase() === String(t).trim().toLowerCase()) || { k: 'c_' + slugT(t), t: String(t).trim(), own: true });
+  if (S.portal.hideStd && own.length) return [...own, other];
+  const want = Array.isArray(S.portal.services) ? S.portal.services : [];
+  const base = want.length ? std.filter((t) => want.includes(t.k)) : std;
+  return [...own, ...base.filter((b) => !own.some((o) => o.k === b.k)), other];
 }
 const slugT = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'x';
 /** Label of a problem type, including this client's own types. */

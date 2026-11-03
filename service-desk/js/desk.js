@@ -10,8 +10,8 @@ import {
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
   collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize,
-} from './sd.js?v=21';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=21';
+} from './sd.js?v=22';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=22';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -915,6 +915,15 @@ const countLines = (t) => String(t || '').split('\n').filter((x) => x.trim()).le
 /** Sites on the client's link: all the client's sites except those hidden in the profile. */
 const linkSites = (c) => { const hide = ((S.profiles || {})[c.id] || {}).hiddenSites || []; const l = sitesFromPlaces(c); const v = l.filter((x) => !hide.includes(x.id)); return v.length ? v : l; };
 
+/** The problem types a client sees, as lines: their own list, or their own types followed by the standard types (those ticked earlier, else all). */
+function typesListText(prof) {
+  if (prof && prof.hideStd && (prof.customTypes || []).length) return prof.customTypes.slice();
+  const std = activeTypes().filter((x) => x.k !== 'other');
+  const want = (prof && prof.services) || [];
+  const base = want.length ? std.filter((x) => want.includes(x.k)) : std;
+  const own = (prof && prof.customTypes) || [];
+  return [...own, ...base.map((x) => x.t).filter((t) => !own.includes(t))];
+}
 /** Service profile of a client: AMC, trade licence, sites on the link, and per site the building photo and the device lists. */
 async function profileModal(clientId) {
   const c = S.clients.find((x) => x.id === clientId); if (!c) return;
@@ -929,9 +938,14 @@ async function profileModal(clientId) {
   const keep = () => {
     const tl = $('#pf-tl', o); if (tl) prof.tradeLicense = tl.value.trim();
     if ($('#pf-amc', o)) { prof.amc = prof.amc || {}; $$('[data-amc]', o).forEach((i) => { prof.amc[i.dataset.amc] = i.value.trim(); }); }
-    if ($('#pf-svc', o)) prof.services = $$('[data-svc]', o).filter((i) => i.checked).map((i) => i.dataset.svc);
-    if ($('#pf-ctypes', o)) prof.customTypes = [...new Set($('#pf-ctypes', o).value.split('\n').map((x) => x.trim()).filter(Boolean))].slice(0, 40);
-    if ($('#pf-hidestd', o)) prof.hideStd = $('#pf-hidestd', o).checked;
+    if ($('#pf-types', o)) {
+      const lines = [...new Set($('#pf-types', o).value.split('\n').map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'other'))].slice(0, 40);
+      const std = activeTypes().filter((x) => x.k !== 'other').map((x) => x.t);
+      const same = lines.length === std.length && lines.every((l, k) => l === std[k]);
+      // the unchanged standard list means nothing special for this client (it then follows later changes to the standard list)
+      prof.services = [];
+      if (same || !lines.length) { prof.customTypes = []; prof.hideStd = false; } else { prof.customTypes = lines; prof.hideStd = true; }
+    }
     if ($('#pf-vis', o)) prof.hiddenSites = $$('[data-vis]', o).filter((i) => !i.checked).map((i) => i.dataset.vis);
     if (sid) { const t = textsOf(sid); $$('[data-dl]', o).forEach((a) => { t[a.dataset.dl] = a.value; }); }
   };
@@ -943,13 +957,9 @@ async function profileModal(clientId) {
         <div class="field"><span>AMC contract</span><div class="row" style="gap:6px"><input data-amc="no" value="${esc(am.no || '')}" placeholder="Contract no." style="flex:1.2"><input type="date" data-amc="start" value="${esc(am.start || '')}" title="Start" style="flex:1"><input type="date" data-amc="end" value="${esc(am.end || '')}" title="End" style="flex:1"></div></div></div>
       <div id="pf-amc" class="grid2" style="margin-top:10px"><label class="field"><span>Covered products &amp; services</span><input data-amc="covered" value="${esc(am.covered || '')}" placeholder="e.g. PPM 4 visits/yr, breakdown calls — parts chargeable"></label>
         <label class="field"><span>Visits per year</span><input type="number" min="0" data-amc="visits" value="${esc(am.visits || '')}" placeholder="4"></label></div>
-      <div class="pfsec"><b>"Type of problem" list for this client</b>
-        <div class="grid2" style="margin-top:8px;align-items:start">
-          <label class="field"><span>This client's own problem types — one per line, shown first</span><textarea id="pf-ctypes" rows="5" placeholder="Lift camera not working\nCar park barrier camera\nVideo wall – missing screen">${esc((prof.customTypes || []).join('\n'))}</textarea></label>
-          <div><label class="pick" style="border:0;padding:4px 0"><input type="checkbox" id="pf-hidestd" ${prof.hideStd ? 'checked' : ''}> Show only this client's own types (hide the standard list)</label>
-            <div class="small muted" style="margin:6px 0 4px">Standard types shown to this client — none ticked = all:</div>
-            <div id="pf-svc" class="svcpick">${activeTypes().filter((x) => x.k !== 'other').map((x) => `<label><input type="checkbox" data-svc="${esc(x.k)}" ${(prof.services || []).includes(x.k) ? 'checked' : ''}>${esc(x.t)}</label>`).join('')}</div></div>
-        </div><div class="small muted" style="margin-top:6px">"Other" is always at the end of the list.</div></div>
+      <div class="pfsec"><div class="row" style="justify-content:space-between;align-items:center"><b>"Type of problem" list for this client</b><button type="button" class="btn sm" id="pf-treset">Reset to standard list</button></div>
+        <label class="field" style="margin-top:8px"><span>One problem type per line, in the order the client sees them — edit, delete, add or reorder freely. <span class="muted">"Other" is always added at the end.</span> <b id="pf-tcnt"></b></span>
+          <textarea id="pf-types" rows="9" spellcheck="true">${esc(typesListText(prof).join('\n'))}</textarea></label></div>
       ${sites.length > 1 ? `<div class="pfsec" id="pf-vis"><b>Sites on the client's link</b> <span class="small muted">— untick a site the client should not see (e.g. one added automatically from a delivery GPS).</span>
         <div class="svcpick">${sites.map((x) => `<label><input type="checkbox" data-vis="${esc(x.id)}" ${(prof.hiddenSites || []).includes(x.id) ? '' : 'checked'}>${esc(x.name)}${x.address ? ` <span class="muted small">· ${esc(String(x.address).split('\n')[0])}</span>` : ''}</label>`).join('')}</div></div>` : ''}
       ${sid ? `<div class="pfsite">
@@ -963,6 +973,12 @@ async function profileModal(clientId) {
           <textarea data-dl="${l.k}" rows="${l.k === 'cameras' ? 8 : 4}" placeholder="${esc(l.ph)}" spellcheck="false">${esc(t[l.k] || '')}</textarea></label>`).join('')}</div>
       </div>` : '<p class="muted">Add sites to this client in LLCT Invoicing first.</p>'}`;
     const ss = $('#pf-site', o); if (ss) ss.onchange = () => { keep(); sid = ss.value; draw(); };
+    const tt = $('#pf-types', o), tc = $('#pf-tcnt', o);
+    if (tt) {
+      const cnt = () => { tc.textContent = `${tt.value.split('\n').filter((x) => x.trim()).length} types`; };
+      cnt(); tt.oninput = cnt;
+      $('#pf-treset', o).onclick = () => { tt.value = activeTypes().filter((x) => x.k !== 'other').map((x) => x.t).join('\n'); cnt(); };
+    }
     $$('[data-dl]', o).forEach((a) => (a.oninput = () => {
       $(`[data-cnt="${a.dataset.dl}"]`, o).textContent = countLines(a.value);
       $('#pf-total', o).textContent = `${$$('[data-dl]', o).reduce((n, x) => n + countLines(x.value), 0)} devices`;
