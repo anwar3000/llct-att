@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=20';
+} from './sd.js?v=21';
 
 window.__sdStarted = true;
 
@@ -22,7 +22,7 @@ const token = MODE === 'link' ? (urlToken || lsGet(TK) || '') : '';
 const WK = 'llct-sd-walkins'; // this device's walk-in requests (tracking ids)
 const myWalkins = () => { try { return JSON.parse(lsGet(WK) || '[]'); } catch (_) { return []; } };
 const addWalkin = (pid, number) => { const l = myWalkins().filter((x) => x.pid !== pid); l.unshift({ pid, number }); lsSet(WK, JSON.stringify(l.slice(0, 20))); };
-const S = { portal: null, tickets: [], tab: 'new', form: freshForm(), photos: [], open: null, sent: null, busy: false, shots: {}, shotSub: null };
+const S = { portal: null, tickets: [], docs: [], tab: 'new', form: freshForm(), photos: [], open: null, sent: null, busy: false, shots: {}, shotSub: null };
 const LS = 'llct-sd-contact';
 const STEPS = ['new', 'assigned', 'accepted', 'on_way', 'on_site', 'completed'];
 const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); return dateKey(d); };
@@ -61,6 +61,11 @@ async function start() {
   loadSitePhotos(sites);
   if (!S.form.contactName && S.portal.contact) S.form.contactName = S.portal.contact;
   if (!S.form.contactPhone && S.portal.phone) S.form.contactPhone = S.portal.phone;
+  onSnapshot(collection(db, 'svcPortals', token, 'docs'), (q) => {
+    S.docs = q.docs.map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.complete !== false || d.by === 'client')
+      .sort((a, b) => DOC_TYPES.findIndex((x) => x.k === a.type) - DOC_TYPES.findIndex((x) => x.k === b.type) || String(a.number).localeCompare(String(b.number)));
+    if (S.tab === 'docs' && !S.docBusy) render(); else renderTabs();
+  }, (e) => console.warn('docs', e));
   onSnapshot(query(collection(db, 'svcPortals', token, 'tickets'), orderBy('createdAt', 'desc'), limit(200)), (q) => {
     S.tickets = q.docs.map((d) => ({ id: d.id, ...d.data() }));
     if (S.tab === 'list' && !S.sent) render(); else renderTabs();
@@ -111,14 +116,14 @@ function startPublic() {
 const openCount = () => S.tickets.filter((t) => !['completed', 'closed', 'cancelled'].includes(t.status)).length;
 function tabsHtml() {
   return `<div class="tabs" id="tabs" role="tablist"><button role="tab" data-tab="new" class="${S.tab === 'new' ? 'on' : ''}">New request</button>
-    <button role="tab" data-tab="list" class="${S.tab === 'list' ? 'on' : ''}">My requests${S.tickets.length ? `<span class="n">${openCount() || S.tickets.length}</span>` : ''}</button></div>`;
+    <button role="tab" data-tab="list" class="${S.tab === 'list' ? 'on' : ''}">My requests${S.tickets.length ? `<span class="n">${openCount() || S.tickets.length}</span>` : ''}</button>${S.portal && !S.portal.walkin ? `<button role="tab" data-tab="docs" class="${S.tab === 'docs' ? 'on' : ''}">Documents${docAlerts() ? `<span class="n" style="background:var(--trim)">${docAlerts()}</span>` : S.docs.length ? `<span class="n" style="background:var(--steel)">${S.docs.length}</span>` : ''}</button>` : ''}</div>`;
 }
 function renderTabs() { const t = $('#tabs'); if (t) { t.outerHTML = tabsHtml(); bindTabs(); } }
 function bindTabs() { $$('[data-tab]').forEach((b) => (b.onclick = () => { readForm(); S.tab = b.dataset.tab; S.sent = null; render(); window.scrollTo(0, 0); })); }
 
 function render() {
   if (!S.portal) return;
-  const body = S.sent ? sentHtml() : S.tab === 'list' ? listHtml() : formHtml();
+  const body = S.sent ? sentHtml() : S.tab === 'list' ? listHtml() : S.tab === 'docs' ? docsHtml() : formHtml();
   app.innerHTML = (S.companyLink && S.portal.walkin ? `<div class="card pad small" style="margin-bottom:14px">Your company has its own service page. <a href="${S.companyLink}"><b>Open my company page</b></a></div>` : '') + tabsHtml() + body + footHtml();
   bindTabs();
   bindInstall();
@@ -128,12 +133,71 @@ function render() {
     const tc = $('#trk-c'); if (tc) tc.onclick = () => { const i = $('#trk'); (navigator.clipboard ? navigator.clipboard.writeText(i.value) : Promise.reject()).then(() => toast('Link copied'), () => { i.select(); document.execCommand('copy'); toast('Link copied'); }); };
   }
   else if (S.tab === 'list') bindList();
+  else if (S.tab === 'docs') bindDocs();
   else bindForm();
 }
 
 function footHtml() {
   return `<div class="foot"><div id="inst" class="hidden"><button class="btn sm" id="inst-b" type="button">Add to home screen</button><div class="small muted" id="inst-t"></div></div>
     <p><img src="img/shield-256.png" alt="">${esc(COMPANY.name)}, Airport Road, Dubai. Call <a href="tel:048805577">${COMPANY.phone}</a> or email <a href="mailto:${COMPANY.email}">${COMPANY.email}</a>.</p></div>`;
+}
+
+// ------------------------------------------------------------------ documents
+const docBase = () => ['svcPortals', token, 'docs'];
+const docAlerts = () => (S.docs || []).filter((d) => ['bad', 'warn'].includes(expiryStatus(d.expiry).tone)).length;
+function docsHtml() {
+  const f = S.docForm || (S.docForm = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' });
+  const ty = docTypeOf(f.type); const sites = S.portal.sites || [];
+  const list = S.docs || [];
+  return `<div class="sheet docsheet">
+    <div class="dochead"><div><h2>Your documents</h2><p class="small muted">Trade licence, SIRA certificate and NOC, approved drawings and other papers for your sites. Our team is reminded before anything expires.</p></div>
+      <button type="button" class="btn primary" id="dn-open">${S.docAdd ? 'Close' : '+ Upload document'}</button></div>
+    ${S.docAdd ? `<div class="docform">
+      <div class="dgrid">
+        <label class="field"><span>Document type <b>*</b></span><select id="dn-type">${DOC_TYPES.map((x) => `<option value="${x.k}" ${x.k === f.type ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>
+        <label class="field"><span>${esc(ty.num)}</span><input id="dn-num" value="${esc(f.number)}" placeholder="e.g. ${f.type === 'tl' ? '123456' : 'ABC-2026-001'}"></label>
+        <label class="field"><span>Expiry date${ty.exp ? '' : ' (if any)'}</span><input type="date" id="dn-exp" value="${esc(f.expiry)}"></label>
+        ${sites.length > 1 ? `<label class="field"><span>For site</span><select id="dn-site"><option value="">All sites</option>${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === f.siteId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
+      </div>
+      <label class="field" style="margin-top:10px"><span>Notes (optional)</span><input id="dn-notes" value="${esc(f.notes)}" placeholder="e.g. Renewed, issued by Dubai Economy"></label>
+      <div class="docfile"><label class="btn"><span id="dn-fl">${S.docFile ? esc(S.docFile.name) : 'Choose file (PDF or photo)'}</span><input type="file" id="dn-file" hidden accept="application/pdf,image/*,.dwg,.dxf,.doc,.docx,.xls,.xlsx"></label>
+        <span class="small muted">${S.docFile ? fmtSize(S.docFile.size) : 'Up to 8 MB. A clear photo of the document is fine.'}</span></div>
+      <div class="row" style="margin-top:12px;justify-content:flex-end"><span class="small muted grow" id="dn-prog"></span><button type="button" class="btn primary" id="dn-save" ${S.docBusy ? 'disabled' : ''}>${S.docBusy ? 'Uploading…' : 'Upload'}</button></div>
+    </div>` : ''}
+    ${list.length ? `<div class="doclist">${list.map((d) => {
+      const x = expiryStatus(d.expiry); const site = sites.find((s) => s.id === d.siteId);
+      return `<div class="docrow ${x.tone}"><div class="dic">${/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE'}</div>
+        <div class="dtx"><b>${esc(docTypeOf(d.type).t)}</b>${d.number ? ` <span class="muted">· ${esc(d.number)}</span>` : ''}
+          <div class="small">${x.text ? `<span class="xp ${x.tone}">${esc(x.text)}</span>` : '<span class="muted">No expiry</span>'}${site ? ` · ${esc(site.name)}` : ''}${d.verified ? ' · <span style="color:var(--success);font-weight:650">✓ Checked by Leaders Line</span>' : ''}</div>
+          <div class="small muted">${esc(d.name || '')}${d.size ? ` · ${fmtSize(d.size)}` : ''}${d.complete === false ? ' · <span style="color:var(--warning)">upload not finished</span>' : ''}</div></div>
+        <div class="dact">${d.complete === false ? '' : `<button type="button" class="btn sm" data-dv="${esc(d.id)}">View</button>`}${!d.verified && d.by === 'client' ? `<button type="button" class="btn sm bad" data-dd="${esc(d.id)}" aria-label="Delete">✕</button>` : ''}</div></div>`;
+    }).join('')}</div>` : `<p class="muted" style="padding:18px 4px">No documents yet. Upload your trade licence first — it takes a minute.</p>`}
+  </div>`;
+}
+function bindDocs() {
+  const f = S.docForm;
+  const keep = () => { if (!$('#dn-type')) return; f.type = $('#dn-type').value; f.number = $('#dn-num').value.trim(); f.expiry = $('#dn-exp').value; f.notes = $('#dn-notes').value.trim(); f.siteId = $('#dn-site') ? $('#dn-site').value : ''; };
+  $('#dn-open').onclick = () => { keep(); S.docAdd = !S.docAdd; render(); };
+  if ($('#dn-type')) $('#dn-type').onchange = () => { keep(); render(); };
+  const fi = $('#dn-file'); if (fi) fi.onchange = () => { keep(); S.docFile = fi.files[0] || null; render(); };
+  const sv = $('#dn-save');
+  if (sv) sv.onclick = async () => {
+    keep();
+    if (!S.docFile) return toast('Please choose the file', true);
+    if (docTypeOf(f.type).exp && f.type !== 'other' && !f.expiry) { if (!confirm('No expiry date entered. Upload anyway?')) return; }
+    S.docBusy = true; render();
+    try {
+      await uploadDocFile(docBase(), { type: f.type, typeLabel: docTypeOf(f.type).t, number: f.number, expiry: f.expiry, siteId: f.siteId, notes: f.notes, by: 'client', byName: S.form.contactName || '', clientId: S.portal.clientId || '' },
+        S.docFile, (p) => { const e = $('#dn-prog'); if (e) e.textContent = `Uploading… ${Math.round(p * 100)}%`; });
+      S.docFile = null; S.docAdd = false; S.docForm = null; toast('Document uploaded — thank you');
+    } catch (e) { toast(friendly(e), true); }
+    S.docBusy = false; render();
+  };
+  $$('[data-dv]').forEach((b) => (b.onclick = () => { const d = S.docs.find((x) => x.id === b.dataset.dv); if (d) openDocFile(docBase(), d).catch((e) => toast(friendly(e), true)); }));
+  $$('[data-dd]').forEach((b) => (b.onclick = async () => {
+    const d = S.docs.find((x) => x.id === b.dataset.dd); if (!d || !confirm(`Delete ${docTypeOf(d.type).t}${d.number ? ' ' + d.number : ''}?`)) return;
+    try { await deleteDocFile(docBase(), d); toast('Deleted'); } catch (e) { toast(friendly(e), true); }
+  }));
 }
 
 // ------------------------------------------------------------------ install as an app

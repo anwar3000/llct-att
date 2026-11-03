@@ -2,7 +2,7 @@
 // Same Firebase project as LLCT Attendance and LLCT Invoicing.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
+  getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
@@ -10,7 +10,7 @@ import { firebaseConfig } from './config.js';
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export {
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
+  collection, collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, Timestamp, writeBatch, arrayUnion, deleteField,
 };
 
@@ -310,3 +310,73 @@ export function beep(times = 3) {
     }
   } catch (_) { /* ignore */ }
 }
+
+// ------------------------------------------------------------------ customer documents (trade licence, SIRA, drawings…)
+// Files are kept in Firestore itself: a document per file (svcPortals/{token}/docs/{id}) and the file in
+// pieces of 700 000 base64 characters (…/docs/{id}/chunks/{n}), like the ID documents of the staff app.
+export const DOC_TYPES = [
+  { k: 'tl', t: 'Trade licence', exp: true, num: 'Licence number' },
+  { k: 'sira_cert', t: 'SIRA certificate', exp: true, num: 'Certificate number' },
+  { k: 'sira_noc', t: 'SIRA NOC', exp: true, num: 'NOC number' },
+  { k: 'drawing', t: 'Property drawing', exp: false, num: 'Drawing number' },
+  { k: 'spc', t: 'SPC approved drawing', exp: true, num: 'Approval number' },
+  { k: 'cd', t: 'Civil Defence certificate', exp: true, num: 'Certificate number' },
+  { k: 'contract', t: 'AMC contract / LPO', exp: true, num: 'Contract / LPO number' },
+  { k: 'other', t: 'Other document', exp: true, num: 'Reference number' },
+];
+export const docTypeOf = (k) => DOC_TYPES.find((d) => d.k === k) || DOC_TYPES[DOC_TYPES.length - 1];
+export const DOC_MAX = 8 * 1024 * 1024; // 8 MB per file
+const DOC_CHUNK = 700000;
+/** Expiry state of a document: { text, tone: 'ok' | 'warn' | 'bad' | '' }. */
+export function expiryStatus(exp) {
+  if (!exp) return { text: '', tone: '' };
+  const end = new Date(exp + 'T23:59:59'); if (isNaN(end)) return { text: '', tone: '' };
+  const days = Math.ceil((end - new Date()) / 86400000);
+  const d = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (days < 0) return { text: `Expired ${d}`, tone: 'bad', days };
+  if (days <= 30) return { text: `Expires ${d} (${days} day${days === 1 ? '' : 's'})`, tone: 'warn', days };
+  return { text: `Valid until ${d}`, tone: 'ok', days };
+}
+const fileToB64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('Could not read the file')); r.readAsDataURL(blob); });
+/** Upload one file with its details. base = path of the docs collection, e.g. ['svcPortals', token, 'docs']. */
+export async function uploadDocFile(base, meta, file, onProgress) {
+  let blob = file, mime = file.type || 'application/octet-stream', name = file.name || 'document';
+  if (/^image\/(jpeg|png|webp|heic|heif)/i.test(mime) && file.size > 600 * 1024) {
+    try { const du = await compressImage(file, 2000, 0.8); blob = await (await fetch(du)).blob(); mime = 'image/jpeg'; name = name.replace(/\.[a-z0-9]+$/i, '') + '.jpg'; } catch (_) { /* keep the original */ }
+  }
+  if (blob.size > DOC_MAX) throw new Error(`The file is ${(blob.size / 1048576).toFixed(1)} MB — the limit is 8 MB. Please send a smaller scan or PDF.`);
+  const b64 = await fileToB64(blob);
+  const n = Math.max(1, Math.ceil(b64.length / DOC_CHUNK));
+  const ref = doc(collection(db, ...base));
+  await setDoc(ref, { ...meta, name, mime, size: blob.size, chunks: n, complete: false, at: serverTimestamp() });
+  for (let i = 0; i < n; i += 8) { // a write may carry at most 10 MB, so send 8 pieces at a time
+    const b = writeBatch(db);
+    for (let k = i; k < Math.min(n, i + 8); k++) b.set(doc(db, ...base, ref.id, 'chunks', String(k)), { d: b64.slice(k * DOC_CHUNK, (k + 1) * DOC_CHUNK) });
+    await b.commit(); if (onProgress) onProgress(Math.min(n, i + 8) / n);
+  }
+  await updateDoc(ref, { complete: true });
+  return ref.id;
+}
+/** The file of a document as a Blob. */
+export async function loadDocFile(base, d) {
+  const q = await getDocs(collection(db, ...base, d.id, 'chunks'));
+  const parts = q.docs.sort((a, b) => +a.id - +b.id).map((x) => x.data().d || '').join('');
+  const bin = atob(parts); const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Blob([u], { type: d.mime || 'application/octet-stream' });
+}
+/** Open (view) or save a document's file. Call straight from a click so the new tab is allowed. */
+export function openDocFile(base, d, download) {
+  const w = download ? null : window.open('', '_blank');
+  if (w) w.document.write('<p style="font:16px system-ui;padding:20px">Opening document…</p>');
+  return loadDocFile(base, d).then((blob) => {
+    const url = URL.createObjectURL(blob);
+    if (w) { w.location.href = url; } else { const a = document.createElement('a'); a.href = url; a.download = d.name || 'document'; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  }, (e) => { if (w) w.close(); throw e; });
+}
+export async function deleteDocFile(base, d) {
+  const q = await getDocs(collection(db, ...base, d.id, 'chunks'));
+  const b = writeBatch(db); q.docs.forEach((x) => b.delete(x.ref)); b.delete(doc(db, ...base, d.id)); await b.commit();
+}
+export const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
