@@ -10,8 +10,8 @@ import {
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
   collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize,
-} from './sd.js?v=22';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=22';
+} from './sd.js?v=24';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=24';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -1110,7 +1110,7 @@ function settingsView(m) {
     <div class="card pad"><h3>Who can assign tickets</h3><p class="small muted">Admins and managers can always assign. Tick staff who may also assign jobs to others (everyone can pick up a new job for themselves).</p>
       ${staff.map((u) => `<div class="row" style="padding:7px 0;border-top:1px solid var(--line)">${avatar(u.name)}<span class="grow"><b>${esc(u.name)}</b><div class="small muted">${esc(u.designation || u.role || '')}</div></span>
         <label class="switch"><input type="checkbox" data-asg="${esc(u.id)}" ${u.canAssignService ? 'checked' : ''}><i></i></label></div>`).join('') || '<div class="muted">No staff.</div>'}</div>
-    <div class="card pad" style="grid-column:1/-1"><div class="row"><h3 class="grow">Service options for customers</h3>
+    <div class="card pad" style="grid-column:1/-1"><div class="row sohead"><h3 class="grow">Service options for customers</h3>
         <button class="btn sm" id="so-reset">Restore defaults</button><button class="btn sm" id="so-add">+ Add option</button><button class="btn sm primary" id="so-save">Save options</button></div>
       <p class="small muted">What customers can tick under "What needs attention" on client links and the walk-in support page. Hide, rename, reorder or add your own.</p>
       <div id="so-list"></div></div>
@@ -1127,7 +1127,7 @@ function settingsView(m) {
   // service options editor
   let opts = SERVICE_TYPES.filter((x) => !x.retired).map((x) => ({ ...x }));
   const drawOpts = () => {
-    $('#so-list', m).innerHTML = `<table class="tbl"><thead><tr><th style="width:44px">Show</th><th style="width:150px">Icon</th><th>Text customers see</th><th style="width:120px">Order</th><th style="width:60px"></th></tr></thead><tbody>
+    $('#so-list', m).innerHTML = `<table class="tbl sotbl"><thead><tr><th style="width:44px">Show</th><th style="width:150px">Icon</th><th>Text customers see</th><th style="width:120px">Order</th><th style="width:60px"></th></tr></thead><tbody>
       ${opts.map((x, i) => `<tr><td><label class="switch"><input type="checkbox" data-on="${i}" ${x.on !== false ? 'checked' : ''}><i></i></label></td>
         <td><div class="row" style="flex-wrap:nowrap"><span style="color:var(--ribbon)">${icon(x.i || x.k, 22)}</span><select data-ic="${i}" style="padding:6px">${ICON_KEYS.map((k) => `<option ${((x.i || x.k) === k) ? 'selected' : ''}>${k}</option>`).join('')}</select></div></td>
         <td><input data-t="${i}" value="${esc(x.t)}"></td>

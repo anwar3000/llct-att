@@ -535,3 +535,21 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .dact { display: flex; gap: 6px; flex: none; }
 .xp.ok { color: var(--success); font-weight: 650; } .xp.warn { color: var(--warning); font-weight: 700; } .xp.bad { color: var(--trim); font-weight: 700; }
 @media (max-width: 560px) { .docsheet { padding: 14px; } .tabs button { padding-left: 10px; padding-right: 10px; } }
+
+/* ---- desk settings on phones ---- */
+@media (max-width: 700px) {
+  .sohead { flex-wrap: wrap; } .sohead h3 { flex: 1 1 100%; margin-bottom: 4px; }
+  .sohead .btn { flex: 1 1 auto; }
+  .sotbl thead { display: none; }
+  .sotbl, .sotbl tbody { display: block; width: 100%; }
+  .sotbl tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "show text order" "icon icon del"; gap: 8px 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .sotbl td { display: block; padding: 0; border: 0; }
+  .sotbl td:nth-child(1) { grid-area: show; } .sotbl td:nth-child(2) { grid-area: icon; } .sotbl td:nth-child(3) { grid-area: text; }
+  .sotbl td:nth-child(4) { grid-area: order; white-space: nowrap; } .sotbl td:nth-child(5) { grid-area: del; justify-self: end; }
+  .sotbl td:nth-child(3) input { width: 100%; }
+  .sotbl td:nth-child(2) .row { gap: 8px; }
+  .linkbox { flex-wrap: nowrap; } .linkbox input { min-width: 0; }
+}
+.switch { display: inline-block; vertical-align: middle; }
+.switch input { position: absolute; width: 0 !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0; border: 0; }
+@media (max-width: 700px) { .sotbl td:nth-child(1) { width: 42px; } }
