@@ -10,8 +10,8 @@ import {
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
   collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize,
-} from './sd.js?v=24';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=24';
+} from './sd.js?v=26';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=26';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -790,7 +790,7 @@ function docsModal(clientId) {
     const ty = docTypeOf(f.type);
     $('#dm', o).innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="small muted">Clients upload these from their service link (Documents tab). Check each one, and keep expiry dates up to date.</span>
         ${link ? `<button class="btn sm primary" id="dm-add">${add ? 'Close' : '+ Upload for client'}</button>` : '<span class="small muted">Create a service link to upload documents.</span>'}</div>
-      ${add ? `<div class="docform"><div class="dgrid">
+      ${add ? `<div class="docform"><div class="docgrid">
         <label class="field"><span>Document type</span><select id="dm-type">${DOC_TYPES.map((x) => `<option value="${x.k}" ${x.k === f.type ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>
         <label class="field"><span>${esc(ty.num)}</span><input id="dm-num" value="${esc(f.number)}"></label>
         <label class="field"><span>Expiry date</span><input type="date" id="dm-exp" value="${esc(f.expiry)}"></label>
@@ -1106,15 +1106,15 @@ function downloadCsv(ts, name) {
 // ================================================================== settings (admin)
 function settingsView(m) {
   const staff = S.users.filter((u) => !['admin', 'manager'].includes(u.role));
-  m.innerHTML = `<h1 style="margin-bottom:12px">Settings</h1><div class="dgrid">
+  m.innerHTML = `<h1 style="margin-bottom:12px">Settings</h1><div class="setgrid">
     <div class="card pad"><h3>Who can assign tickets</h3><p class="small muted">Admins and managers can always assign. Tick staff who may also assign jobs to others (everyone can pick up a new job for themselves).</p>
       ${staff.map((u) => `<div class="row" style="padding:7px 0;border-top:1px solid var(--line)">${avatar(u.name)}<span class="grow"><b>${esc(u.name)}</b><div class="small muted">${esc(u.designation || u.role || '')}</div></span>
         <label class="switch"><input type="checkbox" data-asg="${esc(u.id)}" ${u.canAssignService ? 'checked' : ''}><i></i></label></div>`).join('') || '<div class="muted">No staff.</div>'}</div>
-    <div class="card pad" style="grid-column:1/-1"><div class="row sohead"><h3 class="grow">Service options for customers</h3>
+    <div class="card pad setopts"><div class="row sohead"><h3 class="grow">Service options for customers</h3>
         <button class="btn sm" id="so-reset">Restore defaults</button><button class="btn sm" id="so-add">+ Add option</button><button class="btn sm primary" id="so-save">Save options</button></div>
       <p class="small muted">What customers can tick under "What needs attention" on client links and the walk-in support page. Hide, rename, reorder or add your own.</p>
       <div id="so-list"></div></div>
-    <div class="card pad stack"><h3>Links</h3>
+    <div class="card pad stack setlinks"><h3>Links</h3>
       <div class="field"><span>Staff desk (this page)</span><div class="linkbox"><input readonly value="${esc(new URL('desk.html', PORTAL_BASE).href)}"><button class="btn sm" id="cp1">Copy</button></div></div>
       <div class="field"><span>Client links start with</span><input readonly value="${esc(PORTAL_BASE)}?c=…"></div>
       <div class="field"><span>Walk-in support page (public form for any customer)</span><div class="linkbox"><input id="sup-url" value="${esc(S.supportBase)}"><button class="btn sm" id="sup-save">Save</button></div>

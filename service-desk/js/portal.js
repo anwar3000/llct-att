@@ -4,7 +4,7 @@ import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
   SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=24';
+} from './sd.js?v=26';
 
 window.__sdStarted = true;
 
@@ -153,7 +153,7 @@ function docsHtml() {
     <div class="dochead"><div><h2>Your documents</h2><p class="small muted">Trade licence, SIRA certificate and NOC, approved drawings and other papers for your sites. Our team is reminded before anything expires.</p></div>
       <button type="button" class="btn primary" id="dn-open">${S.docAdd ? 'Close' : '+ Upload document'}</button></div>
     ${S.docAdd ? `<div class="docform">
-      <div class="dgrid">
+      <div class="docgrid">
         <label class="field"><span>Document type <b>*</b></span><select id="dn-type">${DOC_TYPES.map((x) => `<option value="${x.k}" ${x.k === f.type ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>
         <label class="field"><span>${esc(ty.num)}</span><input id="dn-num" value="${esc(f.number)}" placeholder="e.g. ${f.type === 'tl' ? '123456' : 'ABC-2026-001'}"></label>
         <label class="field"><span>Expiry date${ty.exp ? '' : ' (if any)'}</span><input type="date" id="dn-exp" value="${esc(f.expiry)}"></label>
