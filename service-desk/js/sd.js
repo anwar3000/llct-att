@@ -380,3 +380,16 @@ export async function deleteDocFile(base, d) {
   const b = writeBatch(db); q.docs.forEach((x) => b.delete(x.ref)); b.delete(doc(db, ...base, d.id)); await b.commit();
 }
 export const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+/** Documents grouped: the files of one document (e.g. the pages of a drawing) share a group id. */
+export function groupDocs(list) {
+  const m = new Map();
+  (list || []).forEach((d) => { const k = d.group || d.id; if (!m.has(k)) m.set(k, []); m.get(k).push(d); });
+  return [...m.entries()].map(([key, docs]) => {
+    docs.sort((a, b) => (a.page || 0) - (b.page || 0) || String(a.name).localeCompare(String(b.name)));
+    const head = docs[0];
+    return { key, docs, head, size: docs.reduce((n, d) => n + (d.size || 0), 0), verified: docs.every((d) => d.verified), complete: docs.every((d) => d.complete !== false) };
+  });
+}
+/** Short label for one file of a document: "Page 2" or its name. */
+export const fileLabel = (d, i, n) => (n > 1 ? `Page ${d.page || i + 1}` : 'View');
+export const newGroupId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);

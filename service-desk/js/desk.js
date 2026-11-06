@@ -9,9 +9,9 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus, DEVICE_LISTS, listOfOther,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-  collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize,
-} from './sd.js?v=26';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=26';
+  collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId,
+} from './sd.js?v=28';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=28';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -525,7 +525,7 @@ function openTicket(id, quiet = false) {
         ${has ? `<div class="row" style="margin-top:8px;align-items:flex-start;gap:12px">${img ? `<img src="${img}" alt="Building" style="width:150px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--silver);cursor:zoom-in" data-bimg>` : ''}
         <div class="small">${a.text ? `<div style="color:${tone};font-weight:650">${esc(a.text)}${prof.amc.no ? ` · ${esc(prof.amc.no)}` : ''}</div>` : ''}${prof.amc && prof.amc.covered ? `<div class="muted">${esc(prof.amc.covered)}</div>` : ''}
         ${prof.tradeLicense ? `<div>Trade licence: <b>${esc(prof.tradeLicense)}</b>${prof.tradeLicenseExpiry ? ` <span class="xp ${expiryStatus(prof.tradeLicenseExpiry).tone}">${esc(expiryStatus(prof.tradeLicenseExpiry).text)}</span>` : ''}</div>` : ''}
-        ${clientDocs(t.clientId).length ? `<div><a href="#" id="pc-docs">Documents (${clientDocs(t.clientId).length})</a>${clientDocs(t.clientId).filter((d) => expiryStatus(d.expiry).tone === 'bad').length ? ' <span class="xp bad">· some expired</span>' : ''}</div>` : ''}
+        ${clientDocs(t.clientId).length ? `<div><a href="#" id="pc-docs">Documents (${groupDocs(clientDocs(t.clientId)).length})</a>${clientDocs(t.clientId).filter((d) => expiryStatus(d.expiry).tone === 'bad').length ? ' <span class="xp bad">· some expired</span>' : ''}</div>` : ''}
         <div>${[(e.nvrs || []).length && `${e.nvrs.length} NVR`, (e.cameras || []).length && `${e.cameras.length} cameras`, (e.others || []).length && `${e.others.length} other devices`].filter(Boolean).join(', ') || 'No equipment listed for this site'}</div>
         ${(e.nvrs || []).map((n) => `<div class="muted">NVR ${esc(n.no)}${n.name ? ` – ${esc(n.name)}` : ''}${n.model ? ` · ${esc(n.model)}` : ''}${n.ip ? ` · ${esc(n.ip)}` : ''}</div>`).join('')}
         ${(e.cameras || []).length ? `<details class="eqlist"><summary>All cameras (${e.cameras.length}) — IP, NVR, channel</summary><table class="tbl"><thead><tr><th>No.</th><th>Name</th><th>NVR / ch</th><th>IP</th><th>Model</th><th>Serial</th></tr></thead><tbody>
@@ -746,7 +746,7 @@ function clientsView(m) {
   m.innerHTML = `<div class="row" style="margin-bottom:12px"><h1 class="grow">Customers</h1><input id="cq" placeholder="Search client…" value="${esc(S.cq || '')}" style="max-width:280px"></div>
     <p class="muted small" style="margin-top:-4px">Set up each customer's service profile — AMC contract, trade licence, building photos and the equipment we maintain (NVRs, cameras, other devices) — then share their private service link. Sites and GPS come from LLCT Invoicing.</p>
     ${S.clientsErr ? `<div class="card pad" style="color:var(--danger)">${esc(S.clientsErr)}</div>` : ''}
-    ${(() => { const al = clientDocs(null).filter((d) => ['bad', 'warn'].includes(expiryStatus(d.expiry).tone)).sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
+    ${(() => { const al = groupDocs(clientDocs(null)).map((g) => g.head).filter((d) => ['bad', 'warn'].includes(expiryStatus(d.expiry).tone)).sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
       return al.length ? `<div class="card pad docalert"><b>Documents expiring or expired (${al.length})</b>${al.slice(0, 8).map((d) => { const x = expiryStatus(d.expiry); const c = S.clients.find((y) => y.id === docClient(d)); return `<div class="small"><span class="xp ${x.tone}">${esc(x.text)}</span> — ${esc(c ? c.name : '')}: ${esc(docTypeOf(d.type).t)}${d.number ? ' ' + esc(d.number) : ''} <a href="#" data-cdocs="${esc(docClient(d))}">open</a></div>`; }).join('')}</div>` : ''; })()}
     <div class="card" style="overflow:auto"><table class="tbl"><thead><tr><th>Client</th><th>Sites</th><th>Service profile</th><th>Documents</th><th>Tickets</th><th>Last request</th><th>Service link</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td class="click" data-hist="${esc(r.c.id)}" style="cursor:pointer"><b>${esc(r.c.name)}</b>${r.c.phone ? `<div class="small muted">${esc(r.c.contact || '')} ${esc(r.c.phone)}</div>` : ''}</td>
@@ -771,67 +771,85 @@ function clientsView(m) {
 const docClient = (d) => d.clientId || ((S.portals || []).find((p) => p.id === d.portal) || {}).clientId || '';
 const clientDocs = (cid) => (S.docs || []).filter((d) => d.complete !== false && (cid === null || docClient(d) === cid));
 function docSummary(cid) {
-  const l = clientDocs(cid); const bad = l.filter((d) => expiryStatus(d.expiry).tone === 'bad').length, warn = l.filter((d) => expiryStatus(d.expiry).tone === 'warn').length;
+  const l = groupDocs(clientDocs(cid)).map((g) => ({ ...g.head, verified: g.verified })); const bad = l.filter((d) => expiryStatus(d.expiry).tone === 'bad').length, warn = l.filter((d) => expiryStatus(d.expiry).tone === 'warn').length;
   const unv = l.filter((d) => !d.verified).length;
   return `<button class="btn sm" data-cdocs="${esc(cid)}">${l.length ? `Documents (${l.length})` : 'Documents'}</button>
     ${bad ? `<div class="small xp bad">${bad} expired</div>` : ''}${warn ? `<div class="small xp warn">${warn} expiring soon</div>` : ''}${unv ? `<div class="small" style="color:var(--ribbon)">${unv} new to check</div>` : ''}`;
 }
-/** A client's documents: view, download, check (verify), upload for them, delete. */
+/** A client's documents: view, download, check (verify), upload for them, delete. A document may have several files (pages). */
 function docsModal(clientId) {
   const c = S.clients.find((x) => x.id === clientId) || { id: clientId, name: '' };
   const sites = sitesFromPlaces(c);
   const link = (S.portals || []).find((p) => p.clientId === clientId && p.active);
   const o = modal(`<h2 class="grow">${esc(c.name)} — documents</h2>`, '<div id="dm"></div>', '<button class="btn" data-x>Close</button>', { wide: true });
   o.dataset.docs = clientId;
-  let add = false, busy = false, file = null; const f = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' };
+  let add = false, into = null, busy = false, files = []; const f = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' };
   const base = (d) => ['svcPortals', d.portal, 'docs'];
+  const ficon = (d) => (/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE');
   const draw = () => {
-    const l = clientDocs(clientId).sort((a, b) => DOC_TYPES.findIndex((x) => x.k === a.type) - DOC_TYPES.findIndex((x) => x.k === b.type));
-    const ty = docTypeOf(f.type);
-    $('#dm', o).innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="small muted">Clients upload these from their service link (Documents tab). Check each one, and keep expiry dates up to date.</span>
+    const groups = groupDocs(clientDocs(clientId)).sort((a, b) => DOC_TYPES.findIndex((x) => x.k === a.head.type) - DOC_TYPES.findIndex((x) => x.k === b.head.type));
+    const g0 = into ? groups.find((g) => g.key === into) : null;
+    const ty = docTypeOf(g0 ? g0.head.type : f.type);
+    $('#dm', o).innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="small muted">Clients upload these from their service link (Documents tab). A document can have several files, e.g. the pages of a drawing.</span>
         ${link ? `<button class="btn sm primary" id="dm-add">${add ? 'Close' : '+ Upload for client'}</button>` : '<span class="small muted">Create a service link to upload documents.</span>'}</div>
-      ${add ? `<div class="docform"><div class="docgrid">
+      ${add ? `<div class="docform">${g0 ? `<div class="intohead">Adding files to <b>${esc(ty.t)}</b>${g0.head.number ? ' · ' + esc(g0.head.number) : ''} <span class="muted">(${g0.docs.length} already)</span></div>` : `<div class="docgrid">
         <label class="field"><span>Document type</span><select id="dm-type">${DOC_TYPES.map((x) => `<option value="${x.k}" ${x.k === f.type ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>
         <label class="field"><span>${esc(ty.num)}</span><input id="dm-num" value="${esc(f.number)}"></label>
         <label class="field"><span>Expiry date</span><input type="date" id="dm-exp" value="${esc(f.expiry)}"></label>
         ${sites.length > 1 ? `<label class="field"><span>For site</span><select id="dm-site"><option value="">All sites</option>${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === f.siteId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}</div>
-        <label class="field" style="margin-top:10px"><span>Notes</span><input id="dm-notes" value="${esc(f.notes)}"></label>
-        <div class="docfile"><label class="btn"><span>${file ? esc(file.name) : 'Choose file'}</span><input type="file" id="dm-file" hidden></label><span class="small muted" id="dm-prog">${file ? fmtSize(file.size) : 'Up to 8 MB'}</span>
-          <button class="btn primary" id="dm-save" ${busy ? 'disabled' : ''}>${busy ? 'Uploading…' : 'Upload'}</button></div></div>` : ''}
-      ${l.length ? `<div class="doclist">${l.map((d) => {
-        const x = expiryStatus(d.expiry); const site = sites.find((s2) => s2.id === d.siteId);
-        return `<div class="docrow ${x.tone}"><div class="dic">${/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE'}</div>
+        <label class="field" style="margin-top:10px"><span>Notes</span><input id="dm-notes" value="${esc(f.notes)}"></label>`}
+        <div class="docfile"><label class="btn"><span>${files.length ? '+ Add more files' : 'Choose files'}</span><input type="file" id="dm-file" hidden multiple></label><span class="small muted" id="dm-prog">${files.length ? `${files.length} file(s) · ${fmtSize(files.reduce((n, x) => n + x.size, 0))}` : 'Several files allowed — up to 8 MB each'}</span>
+          <button class="btn primary" id="dm-save" ${busy || !files.length ? 'disabled' : ''}>${busy ? 'Uploading…' : 'Upload'}</button></div>
+        ${files.length ? `<div class="flist2">${files.map((x, k) => `<div class="frow"><span class="fpg">${k + 1}</span><span class="fnm">${esc(x.name)}</span><span class="small muted">${fmtSize(x.size)}</span><button type="button" data-frm="${k}">✕</button></div>`).join('')}</div>` : ''}</div>` : ''}
+      ${groups.length ? `<div class="doclist">${groups.map((g) => {
+        const d = g.head, x = expiryStatus(d.expiry); const site = sites.find((s2) => s2.id === d.siteId); const n = g.docs.length;
+        return `<div class="docrow ${x.tone}"><div class="dic">${n > 1 ? `${n}<small>files</small>` : ficon(d)}</div>
           <div class="dtx"><b>${esc(docTypeOf(d.type).t)}</b>${d.number ? ` · ${esc(d.number)}` : ''}${site ? ` <span class="muted">· ${esc(site.name)}</span>` : ''}
-            <div class="small">${x.text ? `<span class="xp ${x.tone}">${esc(x.text)}</span>` : '<span class="muted">No expiry</span>'} · ${d.verified ? `<span style="color:var(--success);font-weight:650">✓ Checked${d.verifiedBy ? ' by ' + esc(d.verifiedBy) : ''}</span>` : '<span style="color:var(--ribbon);font-weight:650">New — not checked</span>'}</div>
-            <div class="small muted">${esc(d.name || '')} · ${fmtSize(d.size || 0)} · ${d.by === 'staff' ? 'uploaded by ' + esc(d.byName || 'staff') : 'uploaded by client' + (d.byName ? ' (' + esc(d.byName) + ')' : '')}${d.at ? ' · ' + esc(fmtDT(d.at)) : ''}${d.notes ? ' · ' + esc(d.notes) : ''}</div></div>
-          <div class="dact"><button class="btn sm" data-dv="${esc(d.id)}">View</button><button class="btn sm" data-dl="${esc(d.id)}">Download</button>
-            ${d.verified ? '' : `<button class="btn sm primary" data-dok="${esc(d.id)}">Mark checked</button>`}${isMgmt() ? `<button class="btn sm bad" data-ddel="${esc(d.id)}">✕</button>` : ''}</div></div>`;
+            <div class="small">${x.text ? `<span class="xp ${x.tone}">${esc(x.text)}</span>` : '<span class="muted">No expiry</span>'} · ${g.verified ? `<span style="color:var(--success);font-weight:650">✓ Checked${d.verifiedBy ? ' by ' + esc(d.verifiedBy) : ''}</span>` : '<span style="color:var(--ribbon);font-weight:650">New — not checked</span>'}</div>
+            <div class="fchips">${g.docs.map((dd, k) => `<span class="fpair"><button class="fchip" data-dv="${esc(dd.id)}" title="View ${esc(dd.name || '')}">${ficon(dd)} ${n > 1 ? 'Page ' + (dd.page || k + 1) : esc(dd.name || 'View')}</button><button class="fchip dl" data-dl="${esc(dd.id)}" title="Download ${esc(dd.name || '')}" aria-label="Download">⬇</button></span>`).join('')}</div>
+            <div class="small muted">${fmtSize(g.size)} · ${d.by === 'staff' ? 'uploaded by ' + esc(d.byName || 'staff') : 'uploaded by client' + (d.byName ? ' (' + esc(d.byName) + ')' : '')}${d.at ? ' · ' + esc(fmtDT(d.at)) : ''}${d.notes ? ' · ' + esc(d.notes) : ''}</div></div>
+          <div class="dact">${link ? `<button class="btn sm" data-dadd="${esc(g.key)}">+ Files</button>` : ''}${g.verified ? '' : `<button class="btn sm primary" data-dok="${esc(g.key)}">Mark checked</button>`}${isMgmt() ? `<button class="btn sm bad" data-ddel="${esc(g.key)}">✕</button>` : ''}</div></div>`;
       }).join('')}</div>` : '<p class="muted">No documents yet.</p>'}`;
     const keep = () => { if (!$('#dm-type', o)) return; f.type = $('#dm-type', o).value; f.number = $('#dm-num', o).value.trim(); f.expiry = $('#dm-exp', o).value; f.notes = $('#dm-notes', o).value.trim(); f.siteId = $('#dm-site', o) ? $('#dm-site', o).value : ''; };
-    const ad = $('#dm-add', o); if (ad) ad.onclick = () => { keep(); add = !add; draw(); };
+    const ad = $('#dm-add', o); if (ad) ad.onclick = () => { keep(); add = !add; into = null; files = []; draw(); };
     const tsel = $('#dm-type', o); if (tsel) tsel.onchange = () => { keep(); draw(); };
-    const fi = $('#dm-file', o); if (fi) fi.onchange = () => { keep(); file = fi.files[0] || null; draw(); };
+    const fi = $('#dm-file', o); if (fi) fi.onchange = () => { keep(); files = [...files, ...fi.files].slice(0, 20); draw(); };
+    $$('[data-frm]', o).forEach((b) => (b.onclick = () => { keep(); files.splice(+b.dataset.frm, 1); draw(); }));
+    $$('[data-dadd]', o).forEach((b) => (b.onclick = () => { add = true; into = b.dataset.dadd; files = []; draw(); }));
     const sv = $('#dm-save', o);
     if (sv) sv.onclick = async () => {
-      keep(); if (!file) return toast('Choose the file', true);
-      busy = true; draw();
+      keep(); if (!files.length) return toast('Choose the file(s)', true);
+      const h = g0 ? g0.head : null;
+      const meta = h ? { type: h.type, typeLabel: h.typeLabel || docTypeOf(h.type).t, number: h.number || '', expiry: h.expiry || '', siteId: h.siteId || '', notes: h.notes || '' }
+        : { type: f.type, typeLabel: docTypeOf(f.type).t, number: f.number, expiry: f.expiry, siteId: f.siteId, notes: f.notes };
+      const group = g0 ? g0.key : newGroupId(); const start = g0 ? Math.max(...g0.docs.map((d) => d.page || 1)) : 0;
+      busy = true; draw(); let done = 0;
       try {
-        await uploadDocFile(['svcPortals', link.id, 'docs'], { type: f.type, typeLabel: docTypeOf(f.type).t, number: f.number, expiry: f.expiry, siteId: f.siteId, notes: f.notes, by: 'staff', byName: S.me.name || '', clientId, verified: true, verifiedBy: S.me.name || '' },
-          file, (p) => { const e = $('#dm-prog', o); if (e) e.textContent = `Uploading… ${Math.round(p * 100)}%`; });
-        if (f.type === 'tl') await syncTradeLicence(clientId, f.number, f.expiry);
-        file = null; add = false; Object.assign(f, { number: '', expiry: '', notes: '' }); toast('Document uploaded');
-      } catch (e) { toast(friendly(e), true); }
+        for (let k = 0; k < files.length; k++) {
+          await uploadDocFile(['svcPortals', link.id, 'docs'], { ...meta, group, page: start + k + 1, by: 'staff', byName: S.me.name || '', clientId, verified: true, verifiedBy: S.me.name || '' },
+            files[k], (p) => { const e = $('#dm-prog', o); if (e) e.textContent = `File ${k + 1} of ${files.length}… ${Math.round(p * 100)}%`; });
+          done++;
+        }
+        if (!g0 && f.type === 'tl') await syncTradeLicence(clientId, f.number, f.expiry);
+        files = []; add = false; into = null; Object.assign(f, { number: '', expiry: '', notes: '' }); toast('Uploaded');
+      } catch (e) { files = files.slice(done); toast(friendly(e), true); }
       busy = false; draw();
     };
-    const find = (id) => l.find((x) => x.id === id);
+    const all = clientDocs(clientId); const find = (id) => all.find((x) => x.id === id); const grp = (k) => groups.find((g) => g.key === k);
     $$('[data-dv]', o).forEach((b) => (b.onclick = () => { const d = find(b.dataset.dv); openDocFile(base(d), d).catch((e) => toast(friendly(e), true)); }));
     $$('[data-dl]', o).forEach((b) => (b.onclick = () => { const d = find(b.dataset.dl); openDocFile(base(d), d, true).catch((e) => toast(friendly(e), true)); }));
     $$('[data-dok]', o).forEach((b) => (b.onclick = async () => {
-      const d = find(b.dataset.dok); b.disabled = true;
-      try { await updateDoc(doc(db, ...base(d), d.id), { verified: true, verifiedBy: S.me.name || '', verifiedAt: serverTimestamp() }); if (d.type === 'tl') await syncTradeLicence(clientId, d.number, d.expiry); toast('Marked as checked'); }
-      catch (e) { toast(friendly(e), true); b.disabled = false; }
+      const g = grp(b.dataset.dok); b.disabled = true;
+      try {
+        for (const d of g.docs) await updateDoc(doc(db, ...base(d), d.id), { verified: true, verifiedBy: S.me.name || '', verifiedAt: serverTimestamp() });
+        if (g.head.type === 'tl') await syncTradeLicence(clientId, g.head.number, g.head.expiry);
+        toast('Marked as checked');
+      } catch (e) { toast(friendly(e), true); b.disabled = false; }
     }));
-    $$('[data-ddel]', o).forEach((b) => (b.onclick = async () => { const d = find(b.dataset.ddel); if (!confirm('Delete this document?')) return; try { await deleteDocFile(base(d), d); toast('Deleted'); } catch (e) { toast(friendly(e), true); } }));
+    $$('[data-ddel]', o).forEach((b) => (b.onclick = async () => {
+      const g = grp(b.dataset.ddel); if (!confirm(`Delete this document${g.docs.length > 1 ? ` and all ${g.docs.length} files` : ''}?`)) return;
+      try { for (const d of g.docs) await deleteDocFile(base(d), d); toast('Deleted'); } catch (e) { toast(friendly(e), true); }
+    }));
   };
   o._redraw = () => { if (!busy && !add) draw(); };
   draw();

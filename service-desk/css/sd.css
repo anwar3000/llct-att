@@ -558,3 +558,23 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .setgrid > .setopts { grid-column: 1 / -1; order: 3; }
 .setgrid > .setlinks { order: 2; }
 @media (max-width: 900px) { .setgrid { grid-template-columns: 1fr; } }
+/* documents with several files */
+.dic small { display: block; font-size: 9px; font-weight: 700; margin-top: -2px; }
+.dic { flex-direction: column; line-height: 1.1; text-align: center; }
+.fchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.fchip { border: 1px solid #C9D6F3; background: var(--ribbon-soft); color: var(--ribbon); border-radius: 8px; padding: 4px 9px; font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip.off { background: #F4F6FA; color: var(--steel); border-color: #E1E5EC; cursor: default; }
+.fpair { display: inline-flex; } .fpair .fchip:first-child { border-radius: 8px 0 0 8px; } .fpair .fchip.dl { border-left: 0; border-radius: 0 8px 8px 0; padding: 4px 7px; }
+.flist2 { margin-top: 10px; border: 1px solid #D5DAE3; border-radius: 10px; background: #fff; max-height: 260px; overflow: auto; }
+.frow { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-top: 1px solid #EDF0F5; font-size: 13.5px; }
+.frow:first-child { border-top: 0; }
+.fpg { width: 22px; height: 22px; border-radius: 6px; background: var(--ribbon-soft); color: var(--ribbon); font-weight: 750; font-size: 12px; display: grid; place-items: center; flex: none; }
+.fnm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.frow button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #D5DAE3; background: #fff; cursor: pointer; flex: none; }
+.frow button[data-frm] { color: var(--trim); border-color: #F0C9C5; }
+.intohead { padding: 2px 0 6px; font-size: 14.5px; }
+@media (max-width: 560px) {
+  .docrow { flex-wrap: wrap; align-items: flex-start; }
+  .docrow .dtx { flex: 1 1 calc(100% - 60px); }
+  .docrow .dact { flex: 1 1 100%; justify-content: flex-end; padding-top: 4px; border-top: 1px dashed #E1E5EC; }
+}

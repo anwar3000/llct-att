@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, DOC_MAX, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=26';
+} from './sd.js?v=28';
 
 window.__sdStarted = true;
 
@@ -116,7 +116,7 @@ function startPublic() {
 const openCount = () => S.tickets.filter((t) => !['completed', 'closed', 'cancelled'].includes(t.status)).length;
 function tabsHtml() {
   return `<div class="tabs" id="tabs" role="tablist"><button role="tab" data-tab="new" class="${S.tab === 'new' ? 'on' : ''}">New request</button>
-    <button role="tab" data-tab="list" class="${S.tab === 'list' ? 'on' : ''}">My requests${S.tickets.length ? `<span class="n">${openCount() || S.tickets.length}</span>` : ''}</button>${S.portal && !S.portal.walkin ? `<button role="tab" data-tab="docs" class="${S.tab === 'docs' ? 'on' : ''}">Documents${docAlerts() ? `<span class="n" style="background:var(--trim)">${docAlerts()}</span>` : S.docs.length ? `<span class="n" style="background:var(--steel)">${S.docs.length}</span>` : ''}</button>` : ''}</div>`;
+    <button role="tab" data-tab="list" class="${S.tab === 'list' ? 'on' : ''}">My requests${S.tickets.length ? `<span class="n">${openCount() || S.tickets.length}</span>` : ''}</button>${S.portal && !S.portal.walkin ? `<button role="tab" data-tab="docs" class="${S.tab === 'docs' ? 'on' : ''}">Documents${docAlerts() ? `<span class="n" style="background:var(--trim)">${docAlerts()}</span>` : S.docs.length ? `<span class="n" style="background:var(--steel)">${groupDocs(S.docs).length}</span>` : ''}</button>` : ''}</div>`;
 }
 function renderTabs() { const t = $('#tabs'); if (t) { t.outerHTML = tabsHtml(); bindTabs(); } }
 function bindTabs() { $$('[data-tab]').forEach((b) => (b.onclick = () => { readForm(); S.tab = b.dataset.tab; S.sent = null; render(); window.scrollTo(0, 0); })); }
@@ -144,59 +144,80 @@ function footHtml() {
 
 // ------------------------------------------------------------------ documents
 const docBase = () => ['svcPortals', token, 'docs'];
-const docAlerts = () => (S.docs || []).filter((d) => ['bad', 'warn'].includes(expiryStatus(d.expiry).tone)).length;
+const docAlerts = () => groupDocs(S.docs).filter((g) => ['bad', 'warn'].includes(expiryStatus(g.head.expiry).tone)).length;
+const fileIcon = (d) => (/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE');
 function docsHtml() {
   const f = S.docForm || (S.docForm = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' });
-  const ty = docTypeOf(f.type); const sites = S.portal.sites || [];
-  const list = S.docs || [];
+  const files = S.docFiles || (S.docFiles = []);
+  const groups = groupDocs(S.docs);
+  const into = S.docAddTo ? groups.find((g) => g.key === S.docAddTo) : null; // adding pages to an existing document
+  const ty = docTypeOf(into ? into.head.type : f.type); const sites = S.portal.sites || [];
+  const total = files.reduce((n, x) => n + x.size, 0);
   return `<div class="sheet docsheet">
-    <div class="dochead"><div><h2>Your documents</h2><p class="small muted">Trade licence, SIRA certificate and NOC, approved drawings and other papers for your sites. Our team is reminded before anything expires.</p></div>
+    <div class="dochead"><div><h2>Your documents</h2><p class="small muted">Trade licence, SIRA certificate and NOC, approved drawings and other papers for your sites. A document can have several files — e.g. every page of a drawing. Our team is reminded before anything expires.</p></div>
       <button type="button" class="btn primary" id="dn-open">${S.docAdd ? 'Close' : '+ Upload document'}</button></div>
     ${S.docAdd ? `<div class="docform">
-      <div class="docgrid">
+      ${into ? `<div class="intohead">Adding files to <b>${esc(ty.t)}</b>${into.head.number ? ` · ${esc(into.head.number)}` : ''} <span class="muted">(${into.docs.length} file${into.docs.length === 1 ? '' : 's'} already)</span></div>` : `<div class="docgrid">
         <label class="field"><span>Document type <b>*</b></span><select id="dn-type">${DOC_TYPES.map((x) => `<option value="${x.k}" ${x.k === f.type ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>
         <label class="field"><span>${esc(ty.num)}</span><input id="dn-num" value="${esc(f.number)}" placeholder="e.g. ${f.type === 'tl' ? '123456' : 'ABC-2026-001'}"></label>
         <label class="field"><span>Expiry date${ty.exp ? '' : ' (if any)'}</span><input type="date" id="dn-exp" value="${esc(f.expiry)}"></label>
         ${sites.length > 1 ? `<label class="field"><span>For site</span><select id="dn-site"><option value="">All sites</option>${sites.map((x) => `<option value="${esc(x.id)}" ${x.id === f.siteId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
       </div>
-      <label class="field" style="margin-top:10px"><span>Notes (optional)</span><input id="dn-notes" value="${esc(f.notes)}" placeholder="e.g. Renewed, issued by Dubai Economy"></label>
-      <div class="docfile"><label class="btn"><span id="dn-fl">${S.docFile ? esc(S.docFile.name) : 'Choose file (PDF or photo)'}</span><input type="file" id="dn-file" hidden accept="application/pdf,image/*,.dwg,.dxf,.doc,.docx,.xls,.xlsx"></label>
-        <span class="small muted">${S.docFile ? fmtSize(S.docFile.size) : 'Up to 8 MB. A clear photo of the document is fine.'}</span></div>
-      <div class="row" style="margin-top:12px;justify-content:flex-end"><span class="small muted grow" id="dn-prog"></span><button type="button" class="btn primary" id="dn-save" ${S.docBusy ? 'disabled' : ''}>${S.docBusy ? 'Uploading…' : 'Upload'}</button></div>
+      <label class="field" style="margin-top:10px"><span>Notes (optional)</span><input id="dn-notes" value="${esc(f.notes)}" placeholder="e.g. Renewed, issued by Dubai Economy"></label>`}
+      <div class="docfile"><label class="btn"><span>${files.length ? '+ Add more files' : 'Choose files (PDF or photos)'}</span><input type="file" id="dn-file" hidden multiple accept="application/pdf,image/*,.dwg,.dxf,.doc,.docx,.xls,.xlsx"></label>
+        <span class="small muted">${files.length ? `${files.length} file${files.length === 1 ? '' : 's'} · ${fmtSize(total)}` : 'Select several at once for multi-page documents. Up to 8 MB each, 20 files.'}</span></div>
+      ${files.length ? `<div class="flist2">${files.map((x, k) => `<div class="frow"><span class="fpg">${k + 1}</span><span class="fnm">${esc(x.name)}</span><span class="small muted">${fmtSize(x.size)}</span>${x.size > DOC_MAX && !/^image\//.test(x.type) ? '<span class="xp bad small">too big</span>' : ''}
+          <button type="button" data-fup="${k}" ${k === 0 ? 'disabled' : ''} aria-label="Move up">↑</button><button type="button" data-frm="${k}" aria-label="Remove">✕</button></div>`).join('')}</div>` : ''}
+      <div class="row" style="margin-top:12px;justify-content:flex-end"><span class="small muted grow" id="dn-prog"></span><button type="button" class="btn primary" id="dn-save" ${S.docBusy || !files.length ? 'disabled' : ''}>${S.docBusy ? 'Uploading…' : `Upload${files.length > 1 ? ` ${files.length} files` : ''}`}</button></div>
     </div>` : ''}
-    ${list.length ? `<div class="doclist">${list.map((d) => {
-      const x = expiryStatus(d.expiry); const site = sites.find((s) => s.id === d.siteId);
-      return `<div class="docrow ${x.tone}"><div class="dic">${/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE'}</div>
+    ${groups.length ? `<div class="doclist">${groups.map((g) => {
+      const d = g.head, x = expiryStatus(d.expiry); const site = sites.find((s2) => s2.id === d.siteId); const n = g.docs.length;
+      return `<div class="docrow ${x.tone}"><div class="dic">${n > 1 ? `${n}<small>files</small>` : fileIcon(d)}</div>
         <div class="dtx"><b>${esc(docTypeOf(d.type).t)}</b>${d.number ? ` <span class="muted">· ${esc(d.number)}</span>` : ''}
-          <div class="small">${x.text ? `<span class="xp ${x.tone}">${esc(x.text)}</span>` : '<span class="muted">No expiry</span>'}${site ? ` · ${esc(site.name)}` : ''}${d.verified ? ' · <span style="color:var(--success);font-weight:650">✓ Checked by Leaders Line</span>' : ''}</div>
-          <div class="small muted">${esc(d.name || '')}${d.size ? ` · ${fmtSize(d.size)}` : ''}${d.complete === false ? ' · <span style="color:var(--warning)">upload not finished</span>' : ''}</div></div>
-        <div class="dact">${d.complete === false ? '' : `<button type="button" class="btn sm" data-dv="${esc(d.id)}">View</button>`}${!d.verified && d.by === 'client' ? `<button type="button" class="btn sm bad" data-dd="${esc(d.id)}" aria-label="Delete">✕</button>` : ''}</div></div>`;
+          <div class="small">${x.text ? `<span class="xp ${x.tone}">${esc(x.text)}</span>` : '<span class="muted">No expiry</span>'}${site ? ` · ${esc(site.name)}` : ''}${g.verified ? ' · <span style="color:var(--success);font-weight:650">✓ Checked by Leaders Line</span>' : ''}</div>
+          <div class="fchips">${g.docs.map((dd, k) => dd.complete === false ? `<span class="fchip off">${n > 1 ? 'Page ' + (dd.page || k + 1) : esc(dd.name)} · uploading…</span>` : `<button type="button" class="fchip" data-dv="${esc(dd.id)}" title="${esc(dd.name || '')}">${fileIcon(dd)} ${n > 1 ? `Page ${dd.page || k + 1}` : esc(dd.name || 'View')}</button>`).join('')}
+            <span class="small muted">${fmtSize(g.size)}</span></div></div>
+        <div class="dact"><button type="button" class="btn sm" data-dadd="${esc(g.key)}" title="Add more files to this document">+ Files</button>${!g.verified && d.by === 'client' ? `<button type="button" class="btn sm bad" data-dd="${esc(g.key)}" aria-label="Delete">✕</button>` : ''}</div></div>`;
     }).join('')}</div>` : `<p class="muted" style="padding:18px 4px">No documents yet. Upload your trade licence first — it takes a minute.</p>`}
   </div>`;
 }
 function bindDocs() {
-  const f = S.docForm;
+  const f = S.docForm; S.docFiles = S.docFiles || [];
   const keep = () => { if (!$('#dn-type')) return; f.type = $('#dn-type').value; f.number = $('#dn-num').value.trim(); f.expiry = $('#dn-exp').value; f.notes = $('#dn-notes').value.trim(); f.siteId = $('#dn-site') ? $('#dn-site').value : ''; };
-  $('#dn-open').onclick = () => { keep(); S.docAdd = !S.docAdd; render(); };
+  $('#dn-open').onclick = () => { keep(); S.docAdd = !S.docAdd; S.docAddTo = null; if (!S.docAdd) S.docFiles = []; render(); };
   if ($('#dn-type')) $('#dn-type').onchange = () => { keep(); render(); };
-  const fi = $('#dn-file'); if (fi) fi.onchange = () => { keep(); S.docFile = fi.files[0] || null; render(); };
+  const fi = $('#dn-file'); if (fi) fi.onchange = () => { keep(); S.docFiles = [...S.docFiles, ...fi.files].slice(0, 20); render(); };
+  $$('[data-frm]').forEach((b) => (b.onclick = () => { keep(); S.docFiles.splice(+b.dataset.frm, 1); render(); }));
+  $$('[data-fup]').forEach((b) => (b.onclick = () => { keep(); const k = +b.dataset.fup; const l = S.docFiles; [l[k - 1], l[k]] = [l[k], l[k - 1]]; render(); }));
+  $$('[data-dadd]').forEach((b) => (b.onclick = () => { S.docAdd = true; S.docAddTo = b.dataset.dadd; S.docFiles = []; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
   const sv = $('#dn-save');
   if (sv) sv.onclick = async () => {
     keep();
-    if (!S.docFile) return toast('Please choose the file', true);
-    if (docTypeOf(f.type).exp && f.type !== 'other' && !f.expiry) { if (!confirm('No expiry date entered. Upload anyway?')) return; }
+    const files = S.docFiles; if (!files.length) return toast('Please choose the file(s)', true);
+    const g = S.docAddTo ? groupDocs(S.docs).find((x) => x.key === S.docAddTo) : null;
+    if (!g && docTypeOf(f.type).exp && f.type !== 'other' && !f.expiry) { if (!confirm('No expiry date entered. Upload anyway?')) return; }
+    const h = g ? g.head : null;
+    const meta = h ? { type: h.type, typeLabel: h.typeLabel || docTypeOf(h.type).t, number: h.number || '', expiry: h.expiry || '', siteId: h.siteId || '', notes: h.notes || '' }
+      : { type: f.type, typeLabel: docTypeOf(f.type).t, number: f.number, expiry: f.expiry, siteId: f.siteId, notes: f.notes };
+    const group = g ? g.key : newGroupId();
+    const start = g ? Math.max(...g.docs.map((d) => d.page || 1)) : 0;
     S.docBusy = true; render();
+    let done = 0;
     try {
-      await uploadDocFile(docBase(), { type: f.type, typeLabel: docTypeOf(f.type).t, number: f.number, expiry: f.expiry, siteId: f.siteId, notes: f.notes, by: 'client', byName: S.form.contactName || '', clientId: S.portal.clientId || '' },
-        S.docFile, (p) => { const e = $('#dn-prog'); if (e) e.textContent = `Uploading… ${Math.round(p * 100)}%`; });
-      S.docFile = null; S.docAdd = false; S.docForm = null; toast('Document uploaded — thank you');
-    } catch (e) { toast(friendly(e), true); }
+      for (let k = 0; k < files.length; k++) {
+        await uploadDocFile(docBase(), { ...meta, group, page: start + k + 1, by: 'client', byName: S.form.contactName || '', clientId: S.portal.clientId || '' }, files[k],
+          (p) => { const e = $('#dn-prog'); if (e) e.textContent = `Uploading file ${k + 1} of ${files.length}… ${Math.round(p * 100)}%`; });
+        done++;
+      }
+      S.docFiles = []; S.docAdd = false; S.docAddTo = null; S.docForm = null; toast(files.length > 1 ? `${files.length} files uploaded — thank you` : 'Document uploaded — thank you');
+    } catch (e) { S.docFiles = S.docFiles.slice(done); toast(`${done ? done + ' uploaded; ' : ''}${friendly(e)}`, true); }
     S.docBusy = false; render();
   };
   $$('[data-dv]').forEach((b) => (b.onclick = () => { const d = S.docs.find((x) => x.id === b.dataset.dv); if (d) openDocFile(docBase(), d).catch((e) => toast(friendly(e), true)); }));
   $$('[data-dd]').forEach((b) => (b.onclick = async () => {
-    const d = S.docs.find((x) => x.id === b.dataset.dd); if (!d || !confirm(`Delete ${docTypeOf(d.type).t}${d.number ? ' ' + d.number : ''}?`)) return;
-    try { await deleteDocFile(docBase(), d); toast('Deleted'); } catch (e) { toast(friendly(e), true); }
+    const g = groupDocs(S.docs).find((x) => x.key === b.dataset.dd); if (!g) return;
+    if (!confirm(`Delete ${docTypeOf(g.head.type).t}${g.head.number ? ' ' + g.head.number : ''}${g.docs.length > 1 ? ` (all ${g.docs.length} files)` : ''}?`)) return;
+    try { for (const d of g.docs) await deleteDocFile(docBase(), d); toast('Deleted'); } catch (e) { toast(friendly(e), true); }
   }));
 }
 
