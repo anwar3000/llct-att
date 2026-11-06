@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, MAX_DAILY_VIOLATIONS, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerDayTimes, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, MAX_DAILY_VIOLATIONS, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerDayTimes, maxTravelMins, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   fmtMoney, tzLabel, atTz, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -18,7 +18,7 @@ export async function monthlySummaryReport(month, onlyIds = null) {
   const users = store.employees.filter((u) => (onlyIds ? onlyIds.includes(u.id) : u.active || sessions.some((s) => s.employeeId === u.id)));
   const rows = users.map((u) => {
     const s = employeeSummary(u, sessions, offs, from, to);
-    // short days on the total time (first check-in to last check-out, incl. travel between sites)
+    // short days on the total time (work + travel between sites, each move up to the travel limit)
     const short = s.days.filter((d) => d.sessions.length && isShortDay(d.date, Math.max(d.span, d.minutes), d.sessions.some((x) => !x.checkOut))).length;
     return [u.name, u.loginId, u.designation, s.workedDays, short, s.offDays, s.absentDays, fmtMins(s.minutes), fmtMins(s.travel), fmtMins(s.span), hoursDec(s.minutes), hoursDec(s.span),
       s.workedDays ? fmtMins(Math.round(s.span / s.workedDays)) : '0:00', s.visits, s.sites.join(', '), s.flagged, s.avgStart,
@@ -325,7 +325,7 @@ export function filterReport(rep, q) {
 // ================================================================== external workers
 // Two times per worker per day:
 //   Work  = time on site (entries merged, never counted twice)
-//   Total = first entry to last exit — work plus the travel between sites. Short days and pay use the total.
+//   Total = work + travel between sites (each move counted up to the travel limit in settings). Short days and pay use the total.
 const entryEnd = (e) => e.checkOut || new Date();
 const workerInfo = (id, e) => {
   const w = store.worker(id);
@@ -432,7 +432,7 @@ export async function workerRegisterReport(month) {
   cols.push('Days', 'Short', 'Work h', 'Travel h', 'Total h');
   return {
     title: `External workers register — ${fmtMonth(month)}`,
-    subtitle: `Numbers are total hours each day (first in to last out, incl. travel between sites) · * = short day (under ${minDayMins() / 60} h) · Work h = on site only`,
+    subtitle: `Numbers are total hours each day (work + travel between sites, up to ${maxTravelMins() || 'any'} min per move) · * = short day (under ${minDayMins() / 60} h) · Work h = on site only`,
     filename: `workers-register-${from.slice(0, 7)}`,
     orientation: 'landscape',
     pdfFont: 6,
@@ -503,7 +503,7 @@ export async function workerPayReport(from, to, onlyCompany = '') {
 
   return {
     title: `External workers — days${admin ? ' & pay' : ''}${onlyCompany ? ` — ${onlyCompany}` : ''}`,
-    subtitle: `${from} to ${to} · minimum ${minM / 60} h per day on total time (first in to last out, incl. travel between sites) · * / SHORT = below minimum${admin ? ` · amount AED ${Math.round(gAmt * 100) / 100}` : ''}`,
+    subtitle: `${from} to ${to} · minimum ${minM / 60} h per day on total time (work + travel between sites, up to ${maxTravelMins() || 'any'} min per move) · * / SHORT = below minimum${admin ? ` · amount AED ${Math.round(gAmt * 100) / 100}` : ''}`,
     filename: `external-workers-days${admin ? '-pay' : ''}-${from}-to-${to}`,
     orientation: 'landscape',
     pdfFont: dates.length > 16 ? 6 : 7.5,

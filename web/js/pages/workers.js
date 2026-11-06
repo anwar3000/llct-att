@@ -304,7 +304,7 @@ function detail(el, id, { setHeader }) {
     el.querySelector('#m-lbl').textContent = fmtMonth(month);
     el.querySelector('#m-next').disabled = monthKey(month) >= monthKey(new Date());
     const list = entries || [];
-    // Work = on site; total = first in to last out each day (incl. travel between sites). Short days use the total.
+    // Work = on site; total = work + travel between sites (capped per move). Short days use the total.
     const times = workerDayTimes(list);
     const T = (d) => times.get(`${id}|${d}`) || { work: 0, total: 0, travel: 0 };
     const dates = [...new Set(list.map((e) => e.date))];
@@ -323,7 +323,7 @@ function detail(el, id, { setHeader }) {
       ${list.length ? [...list].reverse().map((e) => `<tr class="${shortDays.includes(e.date) ? 'short-day' : ''}"><td class="nowrap">${fmtDay(e.inLocal)}${shortDays.includes(e.date) ? ` <span class="pill red" title="Day total ${fmtMins(dayTot.get(e.date))} — below ${minDayMins() / 60} h">Short day</span>` : ''}</td><td><b>${esc(e.siteName)}</b></td>
         <td>${esc(e.employeeName)}</td><td>${fmtTime(e.inLocal)}</td><td>${e.checkOut ? fmtTime(e.outLocal) : pill('On site', 'green', true)}</td>
         <td class="num"><b>${fmtMins(Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000))}</b>${lastOfDay.has(e.id) && list.filter((x) => x.date === e.date).length > 1
-          ? `<div class="small muted nowrap" title="First in to last out, incl. travel between sites">day ${fmtMins(T(e.date).work)} work · ${fmtMins(T(e.date).total)} total</div>` : ''}</td>
+          ? `<div class="small muted nowrap" title="Work + travel between sites (each move up to the travel limit)">day ${fmtMins(T(e.date).work)} work · ${fmtMins(T(e.date).total)} total</div>` : ''}</td>
         <td class="right nowrap">${e.open ? `<button class="btn sm ghost" data-close="${e.id}">End</button>` : ''}
           ${isAdmin() ? `<button class="btn sm ghost icon" data-edit-e="${e.id}" title="Edit times">${icon('edit', 14)}</button>` : ''}
           <button class="btn sm ghost icon" data-del="${e.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')

@@ -569,6 +569,31 @@ export const isShortDay = (date, mins, stillOpen = false) => mins > 0 && mins < 
  * Per worker per day: on-site work (overlapping entries merged), total time from the first entry to the last exit
  * (work + travel between sites) and the travel in between. Key `${workerId}|${date}`.
  */
+export const maxTravelMins = () => {
+  const v = store.settings?.maxTravelMins;
+  return typeof v === 'number' && v >= 0 ? v : 60;
+};
+/**
+ * Work and total time for one person's day from [startMs, endMs] intervals: overlaps are merged (work),
+ * each gap between two sites counts as travel up to the travel limit, total = work + travel.
+ */
+export function dayTimes(iv) {
+  if (!iv.length) return { work: 0, travel: 0, total: 0 };
+  iv = [...iv].sort((a, b) => a[0] - b[0]);
+  const cap = maxTravelMins();
+  let work = 0, travel = 0, [cs, ce] = iv[0];
+  for (const [s, e] of iv.slice(1)) {
+    if (s <= ce) { ce = Math.max(ce, e); continue; }
+    work += ce - cs;
+    const gap = (s - ce) / 60000;
+    travel += cap > 0 ? Math.min(gap, cap) : gap;
+    cs = s; ce = e;
+  }
+  work += ce - cs;
+  const w = Math.max(0, Math.round(work / 60000));
+  const t = Math.round(travel);
+  return { work: w, travel: t, total: w + t };
+}
 export function workerDayTimes(entries) {
   const by = new Map();
   const now = Date.now();
@@ -580,15 +605,8 @@ export function workerDayTimes(entries) {
   const out = new Map();
   for (const [k, iv] of by) {
     iv.sort((a, b) => a[0] - b[0]);
-    let work = 0, [cs, ce] = iv[0];
-    for (const [s, e] of iv.slice(1)) {
-      if (s <= ce) ce = Math.max(ce, e); else { work += ce - cs; cs = s; ce = e; }
-    }
-    work += ce - cs;
-    const first = iv[0][0], last = Math.max(...iv.map((x) => x[1]));
     const lastE = iv.reduce((m, x) => (x[1] >= m[1] ? x : m), iv[0])[3];
-    const w = Math.max(0, Math.round(work / 60000));
-    const total = Math.max(w, Math.round((last - first) / 60000));
+    const { work: w, total } = dayTimes(iv);
     const sites = [];
     iv.forEach((x) => { if (x[2] && sites[sites.length - 1] !== x[2]) sites.push(x[2]); });
     out.set(k, { work: w, total, travel: total - w, firstEntry: iv[0][3], lastEntry: lastE, open: iv.some((x) => !x[3].checkOut), sites });
@@ -623,7 +641,7 @@ export const ROLE_LABEL = { admin: 'Admin', manager: 'Manager', employee: 'Emplo
 export const store = {
   me: null, users: [], sites: [], projects: [], open: [], today: [], schedulesToday: [],
   pendingPetty: [], pendingOff: [], monthOff: [], petty: [], alerts: [], loaded: false, error: null,
-  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8, tripRatePerKm: 0 }, rates: {}, _tToday: [], _tActive: [], payments: [],
+  workers: [], workerLocks: [], idInfo: [], idFiles: [], _wToday: [], _wOpen: [], requests: [], settings: { minDailyHours: 8, tripRatePerKm: 0, maxTravelMins: 60 }, rates: {}, _tToday: [], _tActive: [], payments: [],
   _subs: [], _listeners: new Set(), _day: null, errors: {},
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); },
   emit() { this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); },
@@ -660,6 +678,8 @@ export const store = {
       this.settings = {
         minDailyHours: typeof m.minDailyHours === 'number' && m.minDailyHours > 0 ? m.minDailyHours : 8,
         tripRatePerKm: typeof m.tripRatePerKm === 'number' && m.tripRatePerKm >= 0 ? m.tripRatePerKm : 0,
+        // most travel counted for one gap between two sites (0 = no limit)
+        maxTravelMins: typeof m.maxTravelMins === 'number' && m.maxTravelMins >= 0 ? m.maxTravelMins : 60,
       };
       this.emit();
     }, () => {}));

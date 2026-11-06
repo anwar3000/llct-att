@@ -1,5 +1,5 @@
 // Calculations shared by pages and reports.
-import { sessionMinutes, sessionFlagged, isoWeekday } from './fb.js';
+import { sessionMinutes, sessionFlagged, isoWeekday, dayTimes } from './fb.js';
 import { dateKey, parseKey, addDays } from './util.js';
 
 export function pettySummary(txns) {
@@ -39,8 +39,8 @@ export function employeeDays(user, sessions, offDays, from, to) {
     out.push({
       date: k, day: d, kind, sessions: s,
       minutes: s.reduce((a, x) => a + sessionMinutes(x, now), 0),
-      // first check-in to last check-out — work time plus the travel between sites
-      span: s.length ? Math.max(0, Math.round((Math.max(...s.map((x) => (x.checkOut || now).getTime())) - s[0].checkIn.getTime()) / 60000)) : 0,
+      // work time plus the travel between sites (each gap up to the travel limit)
+      span: dayTimes(s.map((x) => [x.checkIn.getTime(), (x.checkOut || now).getTime()])).total,
       flagged: s.some(sessionFlagged),
       offReason: isOff ? (approved.has(k) ? 'Approved leave' : 'Weekly off') : '',
     });

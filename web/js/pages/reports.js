@@ -35,7 +35,13 @@ export function mount(el, _p, { setHeader }) {
       <b>Minimum working hours per day</b>
       <input id="min-h" type="number" min="1" max="24" step="0.5" value="${store.settings.minDailyHours}" style="width:90px">
       <button class="btn sm" id="min-save">Save</button>
-      <span class="small muted">Days below this are marked as <b style="color:#b23535">short</b> on attendance sheets and reports (staff and external workers).</span>
+      <span class="small muted">Days below this are marked as <b style="color:#b23535">short</b> on attendance sheets and reports (staff and external workers). Measured on total time incl. travel.</span>
+    </div>
+    <div class="card card-pad row" style="margin-bottom:14px;gap:12px;flex-wrap:wrap">
+      <b>Travel between sites — count up to</b>
+      <input id="max-t" type="number" min="0" max="600" step="5" value="${store.settings.maxTravelMins ?? 60}" style="width:90px"> <span>minutes per move</span>
+      <button class="btn sm" id="max-t-save">Save</button>
+      <span class="small muted">When someone finishes one site and goes to the next, the gap counts as travel in the <b>total time</b>, up to this limit (a longer gap, like lunch, is cut to it). 0 = no limit.</span>
     </div>` : ''}
     <div class="card card-pad">
       <div class="searchbar">${icon('search', 18)}<input id="rq" placeholder="Search reports by keywords — employee, site, project, category, note…  (e.g. “Rahul fuel”, “Marina”, “absent”)"></div>
@@ -75,6 +81,11 @@ export function mount(el, _p, { setHeader }) {
     const v = Number(el.querySelector('#min-h').value);
     if (!(v > 0 && v <= 24)) { toast('Enter hours between 1 and 24', true); return; }
     try { await saveSettings({ minDailyHours: v }); toast(`Minimum set to ${v} h per day`); } catch (e) { toast(friendlyError(e), true); }
+  });
+  el.querySelector('#max-t-save')?.addEventListener('click', async () => {
+    const v = Number(el.querySelector('#max-t').value);
+    if (!(v >= 0 && v <= 600)) { toast('Enter minutes between 0 and 600', true); return; }
+    try { await saveSettings({ maxTravelMins: v }); toast(v ? `Travel counted up to ${v} min per move` : 'Travel between sites counted in full'); } catch (e) { toast(friendlyError(e), true); }
   });
   const rq = el.querySelector('#rq');
   rq.oninput = () => { query = rq.value; };

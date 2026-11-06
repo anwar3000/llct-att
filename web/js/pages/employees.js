@@ -292,7 +292,7 @@ function detail(root, id, { setHeader }) {
     </div>
     <div class="grid kpis">
       ${k('Work time (on site)', sum ? fmtMins(sum.minutes) : '…', sum ? `Avg ${fmtMins(sum.avgMinutes)} / day` : '')}
-      ${k('Total incl. travel', sum ? fmtMins(sum.span) : '…', sum ? `First in → last out · travel ${fmtMins(sum.travel)}` : '')}
+      ${k('Total incl. travel', sum ? fmtMins(sum.span) : '…', sum ? `Work + travel between sites (${fmtMins(sum.travel)})` : '')}
       ${k('Days worked', sum ? sum.workedDays : '…', sum ? `${sum.visits} site visits` : '')}
       ${k('Off days', sum ? `${sum.offDays} / ${u.monthlyOffQuota}` : '…', u.weeklyOffDays.length ? `Weekly: ${u.weeklyOffDays.map((w) => WEEKDAYS[w]).join(', ')}` : 'Flexible')}
       ${k('Absent', sum ? sum.absentDays : '…', sum && sum.flagged ? `${sum.flagged} flagged check-ins` : 'No flags')}
