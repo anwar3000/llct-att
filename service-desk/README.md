@@ -42,3 +42,27 @@ Photos from clients are compressed (~150 KB) and stored inside the ticket — no
 ## Notes
 - Popups appear while the desk page / app is open. Background push notifications to phones need Firebase Cloud Messaging + Cloud Functions (Blaze plan) — can be added later.
 - Clients and sites come from LLCT Invoicing (`inv_clients` and their sites). Add GPS to a site there and it reaches the client's link and the technicians' navigation automatically.
+
+## Customer documents on this server (files.php)
+
+Documents clients upload (trade licence, SIRA, SPC drawings…) are saved on this server in
+
+    files/<Customer name>/<Document type>/<id>_<file name>
+
+when `files.php` can run here (PHP). Without PHP they are kept in Firestore instead (8 MB per file).
+
+Setup on the server (once):
+
+    sudo apt install -y php libapache2-mod-php php-curl     # if PHP is not installed yet
+    cd /var/www/html/<this folder>                            # e.g. the support.llct.ae folder
+    sudo mkdir -p files && sudo chown -R www-data:www-data files && sudo chmod 775 files
+    sudo systemctl restart apache2
+
+Check: open `https://<this site>/files.php?a=ping` → `{"ok":true,…,"writable":true}`,
+and `https://<this site>/files/` must answer **403 Forbidden** (the folder is never served directly).
+If `/files/` is not 403, Apache ignores .htaccess here: add `AllowOverride All` for this folder in the site config.
+
+Up to 25 MB per file (`.user.ini` / `.htaccess` raise PHP's upload limit; with php-fpm restart it after the first copy).
+Access is checked against Firestore with the caller's own rights (the client's link, or the staff member's sign-in),
+so the Firestore rules decide who can open what. Optional `config.php`:
+`<?php return ['apiKey' => '…', 'projectId' => '…'];` — otherwise read from the web app's config automatically.

@@ -1,0 +1,22 @@
+# LLCT Service Desk
+Options -Indexes
+
+# Allow document uploads up to 25 MB when PHP runs as an Apache module
+<IfModule mod_php.c>
+  php_value upload_max_filesize 26M
+  php_value post_max_size 28M
+</IfModule>
+<IfModule mod_php7.c>
+  php_value upload_max_filesize 26M
+  php_value post_max_size 28M
+</IfModule>
+
+# Never serve stored document files or settings directly
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^files/ - [F,L]
+  RewriteRule ^config\.php\.example$ - [F,L]
+</IfModule>
+<FilesMatch "^\.(user\.ini|htaccess|fbconfig\.json)$">
+  Require all denied
+</FilesMatch>

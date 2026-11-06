@@ -442,7 +442,8 @@ service cloud.firestore {
         allow read: if isActive() || svcPortalOn(token);
         allow create: if isActive() || (svcPortalOn(token) && request.resource.data.by == 'client'
                         && request.resource.data.get('verified', false) == false
-                        && request.resource.data.size <= 8388608 && request.resource.data.chunks <= 16);
+                        && request.resource.data.size <= (request.resource.data.get('storage', '') == 'server' ? 26214400 : 8388608)
+                        && request.resource.data.chunks <= 16);
         allow update: if isActive() || (svcPortalOn(token) && resource.data.by == 'client'
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['complete']));
         allow delete: if isActive() || (svcPortalOn(token) && resource.data.by == 'client' && resource.data.get('verified', false) != true);

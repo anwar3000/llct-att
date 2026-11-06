@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, DOC_MAX, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, DOC_MAX, DOC_MAX_SERVER, fileServer, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=28';
+} from './sd.js?v=29';
 
 window.__sdStarted = true;
 
@@ -147,6 +147,7 @@ const docBase = () => ['svcPortals', token, 'docs'];
 const docAlerts = () => groupDocs(S.docs).filter((g) => ['bad', 'warn'].includes(expiryStatus(g.head.expiry).tone)).length;
 const fileIcon = (d) => (/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE');
 function docsHtml() {
+  if (S.docMax === undefined) { S.docMax = DOC_MAX; fileServer().then((ok) => { if (ok) { S.docMax = DOC_MAX_SERVER; if (S.tab === 'docs' && !S.docBusy) render(); } }); }
   const f = S.docForm || (S.docForm = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' });
   const files = S.docFiles || (S.docFiles = []);
   const groups = groupDocs(S.docs);
@@ -165,8 +166,8 @@ function docsHtml() {
       </div>
       <label class="field" style="margin-top:10px"><span>Notes (optional)</span><input id="dn-notes" value="${esc(f.notes)}" placeholder="e.g. Renewed, issued by Dubai Economy"></label>`}
       <div class="docfile"><label class="btn"><span>${files.length ? '+ Add more files' : 'Choose files (PDF or photos)'}</span><input type="file" id="dn-file" hidden multiple accept="application/pdf,image/*,.dwg,.dxf,.doc,.docx,.xls,.xlsx"></label>
-        <span class="small muted">${files.length ? `${files.length} file${files.length === 1 ? '' : 's'} · ${fmtSize(total)}` : 'Select several at once for multi-page documents. Up to 8 MB each, 20 files.'}</span></div>
-      ${files.length ? `<div class="flist2">${files.map((x, k) => `<div class="frow"><span class="fpg">${k + 1}</span><span class="fnm">${esc(x.name)}</span><span class="small muted">${fmtSize(x.size)}</span>${x.size > DOC_MAX && !/^image\//.test(x.type) ? '<span class="xp bad small">too big</span>' : ''}
+        <span class="small muted">${files.length ? `${files.length} file${files.length === 1 ? '' : 's'} · ${fmtSize(total)}` : `Select several at once for multi-page documents. Up to ${S.docMax / 1048576} MB each, 20 files.`}</span></div>
+      ${files.length ? `<div class="flist2">${files.map((x, k) => `<div class="frow"><span class="fpg">${k + 1}</span><span class="fnm">${esc(x.name)}</span><span class="small muted">${fmtSize(x.size)}</span>${x.size > S.docMax && !/^image\//.test(x.type) ? '<span class="xp bad small">too big</span>' : ''}
           <button type="button" data-fup="${k}" ${k === 0 ? 'disabled' : ''} aria-label="Move up">↑</button><button type="button" data-frm="${k}" aria-label="Remove">✕</button></div>`).join('')}</div>` : ''}
       <div class="row" style="margin-top:12px;justify-content:flex-end"><span class="small muted grow" id="dn-prog"></span><button type="button" class="btn primary" id="dn-save" ${S.docBusy || !files.length ? 'disabled' : ''}>${S.docBusy ? 'Uploading…' : `Upload${files.length > 1 ? ` ${files.length} files` : ''}`}</button></div>
     </div>` : ''}

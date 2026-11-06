@@ -9,12 +9,13 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus, DEVICE_LISTS, listOfOther,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-  collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId,
-} from './sd.js?v=28';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=28';
+  collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, setIdTokenProvider, serverUsage, fileServer,
+} from './sd.js?v=29';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=29';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
+setIdTokenProvider(() => (auth.currentUser ? auth.currentUser.getIdToken() : ''));
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 const LOGIN_DOMAIN = 'staff.attendance.app';
 const loginToEmail = (l) => { const s = String(l || '').trim().toLowerCase(); return s.includes('@') ? s : `${s}@${LOGIN_DOMAIN}`; };
@@ -735,6 +736,7 @@ function newTicketModal(preClientId = '') {
 
 // ================================================================== clients & links
 function clientsView(m) {
+  if (!S.usageAt || Date.now() - S.usageAt > 30000) { S.usageAt = Date.now(); loadUsage(); }
   const all = allTickets();
   const q = (S.cq || '').toLowerCase();
   const rows = S.clients.filter((c) => !q || String(c.name).toLowerCase().includes(q)).map((c) => {
@@ -746,6 +748,7 @@ function clientsView(m) {
   m.innerHTML = `<div class="row" style="margin-bottom:12px"><h1 class="grow">Customers</h1><input id="cq" placeholder="Search client…" value="${esc(S.cq || '')}" style="max-width:280px"></div>
     <p class="muted small" style="margin-top:-4px">Set up each customer's service profile — AMC contract, trade licence, building photos and the equipment we maintain (NVRs, cameras, other devices) — then share their private service link. Sites and GPS come from LLCT Invoicing.</p>
     ${S.clientsErr ? `<div class="card pad" style="color:var(--danger)">${esc(S.clientsErr)}</div>` : ''}
+    ${S.usage ? `<div class="small muted" style="margin:-4px 0 10px">Document files on this server: <b>${fmtSize(S.usage.total || 0)}</b> used${S.usage.diskFree != null ? ` · ${fmtSize(S.usage.diskFree)} free of ${fmtSize(S.usage.diskSize || 0)}` : ''}</div>` : ''}
     ${(() => { const al = groupDocs(clientDocs(null)).map((g) => g.head).filter((d) => ['bad', 'warn'].includes(expiryStatus(d.expiry).tone)).sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
       return al.length ? `<div class="card pad docalert"><b>Documents expiring or expired (${al.length})</b>${al.slice(0, 8).map((d) => { const x = expiryStatus(d.expiry); const c = S.clients.find((y) => y.id === docClient(d)); return `<div class="small"><span class="xp ${x.tone}">${esc(x.text)}</span> — ${esc(c ? c.name : '')}: ${esc(docTypeOf(d.type).t)}${d.number ? ' ' + esc(d.number) : ''} <a href="#" data-cdocs="${esc(docClient(d))}">open</a></div>`; }).join('')}</div>` : ''; })()}
     <div class="card" style="overflow:auto"><table class="tbl"><thead><tr><th>Client</th><th>Sites</th><th>Service profile</th><th>Documents</th><th>Tickets</th><th>Last request</th><th>Service link</th></tr></thead><tbody>
@@ -770,11 +773,14 @@ function clientsView(m) {
 /** Client of a document: from the link it was uploaded on. */
 const docClient = (d) => d.clientId || ((S.portals || []).find((p) => p.id === d.portal) || {}).clientId || '';
 const clientDocs = (cid) => (S.docs || []).filter((d) => d.complete !== false && (cid === null || docClient(d) === cid));
+const folderName = (n) => String(n || '').replace(/[^\p{L}\p{N} ._&()\-]+/gu, ' ').replace(/\s+/g, ' ').trim().replace(/^[ .]+|[ .]+$/g, '').slice(0, 80);
+function loadUsage() { serverUsage().then((u) => { if (u && u.ok) { S.usage = u; if (S.view === 'clients') render(); } }).catch(() => {}); }
 function docSummary(cid) {
+  const c = S.clients.find((x) => x.id === cid); const u = S.usage && c ? (S.usage.customers || {})[folderName(c.name)] : null;
   const l = groupDocs(clientDocs(cid)).map((g) => ({ ...g.head, verified: g.verified })); const bad = l.filter((d) => expiryStatus(d.expiry).tone === 'bad').length, warn = l.filter((d) => expiryStatus(d.expiry).tone === 'warn').length;
   const unv = l.filter((d) => !d.verified).length;
   return `<button class="btn sm" data-cdocs="${esc(cid)}">${l.length ? `Documents (${l.length})` : 'Documents'}</button>
-    ${bad ? `<div class="small xp bad">${bad} expired</div>` : ''}${warn ? `<div class="small xp warn">${warn} expiring soon</div>` : ''}${unv ? `<div class="small" style="color:var(--ribbon)">${unv} new to check</div>` : ''}`;
+    ${bad ? `<div class="small xp bad">${bad} expired</div>` : ''}${warn ? `<div class="small xp warn">${warn} expiring soon</div>` : ''}${unv ? `<div class="small" style="color:var(--ribbon)">${unv} new to check</div>` : ''}${u ? `<div class="small muted">${fmtSize(u.bytes)} on server</div>` : ''}`;
 }
 /** A client's documents: view, download, check (verify), upload for them, delete. A document may have several files (pages). */
 function docsModal(clientId) {

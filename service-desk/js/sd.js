@@ -325,7 +325,37 @@ export const DOC_TYPES = [
   { k: 'other', t: 'Other document', exp: true, num: 'Reference number' },
 ];
 export const docTypeOf = (k) => DOC_TYPES.find((d) => d.k === k) || DOC_TYPES[DOC_TYPES.length - 1];
-export const DOC_MAX = 8 * 1024 * 1024; // 8 MB per file
+export const DOC_MAX = 8 * 1024 * 1024; // 8 MB per file when kept in Firestore
+export const DOC_MAX_SERVER = 25 * 1024 * 1024; // 25 MB per file when kept on the server (files.php)
+// ---- files on the server: files.php next to the pages saves them in files/<Customer>/<Document type>/
+const FILES_URL = new URL('../files.php', import.meta.url).href;
+let serverOk = null;
+/** Does this server keep document files (files.php present and PHP running)? Checked once. */
+export async function fileServer() {
+  if (serverOk !== null) return serverOk;
+  try { const r = await fetch(`${FILES_URL}?a=ping`, { cache: 'no-store' }); const j = r.ok ? await r.json() : null; serverOk = !!(j && j.ok && j.writable !== false); }
+  catch (_) { serverOk = false; }
+  return serverOk;
+}
+let idTokenFn = null;
+/** The desk passes a function giving the signed-in staff member's Firebase ID token (sent to files.php). */
+export const setIdTokenProvider = (fn) => { idTokenFn = fn; };
+const authHeaders = async () => { try { const t = idTokenFn ? await idTokenFn() : ''; return t ? { 'X-Id-Token': t } : {}; } catch (_) { return {}; } };
+/** Space used per customer on the server (staff). */
+export async function serverUsage() {
+  if (!(await fileServer())) return null;
+  const r = await fetch(`${FILES_URL}?a=usage`, { headers: await authHeaders(), cache: 'no-store' }); return r.ok ? r.json() : null;
+}
+function xhrUpload(form, onProgress, headers) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest(); x.open('POST', `${FILES_URL}?a=up`);
+    Object.entries(headers || {}).forEach(([k, v]) => x.setRequestHeader(k, v));
+    x.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    x.onload = () => { let j = null; try { j = JSON.parse(x.responseText); } catch (_) { /* not JSON */ } if (x.status === 200 && j && j.ok) res(j); else rej(new Error((j && j.error) || `Upload failed (${x.status})`)); };
+    x.onerror = () => rej(new Error('Upload failed — check the connection'));
+    x.send(form);
+  });
+}
 const DOC_CHUNK = 700000;
 /** Expiry state of a document: { text, tone: 'ok' | 'warn' | 'bad' | '' }. */
 export function expiryStatus(exp) {
@@ -344,7 +374,16 @@ export async function uploadDocFile(base, meta, file, onProgress) {
   if (/^image\/(jpeg|png|webp|heic|heif)/i.test(mime) && file.size > 600 * 1024) {
     try { const du = await compressImage(file, 2000, 0.8); blob = await (await fetch(du)).blob(); mime = 'image/jpeg'; name = name.replace(/\.[a-z0-9]+$/i, '') + '.jpg'; } catch (_) { /* keep the original */ }
   }
-  if (blob.size > DOC_MAX) throw new Error(`The file is ${(blob.size / 1048576).toFixed(1)} MB — the limit is 8 MB. Please send a smaller scan or PDF.`);
+  const onServer = base[0] === 'svcPortals' && (await fileServer());
+  const max = onServer ? DOC_MAX_SERVER : DOC_MAX;
+  if (blob.size > max) throw new Error(`The file is ${(blob.size / 1048576).toFixed(1)} MB — the limit is ${max / 1048576} MB. Please send a smaller scan or PDF.`);
+  if (onServer) {
+    const ref = doc(collection(db, ...base)); // id first, so the file on the server carries it
+    const fd = new FormData(); fd.append('t', base[1]); fd.append('d', ref.id); fd.append('type', meta.typeLabel || meta.type || 'Documents'); fd.append('file', blob, name);
+    const up = await xhrUpload(fd, onProgress, await authHeaders());
+    await setDoc(ref, { ...meta, name, mime, size: blob.size, chunks: 0, storage: 'server', path: up.path, complete: true, at: serverTimestamp() });
+    return ref.id;
+  }
   const b64 = await fileToB64(blob);
   const n = Math.max(1, Math.ceil(b64.length / DOC_CHUNK));
   const ref = doc(collection(db, ...base));
@@ -359,6 +398,11 @@ export async function uploadDocFile(base, meta, file, onProgress) {
 }
 /** The file of a document as a Blob. */
 export async function loadDocFile(base, d) {
+  if (d.storage === 'server') {
+    const r = await fetch(`${FILES_URL}?a=get&t=${encodeURIComponent(base[1])}&d=${encodeURIComponent(d.id)}`, { headers: await authHeaders() });
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error; } catch (_) { /* file, not JSON */ } throw new Error(m || `Could not open the file (${r.status})`); }
+    return r.blob();
+  }
   const q = await getDocs(collection(db, ...base, d.id, 'chunks'));
   const parts = q.docs.sort((a, b) => +a.id - +b.id).map((x) => x.data().d || '').join('');
   const bin = atob(parts); const u = new Uint8Array(bin.length);
@@ -376,6 +420,12 @@ export function openDocFile(base, d, download) {
   }, (e) => { if (w) w.close(); throw e; });
 }
 export async function deleteDocFile(base, d) {
+  if (d.storage === 'server') {
+    await deleteDoc(doc(db, ...base, d.id)); // first the record, then the server removes the file it no longer belongs to
+    const fd = new FormData(); fd.append('t', base[1]); fd.append('d', d.id);
+    await fetch(`${FILES_URL}?a=del`, { method: 'POST', body: fd, headers: await authHeaders() }).catch(() => {});
+    return;
+  }
   const q = await getDocs(collection(db, ...base, d.id, 'chunks'));
   const b = writeBatch(db); q.docs.forEach((x) => b.delete(x.ref)); b.delete(doc(db, ...base, d.id)); await b.commit();
 }
