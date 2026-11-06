@@ -13,7 +13,7 @@ on:
         default: ''
   push:
     branches: [main]
-    paths: ['web/**', 'tools/gen_web_config.py', '.github/workflows/deploy-web.yml']
+    paths: ['web/**', 'tools/gen_web_config.py', 'tools/stamp_web_version.py', '.github/workflows/deploy-web.yml']
 
 permissions:
   contents: read
@@ -48,6 +48,9 @@ jobs:
           fi
           cat gen.txt
           touch web/.nojekyll
+
+      - name: Stamp build version on scripts (no stale cached files after an update)
+        run: python3 tools/stamp_web_version.py web "$(git rev-parse --short=10 HEAD)"
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
