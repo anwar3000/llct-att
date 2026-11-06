@@ -1,5 +1,5 @@
 // Company documents: LLCT trade license, Abu Dhabi trade license, Chamber of Commerce, WC insurance…
-// plus additional documents with their own heading. Numbers, issue / expiry dates and copies (photo or PDF, max 2 MB).
+// plus additional documents with their own heading. Numbers, issue / expiry dates and copies (photo or PDF, max 10 MB).
 import {
   COMPANY_DOC_TYPES, watchCompanyDocs, watchCompanyFiles, saveCompanyDoc, uploadCompanyFile, readCompanyFile,
   deleteCompanyFile, deleteCompanyDoc, companyDueState, daysUntil,
@@ -66,7 +66,7 @@ export function mount(el, _p, { setHeader }) {
     const file = await chooseFile();
     if (!file) return;
     try {
-      const p = await prepareFile(file);
+      const p = await prepareFile(file, 10 * 1024 * 1024);
       if (!e.doc) await saveCompanyDoc({ id: e.id, key: e.key, title: e.title, custom: e.custom });
       await uploadCompanyFile({ docId: e.id, name: `${safe(e.title)}.${p.mime === 'application/pdf' ? 'pdf' : 'jpg'}`, mime: p.mime, base64: p.base64 });
       toast(`${e.title} uploaded`);

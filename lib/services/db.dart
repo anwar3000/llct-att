@@ -987,15 +987,20 @@ class Db {
     required Uint8List bytes,
     String by = '',
   }) async {
-    if (bytes.length > kMaxDocBytes) throw Exception('File is larger than 2 MB.');
+    if (bytes.length > kMaxCompanyDocBytes) throw Exception('File is larger than 10 MB.');
     final b64 = base64Encode(bytes);
     final ref = companyFiles.doc();
     final n = (b64.length / _chunk).ceil().clamp(1, 1000);
-    final batch = _fs.batch();
-    for (var i = 0; i < n; i++) {
-      final end = (i + 1) * _chunk;
-      batch.set(ref.collection('chunks').doc('$i'), {'d': b64.substring(i * _chunk, end > b64.length ? b64.length : end)});
+    // Several writes of up to 8 pieces (one write is limited to 10 MB); the file entry last.
+    for (var s = 0; s < n; s += 8) {
+      final part = _fs.batch();
+      for (var i = s; i < n && i < s + 8; i++) {
+        final end = (i + 1) * _chunk;
+        part.set(ref.collection('chunks').doc('$i'), {'d': b64.substring(i * _chunk, end > b64.length ? b64.length : end)});
+      }
+      await part.commit();
     }
+    final batch = _fs.batch();
     batch.set(ref, {
       'docId': docId,
       'name': name,

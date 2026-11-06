@@ -1243,10 +1243,14 @@ export async function saveCompanyDoc({ id = null, key = '', title, number = '', 
 export async function uploadCompanyFile({ docId, name, mime, base64 }) {
   const ref = doc(C('companyFiles'));
   const n = Math.max(1, Math.ceil(base64.length / CHUNK));
-  const b = writeBatch(db);
-  for (let i = 0; i < n; i++) b.set(doc(db, 'companyFiles', ref.id, 'chunks', String(i)), { d: base64.slice(i * CHUNK, (i + 1) * CHUNK) });
-  b.set(ref, { docId, name, mime, size: Math.round(base64.length * 0.75), chunks: n, uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '' });
-  await b.commit();
+  // Up to 10 MB: the pieces go in several writes (one write is limited to 10 MB), the file entry last,
+  // so nobody sees a half-uploaded copy.
+  for (let s = 0; s < n; s += 8) {
+    const b = writeBatch(db);
+    for (let i = s; i < Math.min(n, s + 8); i++) b.set(doc(db, 'companyFiles', ref.id, 'chunks', String(i)), { d: base64.slice(i * CHUNK, (i + 1) * CHUNK) });
+    await b.commit();
+  }
+  await setDoc(ref, { docId, name, mime, size: Math.round(base64.length * 0.75), chunks: n, uploadedAt: serverTimestamp(), uploadedBy: store.me?.name || '' });
   return ref.id;
 }
 export async function readCompanyFile(f) {

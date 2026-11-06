@@ -29,8 +29,9 @@ class DocBytes {
 
 typedef PickedDoc = ({String name, String mime, Uint8List bytes});
 
-/// Camera / gallery / PDF picker, max 2 MB. Returns null when cancelled; throws with a readable message.
-Future<PickedDoc?> pickDocument(BuildContext context, String title, {bool allowPdf = true}) async {
+/// Camera / gallery / PDF picker, max 2 MB ([maxBytes] for company documents). Returns null when cancelled; throws with a readable message.
+Future<PickedDoc?> pickDocument(BuildContext context, String title, {bool allowPdf = true, int maxBytes = kMaxDocBytes}) async {
+  final mb = '${(maxBytes / 1048576).round()} MB';
   final src = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -38,7 +39,7 @@ Future<PickedDoc?> pickDocument(BuildContext context, String title, {bool allowP
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          child: Text('$title · max 2 MB', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          child: Text('$title · max $mb', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
         ),
         ListTile(
             leading: const Icon(Icons.photo_camera_outlined),
@@ -68,7 +69,7 @@ Future<PickedDoc?> pickDocument(BuildContext context, String title, {bool allowP
     );
     final f = r?.files.single;
     if (f == null) return null;
-    if (f.size > kMaxDocBytes) throw Exception('${f.name} is larger than 2 MB. Please choose a smaller file.');
+    if (f.size > maxBytes) throw Exception('${f.name} is larger than $mb. Please choose a smaller file.');
     bytes = f.bytes;
     name = f.name;
     final ext = (f.extension ?? '').toLowerCase();
@@ -86,8 +87,8 @@ Future<PickedDoc?> pickDocument(BuildContext context, String title, {bool allowP
     mime = 'image/jpeg';
   }
   if (bytes == null) throw Exception('Could not read the file.');
-  if (bytes.length > kMaxDocBytes) {
-    throw Exception('File is ${(bytes.length / 1048576).toStringAsFixed(1)} MB — the limit is 2 MB.');
+  if (bytes.length > maxBytes) {
+    throw Exception('File is ${(bytes.length / 1048576).toStringAsFixed(1)} MB — the limit is $mb.');
   }
   return (name: name, mime: mime, bytes: Uint8List.fromList(bytes));
 }

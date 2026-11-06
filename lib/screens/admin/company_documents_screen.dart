@@ -79,7 +79,7 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
 
   Future<void> _upload(_Entry e) async {
     try {
-      final p = await pickDocument(context, e.title);
+      final p = await pickDocument(context, e.title, maxBytes: kMaxCompanyDocBytes);
       if (p == null || !mounted) return;
       setState(() => _busy = e.id);
       if (e.doc == null) {

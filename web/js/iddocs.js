@@ -293,10 +293,11 @@ function readAsDataUrl(file) {
 function loadImage(src) {
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Could not read this image. Use JPG, PNG or PDF (iPhone HEIC photos: export as JPG first).')); i.src = src; });
 }
-/** Images are resized to ≤2000 px JPEG (sharp enough to read, small enough to store). PDFs kept as-is. Max 2 MB each. */
-export async function prepareFile(file) {
+/** Images are resized to ≤2000 px JPEG (sharp enough to read, small enough to store). PDFs kept as-is. Max 2 MB each (company documents 10 MB). */
+export async function prepareFile(file, maxBytes = MAX_FILE) {
+  const mb = `${Math.round(maxBytes / 1048576)} MB`;
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-    if (file.size > MAX_FILE) throw new Error(`${file.name} is larger than 2 MB. Compress the PDF or upload a photo of it.`);
+    if (file.size > maxBytes) throw new Error(`${file.name} is ${sizeTxt(file.size)} — larger than ${mb}. Compress the PDF or upload a photo of it.`);
     const url = await readAsDataUrl(file);
     return { name: file.name, mime: 'application/pdf', base64: url.split(',')[1] };
   }
@@ -313,8 +314,8 @@ export async function prepareFile(file) {
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0, c.width, c.height);
     let out = c.toDataURL('image/jpeg', 0.85);
-    if (out.length * 0.75 > MAX_FILE) out = c.toDataURL('image/jpeg', 0.6);
-    if (out.length * 0.75 > MAX_FILE) throw new Error(`${file.name} is still larger than 2 MB after compressing.`);
+    if (out.length * 0.75 > maxBytes) out = c.toDataURL('image/jpeg', 0.6);
+    if (out.length * 0.75 > maxBytes) throw new Error(`${file.name} is still larger than ${mb} after compressing.`);
     return { name: file.name.replace(/\.[^.]+$/, '') + '.jpg', mime: 'image/jpeg', base64: out.split(',')[1] };
   } finally { URL.revokeObjectURL(url); }
 }

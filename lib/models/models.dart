@@ -1106,6 +1106,8 @@ class CompanyFile {
 
 /// Max size of one uploaded document copy.
 const kMaxDocBytes = 2 * 1024 * 1024;
+/// Company documents (trade licence, insurance…) can be larger scanned PDFs.
+const kMaxCompanyDocBytes = 10 * 1024 * 1024;
 
 
 /// A driver's car trip: start → stop with GPS route, distance and cost.
