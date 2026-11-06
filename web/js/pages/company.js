@@ -202,7 +202,9 @@ export function mount(el, _p, { setHeader }) {
       <div class="slot-main">
         <div class="row" style="gap:8px"><span class="slot-t">${esc(e.title.toUpperCase())}</span>${statusPill(d.expiry)}</div>
         <div class="cd-info">${info}</div>${d.notes ? `<div class="small muted">${esc(d.notes)}</div>` : ''}
-        <div class="row" style="gap:8px;margin-top:8px">${fl.map((f, i) => `<div class="slot-th cd-th" data-view="${f.id}" title="${esc(e.title)} ${i + 1} — click to view">${isImg(f) ? '' : '<b>PDF</b>'}
+        <div class="cd-files">${fl.map((f, i) => `<div class="cd-file" data-view="${f.id}" title="${esc(e.title)} ${i + 1} — click to view">
+            <div class="cd-pv">${isImg(f) ? '' : '<b class="cd-ph">PDF</b>'}</div>
+            <div class="cd-cap"><span class="cd-type ${isImg(f) ? 'img' : 'pdf'}">${isImg(f) ? 'IMG' : 'PDF'}</span><span>${fl.length > 1 ? `Copy ${i + 1}` : 'Copy'}${f.size ? ` · ${f.size > 1048576 ? `${(f.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`}` : ''}</span></div>
             <button class="x" data-delf="${f.id}" title="Delete file">${icon('close', 11)}</button></div>`).join('')}
           ${fl.length ? '' : '<span class="small red-t">Not uploaded</span>'}</div>
       </div>
@@ -244,12 +246,9 @@ export function mount(el, _p, { setHeader }) {
       t.onclick = (ev) => { if (!ev.target.closest('[data-delf]')) viewFile(f, e?.title || f.name); };
       try {
         const b64 = await bytes(f);
-        if (isImg(f)) t.insertAdjacentHTML('afterbegin', `<img src="data:${f.mime};base64,${b64}" alt="">`);
-        else {
-          const src = await pdfThumb(`co_${f.id}`, b64);
-          t.querySelector('b')?.remove();
-          t.insertAdjacentHTML('afterbegin', `<img src="${src}" alt="" style="object-position:top"><span class="pdf-badge">PDF</span>`);
-        }
+        const pv = t.querySelector('.cd-pv');
+        if (isImg(f)) pv.innerHTML = `<img src="data:${f.mime};base64,${b64}" alt="">`;
+        else pv.innerHTML = `<img src="${await pdfThumb(`co_${f.id}`, b64)}" alt="" style="object-position:top">`;
       } catch { /* keep the PDF label */ }
     });
     el.querySelectorAll('[data-delf]').forEach((b) => {

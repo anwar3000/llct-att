@@ -449,7 +449,7 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
             ),
           const SizedBox(height: 4),
           SizedBox(
-            height: 70,
+            height: 168,
             child: ListView(scrollDirection: Axis.horizontal, children: [
               for (var i = 0; i < files.length; i++)
                 Padding(
@@ -463,13 +463,43 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
                         mime: files[i].mime,
                         load: () => Db.readCompanyFile(files[i]),
                         onDelete: _canEdit ? () => Db.deleteCompanyFile(files[i]) : null),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: SizedBox(
-                        width: 96,
-                        height: 70,
-                        child: DocThumb(id: files[i].id, isImage: files[i].isImage, load: () => Db.readCompanyFile(files[i])),
+                    // one clear rectangle per copy: page preview + type and copy number underneath
+                    child: Container(
+                      width: 116,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE3E1DC)),
                       ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(children: [
+                        SizedBox(
+                          width: 116,
+                          height: 136,
+                          child: DocThumb(id: files[i].id, isImage: files[i].isImage, load: () => Db.readCompanyFile(files[i])),
+                        ),
+                        Container(
+                          height: 30,
+                          decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE3E1DC)))),
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Row(children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: files[i].isImage ? const Color(0xFF2E7DB2) : const Color(0xFFD64545),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(files[i].isImage ? 'IMG' : 'PDF',
+                                  style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(files.length > 1 ? 'Copy ${i + 1}' : 'Copy',
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                            ),
+                          ]),
+                        ),
+                      ]),
                     ),
                   ),
                 ),
@@ -480,7 +510,7 @@ class _CompanyDocumentsScreenState extends State<CompanyDocumentsScreen> {
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => _upload(e),
                   child: SizedBox(
-                    width: files.isEmpty ? 130 : 70,
+                    width: files.isEmpty ? 130 : 90,
                     child: DocPlaceholder(icon: files.isEmpty ? Icons.upload_file : Icons.add),
                   ),
                 )

@@ -546,3 +546,20 @@ table.t tr.boq-sec td { background: #fff4e2; font-weight: 700; letter-spacing: .
   border-radius: 10px; padding: 9px 12px; margin-bottom: 6px; cursor: pointer; font: inherit; }
 .qp-row:hover { border-color: var(--primary); background: #fff8ec; }
 .qp-row .small { flex-basis: 100%; }
+
+/* ---------- Company document copies: one clear rectangle per copy */
+.cd-files { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; align-items: flex-start; }
+.cd-file { position: relative; flex: 0 0 132px; width: 132px; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer;
+  overflow: hidden; box-shadow: 0 1px 2px rgba(30, 30, 30, .05); transition: border-color .15s, box-shadow .15s; }
+.cd-file:hover { border-color: #D98A1A; box-shadow: 0 4px 12px rgba(30, 30, 30, .1); }
+.cd-pv { height: 168px; background: #f4f3ef; display: grid; place-items: center; border-bottom: 1px solid var(--line); overflow: hidden; }
+.cd-pv img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.cd-ph { color: #b23535; font-size: 13px; letter-spacing: .05em; }
+.cd-cap { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-type { font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 4px; color: #fff; background: #D64545; flex: 0 0 auto; }
+.cd-type.img { background: #2E7DB2; }
+.cd-file .x { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(178, 53, 53, .92); color: #fff;
+  display: none; place-items: center; cursor: pointer; padding: 0; }
+.cd-file:hover .x { display: grid; }
+@media (hover: none) { .cd-file .x { display: grid; } }
+@media (max-width: 560px) { .cd-file { flex-basis: calc(50% - 5px); width: auto; } .cd-pv { height: 150px; } }
