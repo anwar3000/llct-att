@@ -563,3 +563,30 @@ table.t tr.boq-sec td { background: #fff4e2; font-weight: 700; letter-spacing: .
 .cd-file:hover .x { display: grid; }
 @media (hover: none) { .cd-file .x { display: grid; } }
 @media (max-width: 560px) { .cd-file { flex-basis: calc(50% - 5px); width: auto; } .cd-pv { height: 150px; } }
+
+/* ---------- Company documents as cards */
+.cd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; padding: 14px; }
+.cd-card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 14px; min-width: 0;
+  border-top: 4px solid #cfe6da; box-shadow: 0 1px 2px rgba(30, 30, 30, .04); }
+.cd-card.empty { border-top-color: #e3e1dc; background: #fcfbf9; }
+.cd-card.soon { border-top-color: #E0A23A; }
+.cd-card.expired { border-top-color: #D64545; }
+.cd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.cd-ttl { font-weight: 800; font-size: 13.5px; letter-spacing: .02em; line-height: 1.3; }
+.cd-head .pill { flex: 0 0 auto; white-space: nowrap; }
+.cd-card .cd-info { margin-top: 10px; }
+.cd-card .cd-files { flex: 1; margin-top: 12px; }
+.cd-card .cd-file { flex: 0 0 104px; width: 104px; }
+.cd-card .cd-pv { height: 132px; }
+.cd-drop { width: 100%; min-height: 132px; border: 1.5px dashed #d0ccc2; border-radius: 10px; background: #f7f6f3; color: #9a978f; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.cd-drop:hover { border-color: #D98A1A; color: #b06d10; background: #fff8ec; }
+.cd-foot { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+@media (max-width: 560px) { .cd-grid { grid-template-columns: 1fr; padding: 10px; } .cd-card .cd-file { flex-basis: calc(50% - 5px); width: auto; } }
+.cd-card .cd-files { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-content: start; }
+.cd-card .cd-file { width: auto; flex: none; }
+.cd-card .cd-pv { height: 118px; }
+.cd-card .cd-cap { font-size: 11px; padding: 5px 6px; }
+.cd-card .cd-cap .cd-size { display: none; }
+.cd-card .cd-drop { grid-column: 1 / -1; min-height: 96px; }
+@media (max-width: 560px) { .cd-card .cd-file { flex-basis: auto; } .cd-card .cd-pv { height: 128px; } }

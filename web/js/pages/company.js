@@ -198,21 +198,22 @@ export function mount(el, _p, { setHeader }) {
       <span class="cd-kv"><span>EXPIRY</span><b>${esc(d.expiry ? fmtD(d.expiry) : '—')}</b></span>
       ${d.issueDate ? `<span class="cd-kv"><span>ISSUED</span><b>${esc(fmtD(d.issueDate))}</b></span>` : ''}
       ${!d.number || !d.expiry ? `<a href="javascript:void 0" class="small" data-ed="${esc(e.id)}">+ Add number & expiry</a>` : ''}`;
-    return `<div class="slot ${fl.length ? 'has' : ''}" data-e="${esc(e.id)}" style="grid-template-columns:1fr auto">
-      <div class="slot-main">
-        <div class="row" style="gap:8px"><span class="slot-t">${esc(e.title.toUpperCase())}</span>${statusPill(d.expiry)}</div>
-        <div class="cd-info">${info}</div>${d.notes ? `<div class="small muted">${esc(d.notes)}</div>` : ''}
-        <div class="cd-files">${fl.map((f, i) => `<div class="cd-file" data-view="${f.id}" title="${esc(e.title)} ${i + 1} — click to view">
-            <div class="cd-pv">${isImg(f) ? '' : '<b class="cd-ph">PDF</b>'}</div>
-            <div class="cd-cap"><span class="cd-type ${isImg(f) ? 'img' : 'pdf'}">${isImg(f) ? 'IMG' : 'PDF'}</span><span>${fl.length > 1 ? `Copy ${i + 1}` : 'Copy'}${f.size ? ` · ${f.size > 1048576 ? `${(f.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`}` : ''}</span></div>
-            <button class="x" data-delf="${f.id}" title="Delete file">${icon('close', 11)}</button></div>`).join('')}
-          ${fl.length ? '' : '<span class="small red-t">Not uploaded</span>'}</div>
+    const st = dueState(d.expiry);
+    return `<div class="cd-card ${fl.length ? 'has' : 'empty'} ${st}" data-e="${esc(e.id)}">
+      <div class="cd-head">
+        <div class="cd-ttl">${esc(e.title.toUpperCase())}</div>${statusPill(d.expiry)}
       </div>
-      <div class="slot-act" style="flex-direction:column;align-items:stretch">
-        <button class="btn sm" data-up="${esc(e.id)}">${icon('upload', 14)} Upload</button>
+      <div class="cd-info">${info}</div>${d.notes ? `<div class="small muted" style="margin-top:4px">${esc(d.notes)}</div>` : ''}
+      <div class="cd-files">${fl.map((f, i) => `<div class="cd-file" data-view="${f.id}" title="${esc(e.title)} — copy ${i + 1}${f.size ? ` (${f.size > 1048576 ? `${(f.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`})` : ''} — click to view">
+          <div class="cd-pv">${isImg(f) ? '' : '<b class="cd-ph">PDF</b>'}</div>
+          <div class="cd-cap"><span class="cd-type ${isImg(f) ? 'img' : 'pdf'}">${isImg(f) ? 'IMG' : 'PDF'}</span><span>${fl.length > 1 ? `Copy ${i + 1}` : 'Copy'}</span></div>
+          <button class="x" data-delf="${f.id}" title="Delete file">${icon('close', 11)}</button></div>`).join('')}
+        ${fl.length ? '' : `<button class="cd-drop" data-up="${esc(e.id)}">${icon('upload', 18)}<span>Not uploaded — upload copy</span></button>`}</div>
+      <div class="cd-foot">
+        ${fl.length ? `<button class="btn sm" data-up="${esc(e.id)}">${icon('upload', 14)} Upload</button>` : ''}
         <button class="btn sm ghost" data-ed="${esc(e.id)}">${icon('edit', 14)} Number & dates</button>
-        ${fl.length ? `<button class="btn sm ghost" data-rd="${esc(e.id)}" title="Read the number and dates from the uploaded copy">🔍 Read from copy</button>` : ''}
-        ${e.custom ? `<button class="btn sm ghost" data-rm="${esc(e.id)}">${icon('trash', 14)} Delete</button>` : ''}
+        ${fl.length ? `<button class="btn sm ghost" data-rd="${esc(e.id)}" title="Read the number and dates from the uploaded copy">🔍 Read</button>` : ''}
+        ${e.custom ? `<button class="btn sm ghost icon" data-rm="${esc(e.id)}" title="Delete document">${icon('trash', 14)}</button>` : ''}
       </div></div>`;
   };
 
@@ -226,9 +227,9 @@ export function mount(el, _p, { setHeader }) {
       ${bad.length ? `<div class="card" style="background:#fff4e2;border-color:#f3d7a6"><b>${icon('warn', 16, '#D98A1A')} Renew soon:</b>
         ${bad.map((e) => `${esc(e.title)} ${statusPill(e.doc.expiry)}`).join(' &nbsp; ')}</div>` : ''}
       <div class="card ${bad.length ? 'mt' : ''}"><div class="card-head"><h2>Company documents</h2><span class="small muted">${files.length} file${files.length === 1 ? '' : 's'}</span></div>
-        <div class="slots">${std.map(card).join('')}</div></div>
+        <div class="cd-grid">${std.map(card).join('')}</div></div>
       <div class="card mt"><div class="card-head"><h2>Additional documents</h2><button class="btn sm ghost" id="cd-add2">${icon('plus', 14)} Add with heading</button></div>
-        ${add.length ? `<div class="slots">${add.map(card).join('')}</div>` : '<div class="empty small">ISO certificate, bank letter, civil defence… add each one with its own heading.</div>'}</div>`;
+        ${add.length ? `<div class="cd-grid">${add.map(card).join('')}</div>` : '<div class="empty small">ISO certificate, bank letter, civil defence… add each one with its own heading.</div>'}</div>`;
     const find = (id) => all.find((x) => x.id === id);
     el.querySelectorAll('[data-up]').forEach((b) => { b.onclick = () => upload(find(b.dataset.up)); });
     el.querySelectorAll('[data-ed]').forEach((b) => { b.onclick = () => edit(find(b.dataset.ed)); });
