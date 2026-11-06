@@ -458,6 +458,7 @@ async function ownerFiles(o, progress) {
 
 /** ZIP: one folder per person with their copies, plus an Excel sheet of all the numbers. */
 export async function downloadIdZip(owners, title = 'ID documents', progress) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   const JSZip = window.JSZip;
   if (!JSZip) throw new Error('ZIP library did not load — check your internet connection and reload.');
   const zip = new JSZip();
@@ -497,6 +498,7 @@ export async function downloadIdZip(owners, title = 'ID documents', progress) {
 
 /** One PDF: a page per person with their details and every image copy (PDF copies are listed — they're in the ZIP). */
 export async function downloadIdPack(owners, title = 'ID documents', progress) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   const jsPDF = window.jspdf && window.jspdf.jsPDF;
   if (!jsPDF) throw new Error('PDF library did not load — check your internet connection.');
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -623,6 +625,7 @@ async function coverCrop(src, ratio) {
 }
 
 export async function downloadIdSheets(owners, title = 'ID documents', progress) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   const jsPDF = window.jspdf && window.jspdf.jsPDF;
   if (!jsPDF) throw new Error('PDF library did not load — check your internet connection.');
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });

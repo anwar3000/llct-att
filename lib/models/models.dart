@@ -495,7 +495,9 @@ class PettyTxn {
   final String note;
   final String siteId;
   final String siteName;
-  final String? receipt; // base64
+  final String? receipt; // base64 (older entries keep it in the record)
+  /// Has a receipt photo (in the record, or in pettyFiles/{id}).
+  final bool hasReceipt;
   final String status; // pending | approved | rejected
   final String reviewNote;
   final String createdByName;
@@ -513,6 +515,7 @@ class PettyTxn {
     this.siteId = '',
     this.siteName = '',
     this.receipt,
+    this.hasReceipt = false,
     this.status = 'pending',
     this.reviewNote = '',
     this.createdByName = '',
@@ -539,6 +542,7 @@ class PettyTxn {
       receipt: m['receipt'] is String && (m['receipt'] as String).isNotEmpty
           ? m['receipt'] as String
           : null,
+      hasReceipt: m['hasReceipt'] == true || (m['receipt'] is String && (m['receipt'] as String).isNotEmpty),
       status: _str(m['status'], 'pending'),
       reviewNote: _str(m['reviewNote']),
       createdByName: _str(m['createdByName']),

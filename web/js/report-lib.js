@@ -744,6 +744,7 @@ export function saveBlob(blob, name) {
 }
 
 export async function downloadReport(rep, format = 'xlsx') {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   if (format === 'xlsx') return toXlsx(rep);
   if (format === 'csv') return toCsv(rep);
   if (format === 'pdf') return toPdf(rep);

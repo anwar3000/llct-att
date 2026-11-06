@@ -165,6 +165,7 @@ export function mount(el, _p, { setHeader }) {
   }
 
   async function zipAll() {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
     if (!window.JSZip) { toast('ZIP library did not load — reload the page.', true); return; }
     if (!files?.length) { toast('No files uploaded yet'); return; }
     const { std, add } = entries();

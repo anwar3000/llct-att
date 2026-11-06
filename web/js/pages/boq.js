@@ -207,6 +207,7 @@ export function rowsToItems(rows) {
 }
 
 async function fileRows(file) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   const XLSX = window.XLSX;
   if (!XLSX) throw new Error('Excel library did not load — check your internet connection.');
   const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });

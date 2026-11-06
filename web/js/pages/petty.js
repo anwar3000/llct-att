@@ -1,4 +1,4 @@
-import { store, isAdmin, addPetty, reviewPetty, deletePetty } from '../fb.js';
+import { store, isAdmin, addPetty, reviewPetty, deletePetty, pettyReceipt, inlineReceipts, movePettyReceipts } from '../fb.js';
 import {
   esc, icon, avatar, pill, cap, fmtMoney, fmtDateTime, toast, modal, confirmBox, promptBox, friendlyError, b64img, photoViewer, statusPill,
   dateKey, startOfMonth, addDays,
@@ -28,7 +28,12 @@ export function mount(el, _p, { setHeader }) {
     const filtered = all.filter((t) => (!emp || t.employeeId === emp) &&
       (type === 'all' || (type === 'credit' && t.type === 'credit') || (type === 'expense' && t.type !== 'credit') || (type === 'rejected' && t.status === 'rejected')));
 
+    const inline = isAdmin() ? inlineReceipts() : 0;
     el.innerHTML = `
+    ${inline ? `<div class="card card-pad row mb" style="gap:12px;flex-wrap:wrap;background:#fff7e8;border:1px solid #f3d9a6">
+      <span class="grow"><b>${inline} receipt photo${inline === 1 ? ' is' : 's are'} stored inside the petty cash records</b><br>
+      <span class="small muted">This makes the dashboard load slowly. Move them to separate storage — nothing is lost, receipts still open here and in the app.</span></span>
+      <button class="btn" id="pc-move">Move receipts now</button></div>` : ''}
     <div class="grid kpis">
       ${k('Cash given (approved)', fmtMoney(total.credited), '', '#2E9E6A')}
       ${k('Spent (approved)', fmtMoney(total.spent), '', '#D64545')}
@@ -39,7 +44,8 @@ export function mount(el, _p, { setHeader }) {
       <div class="table-wrap"><table class="t"><tr><th>Employee</th><th>Type</th><th>Details</th><th>Receipt</th><th class="num">Amount</th><th></th></tr>
       ${pending.map((t) => `<tr><td><div class="person">${avatar(t.employeeName, 28)}<span class="nm">${esc(t.employeeName)}</span></div><div class="small muted">${fmtDateTime(t.createdLocal)}</div></td>
         <td>${esc(t.type === 'credit' ? 'Cash received' : t.category)}</td><td class="small">${esc(t.note)}${t.siteName ? `<div class="muted">${esc(t.siteName)}</div>` : ''}</td>
-        <td>${t.receipt ? `<img src="${b64img(t.receipt)}" data-photo style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:zoom-in">` : '<span class="muted small">—</span>'}</td>
+        <td>${t.receipt ? `<img src="${b64img(t.receipt)}" data-photo style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:zoom-in">`
+          : t.hasReceipt ? `<img data-rc="${t.id}" data-photo alt="" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:zoom-in;background:#eee">` : '<span class="muted small">—</span>'}</td>
         <td class="num"><b style="color:${t.type === 'credit' ? '#2E9E6A' : '#D64545'}">${t.type === 'credit' ? '+' : '−'}${fmtMoney(t.amount)}</b></td>
         <td class="right nowrap"><button class="btn sm ghost" data-no="${t.id}">Reject</button> <button class="btn sm success" data-yes="${t.id}">Approve</button></td></tr>`).join('')}
       </table></div></div>` : ''}
@@ -59,12 +65,30 @@ export function mount(el, _p, { setHeader }) {
           <td>${esc(t.type === 'credit' ? 'Cash given' : t.category)}<div class="small muted">${esc([t.siteName, t.note].filter(Boolean).join(' · '))}</div></td>
           <td class="num" style="color:${t.type === 'credit' ? '#2E9E6A' : '#D64545'}">${t.type === 'credit' ? '+' : '−'}${fmtMoney(t.amount)}</td>
           <td>${statusPill(t.status)}${t.reviewNote ? `<div class="small muted">${esc(t.reviewNote)}</div>` : ''}</td>
-          <td class="right"><button class="btn sm ghost icon" data-delp="${t.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')
+          <td class="right nowrap">${t.hasReceipt ? `<button class="btn sm ghost icon" data-showrc="${t.id}" title="Receipt">${icon('doc', 14)}</button>` : ''}<button class="btn sm ghost icon" data-delp="${t.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')
           || '<tr><td colspan="6"><div class="empty">Nothing here</div></td></tr>'}
         </table></div></div>
     </div>`;
 
-    el.querySelectorAll('[data-photo]').forEach((i) => { i.onclick = () => photoViewer(i.src); });
+    el.querySelectorAll('[data-photo]').forEach((i) => { i.onclick = () => { if (i.src) photoViewer(i.src); }; });
+    const byId = (id) => store.petty.find((x) => x.id === id) || store.pendingPetty?.find((x) => x.id === id);
+    el.querySelectorAll('[data-rc]').forEach((img) => {
+      const t = byId(img.dataset.rc);
+      if (t) pettyReceipt(t).then((b) => { if (b) img.src = b64img(b); }).catch(() => {});
+    });
+    el.querySelectorAll('[data-showrc]').forEach((b) => {
+      b.onclick = async () => {
+        const t = byId(b.dataset.showrc);
+        try { const r = t && await pettyReceipt(t); if (r) photoViewer(b64img(r)); else toast('Receipt not found (it may be in a backup).', true); } catch (e) { toast(friendlyError(e), true); }
+      };
+    });
+    el.querySelector('#pc-move')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true;
+      try {
+        const n = await movePettyReceipts((d, all) => { btn.textContent = `Moving… ${d} / ${all}`; });
+        toast(`${n} receipts moved — the dashboard loads faster now`);
+      } catch (err) { btn.disabled = false; btn.textContent = 'Move receipts now'; toast(friendlyError(err), true); }
+    });
     el.querySelectorAll('[data-yes]').forEach((b) => { b.onclick = () => reviewPetty(b.dataset.yes, true, store.me.name).then(() => toast('Approved')); });
     el.querySelectorAll('[data-no]').forEach((b) => {
       b.onclick = async () => {

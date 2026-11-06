@@ -716,7 +716,13 @@ class Db {
     String? receipt,
   }) async {
     final now = DateTime.now();
-    await petty.add({
+    // The receipt photo goes to pettyFiles/{id}; the petty record only says it has one (keeps lists fast).
+    final ref = petty.doc();
+    final b = _fs.batch();
+    if (receipt != null && receipt.isNotEmpty) {
+      b.set(_fs.collection('pettyFiles').doc(ref.id), {'d': receipt, 'employeeId': employeeId});
+    }
+    b.set(ref, {
       'employeeId': employeeId,
       'employeeName': employeeName,
       'type': type,
@@ -725,7 +731,8 @@ class Db {
       'note': note,
       'siteId': site?.id ?? '',
       'siteName': site?.name ?? '',
-      'receipt': receipt ?? '',
+      'receipt': '',
+      'hasReceipt': receipt != null && receipt.isNotEmpty,
       'status': status,
       'createdBy': createdBy,
       'createdByName': createdByName,
@@ -733,6 +740,25 @@ class Db {
       'month': monthKey(now),
       'tz': now.timeZoneOffset.inMinutes,
       'createdAt': FieldValue.serverTimestamp(),
+    });
+    await b.commit();
+  }
+
+  static final Map<String, Future<String?>> _receipts = {};
+
+  /// Receipt photo of a petty entry (inside the record for old entries, else in pettyFiles).
+  static Future<String?> pettyReceipt(PettyTxn t) {
+    if (t.receipt != null) return Future.value(t.receipt);
+    if (!t.hasReceipt) return Future.value(null);
+    return _receipts.putIfAbsent(t.id, () async {
+      try {
+        final d = await _fs.collection('pettyFiles').doc(t.id).get();
+        final v = d.data()?['d'];
+        return v is String && v.isNotEmpty ? v : null;
+      } catch (_) {
+        _receipts.remove(t.id);
+        return null;
+      }
     });
   }
 
@@ -744,7 +770,12 @@ class Db {
         'reviewedAt': FieldValue.serverTimestamp(),
       });
 
-  static Future<void> deletePetty(String id) => petty.doc(id).delete();
+  static Future<void> deletePetty(String id) async {
+    await petty.doc(id).delete();
+    try {
+      await _fs.collection('pettyFiles').doc(id).delete();
+    } catch (_) {}
+  }
 
   // ------------------------------------------------------------- off days
   static Stream<List<OffDay>> offDaysForEmployeeMonth(String uid, String month) => offDays

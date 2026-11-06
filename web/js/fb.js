@@ -102,7 +102,7 @@ export function mapPetty(d) {
   return {
     id: d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', type: m.type || 'expense',
     amount: num(m.amount), category: m.category || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '',
-    receipt: m.receipt || '', status: m.status || 'pending', reviewNote: m.reviewNote || '', reviewedBy: m.reviewedBy || '',
+    receipt: m.receipt || '', hasReceipt: m.hasReceipt === true || !!m.receipt, status: m.status || 'pending', reviewNote: m.reviewNote || '', reviewedBy: m.reviewedBy || '',
     createdByName: m.createdByName || '', createdAt: toDate(m.createdAt), date: m.date || '',
     tz: tzOf(m.tz), createdLocal: atTz(toDate(m.createdAt), tzOf(m.tz)),
   };
@@ -1116,7 +1116,10 @@ export function addPetty({ emp, type, amount, category, note, site, me }) {
 export const reviewPetty = (id, approve, reviewer, note = '') => updateDoc(doc(db, 'petty', id), {
   status: approve ? 'approved' : 'rejected', reviewedBy: reviewer, reviewNote: note, reviewedAt: serverTimestamp(),
 });
-export const deletePetty = (id) => deleteDoc(doc(db, 'petty', id));
+export async function deletePetty(id) {
+  await deleteDoc(doc(db, 'petty', id));
+  deleteDoc(doc(db, 'pettyFiles', id)).catch(() => {}); // its receipt photo, if any
+}
 export const reviewOff = (id, approve) => updateDoc(doc(db, 'offDays', id), { status: approve ? 'approved' : 'rejected' });
 export const deleteUpdate = (id) => deleteDoc(doc(db, 'siteUpdates', id));
 export const editUpdate = (id, data) => updateDoc(doc(db, 'siteUpdates', id), {
@@ -1308,4 +1311,35 @@ export async function listQuotations() {
     const s = await getDocs(query(C('inv_docs'), where('type', '==', 'quotation'), where('createdBy', '==', auth.currentUser?.uid || '')));
     return s.docs.map(map);
   }
+}
+
+// ------------------------------------------------------------------ petty cash receipts kept apart from the records
+// pettyFiles/{pettyId} = { d: base64, employeeId }. The petty records stay small, so the dashboard
+// (which keeps petty cash live) loads fast; a receipt photo is fetched only when someone looks at it.
+const _receipts = new Map();
+export async function pettyReceipt(t) {
+  if (t.receipt) return t.receipt;
+  if (!t.hasReceipt) return '';
+  if (!_receipts.has(t.id)) {
+    _receipts.set(t.id, getDoc(doc(db, 'pettyFiles', t.id)).then((d) => (d.exists() ? d.data().d || '' : ''))
+      .catch((e) => { _receipts.delete(t.id); throw e; }));
+  }
+  return _receipts.get(t.id);
+}
+/** How many loaded petty records still carry their receipt photo inside the record. */
+export const inlineReceipts = () => (store.petty || []).filter((t) => t.receipt).length;
+/** Moves receipt photos out of the petty records into pettyFiles (admin). Safe to run again. */
+export async function movePettyReceipts(progress = () => {}) {
+  const snap = await getDocs(query(C('petty'), where('receipt', '>', '')));
+  const docs = snap.docs.filter((d) => d.data().receipt);
+  let done = 0, b = writeBatch(db), inBatch = 0, bytes = 0;
+  for (const d of docs) {
+    const m = d.data();
+    b.set(doc(db, 'pettyFiles', d.id), { d: m.receipt, employeeId: m.employeeId || '' });
+    b.update(d.ref, { receipt: '', hasReceipt: true });
+    inBatch++; bytes += m.receipt.length;
+    if (inBatch >= 8 || bytes > 6e6) { await b.commit(); done += inBatch; progress(done, docs.length); b = writeBatch(db); inBatch = 0; bytes = 0; }
+  }
+  if (inBatch) { await b.commit(); done += inBatch; progress(done, docs.length); }
+  return done;
 }

@@ -211,7 +211,7 @@ class PettyTile extends StatelessWidget {
                 Pill.status(t.status),
               ]),
             ]),
-            if (t.note.isNotEmpty || t.receipt != null || t.reviewNote.isNotEmpty) ...[
+            if (t.note.isNotEmpty || t.hasReceipt || t.reviewNote.isNotEmpty) ...[
               const SizedBox(height: 8),
               Row(children: [
                 const SizedBox(width: 50),
@@ -225,13 +225,27 @@ class PettyTile extends StatelessWidget {
                               fontSize: 12.5, color: AppColors.muted, fontStyle: FontStyle.italic)),
                   ]),
                 ),
-                if (t.receipt != null)
-                  GestureDetector(
-                    onTap: () => openPhoto(context, t.receipt!),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Base64Image(t.receipt!, width: 44, height: 44),
-                    ),
+                if (t.hasReceipt)
+                  FutureBuilder<String?>(
+                    future: Db.pettyReceipt(t),
+                    builder: (c, snap) {
+                      final r = snap.data;
+                      return GestureDetector(
+                        onTap: r == null ? null : () => openPhoto(context, r),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: r == null
+                              ? Container(
+                                  width: 44,
+                                  height: 44,
+                                  color: const Color(0xFFEDEBE6),
+                                  child: Icon(snap.connectionState == ConnectionState.done ? Icons.receipt_long_outlined : Icons.hourglass_empty,
+                                      size: 18, color: AppColors.muted),
+                                )
+                              : Base64Image(r, width: 44, height: 44),
+                        ),
+                      );
+                    },
                   ),
               ]),
             ],

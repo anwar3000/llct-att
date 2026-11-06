@@ -20,7 +20,8 @@ const APPS = { att: 'LLCT Attendance', inv: 'LLCT Invoicing', shared: 'Shared �
 const CATS = { photo: 'Photos & files', gps: 'GPS trails & routes', rec: 'Records (data)' };
 const AREAS = [
   { key: 'siteUpdates', label: 'Site update photos & notes', app: 'att', cat: 'photo' },
-  { key: 'petty', label: 'Petty cash (with receipt photos)', app: 'att', cat: 'photo' },
+  { key: 'petty', label: 'Petty cash records', app: 'att', cat: 'rec' },
+  { key: 'pettyFiles', label: 'Petty cash receipt photos', app: 'att', cat: 'photo' },
   { key: 'acctFiles', label: 'Accounts receipt copies', app: 'att', cat: 'photo' },
   { key: 'idFiles', label: 'ID document copies', app: 'att', cat: 'photo' },
   { key: 'companyFiles', label: 'Company document copies', app: 'att', cat: 'photo' },
@@ -266,6 +267,7 @@ async function zipAndSave(zip, name, progress) {
 
 // ------------------------------------------------------------------ photos ZIP
 async function photosBackup(from, to, kinds, progress) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   if (!window.JSZip) throw new Error('ZIP library not loaded — reload the page.');
   const zip = new window.JSZip();
   const index = [['Folder / file', 'Date', 'Type', 'Details']];
@@ -288,8 +290,10 @@ async function photosBackup(from, to, kinds, progress) {
     progress('Collecting petty cash receipts…');
     for (const d of await allDocs('petty', where('date', '>=', from), where('date', '<=', to))) {
       const t = d.data();
-      if (!t.receipt) continue;
-      const f = b64(t.receipt);
+      let rc = t.receipt;
+      if (!rc && t.hasReceipt) { try { const f2 = await getDoc(doc(db, 'pettyFiles', d.id)); rc = f2.exists() ? f2.data().d : ''; } catch { rc = ''; } }
+      if (!rc) continue;
+      const f = b64(rc);
       const name = `petty-receipts/${t.date}_${safe(t.employeeName)}_${safe(t.category || t.type)}_AED${t.amount}_${d.id.slice(0, 5)}.${extOf(f.mime)}`;
       zip.file(name, f.base64, { base64: true }); n++;
       index.push([name, t.date, 'Petty cash', `${t.employeeName} · ${t.category || t.type} · AED ${t.amount} · ${t.note || ''}`]);
@@ -355,6 +359,7 @@ async function photosBackup(from, to, kinds, progress) {
 
 // ------------------------------------------------------------------ transactions Excel
 async function excelBackup(progress) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   if (!window.XLSX) throw new Error('Excel library not loaded — reload the page.');
   const X = window.XLSX;
   const wb = X.utils.book_new();
@@ -407,6 +412,7 @@ function plain(v) {
   return v;
 }
 async function jsonBackup(withGps, progress) {
+  await (window.__libs || 0); // Excel / PDF / ZIP libraries load in the background after start
   if (!window.JSZip) throw new Error('ZIP library not loaded — reload the page.');
   const zip = new window.JSZip();
   const summary = {};
@@ -474,10 +480,11 @@ async function freeSpace(cut, kinds, progress) {
     progress('Petty cash receipts…');
     const ops = [];
     for (const d of await allDocs('petty', where('date', '<', cut))) {
-      const r = d.data().receipt;
-      if (!r) continue;
-      photos++; bytes += String(r).length;
-      ops.push((b) => b.update(d.ref, { receipt: '', receiptInBackup: true, ...stamp }));
+      const m = d.data();
+      if (!m.receipt && !m.hasReceipt) continue;
+      photos++; bytes += m.receipt ? String(m.receipt).length : 150 * 1024;
+      ops.push((b) => b.update(d.ref, { receipt: '', hasReceipt: false, receiptInBackup: true, ...stamp }));
+      if (m.hasReceipt) ops.push((b) => b.delete(doc(db, 'pettyFiles', d.id)));
     }
     await commitAll(ops, progress, 'Petty cash receipts');
   }

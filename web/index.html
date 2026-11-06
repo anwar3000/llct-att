@@ -11,12 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="css/app.css?v=1.12.0" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div id="app">
@@ -49,6 +45,26 @@
         if (!window.__appStarted) show('Still loading after 15 s. Address: ' + location.href +
           '\nCheck your internet connection, then reload (Cmd+Shift+R).');
       }, 15000);
+    })();
+  </script>
+  <script>
+    // Excel / PDF / ZIP libraries (about 1.4 MB) load in the background so they don't hold up the dashboard;
+    // downloads wait for them (window.__libs).
+    (function () {
+      function load(src) {
+        return new Promise(function (ok) {
+          var s = document.createElement('script'); s.src = src; s.async = false;
+          s.onload = ok; s.onerror = function () { console.warn('Could not load ' + src); ok(); };
+          document.head.appendChild(s);
+        });
+      }
+      window.__libs = Promise.all([
+        load('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'),
+        load('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js').then(function () {
+          return load('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+        }),
+        load('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'),
+      ]);
     })();
   </script>
   <div id="modal-root"></div>
