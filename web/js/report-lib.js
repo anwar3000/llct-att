@@ -1,6 +1,6 @@
 // Report builders + Excel / PDF / CSV export.
 import {
-  store, isAdmin, MAX_DAILY_VIOLATIONS, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
+  store, isAdmin, MAX_DAILY_VIOLATIONS, alertsInRange, tripKindLabel, tripsInRange, tripsForSites, tripKm, tripCost, tripMinutes, workerEntriesInRange, workerDayTimes, workerEntriesForSites, minDayMins, isShortDay, alertLabel, sessionsInRange, offDaysInRange, updatesInRange, sessionsForSites, updatesForSites, sessionMinutes, sessionFlagged,
 } from './fb.js';
 import {
   fmtMoney, tzLabel, atTz, dateKey, parseKey, startOfMonth, endOfMonth, daysInMonth, fmtMonth, fmtMins, hoursDec, fmtDate, cap, WEEKDAYS,
@@ -18,23 +18,26 @@ export async function monthlySummaryReport(month, onlyIds = null) {
   const users = store.employees.filter((u) => (onlyIds ? onlyIds.includes(u.id) : u.active || sessions.some((s) => s.employeeId === u.id)));
   const rows = users.map((u) => {
     const s = employeeSummary(u, sessions, offs, from, to);
-    const short = s.days.filter((d) => d.sessions.length && isShortDay(d.date, d.minutes, d.sessions.some((x) => !x.checkOut))).length;
-    return [u.name, u.loginId, u.designation, s.workedDays, short, s.offDays, s.absentDays, fmtMins(s.minutes), hoursDec(s.minutes),
-      fmtMins(s.avgMinutes), s.visits, s.sites.join(', '), s.flagged, s.avgStart,
+    // short days on the total time (first check-in to last check-out, incl. travel between sites)
+    const short = s.days.filter((d) => d.sessions.length && isShortDay(d.date, Math.max(d.span, d.minutes), d.sessions.some((x) => !x.checkOut))).length;
+    return [u.name, u.loginId, u.designation, s.workedDays, short, s.offDays, s.absentDays, fmtMins(s.minutes), fmtMins(s.travel), fmtMins(s.span), hoursDec(s.minutes), hoursDec(s.span),
+      s.workedDays ? fmtMins(Math.round(s.span / s.workedDays)) : '0:00', s.visits, s.sites.join(', '), s.flagged, s.avgStart,
       u.weeklyOffDays.length ? u.weeklyOffDays.map((w) => WEEKDAYS[w]).join('/') : 'Flexible'];
   });
-  const tot = rows.reduce((a, r) => { a[0] += r[3]; a[6] += r[4]; a[1] += r[5]; a[2] += r[6]; a[3] += r[8]; a[4] += r[10]; a[5] += r[12]; return a; }, [0, 0, 0, 0, 0, 0, 0]);
+  const tot = rows.reduce((a, r) => { a[0] += r[3]; a[6] += r[4]; a[1] += r[5]; a[2] += r[6]; a[3] += r[10]; a[7] += r[11]; a[4] += r[13]; a[5] += r[15]; return a; }, [0, 0, 0, 0, 0, 0, 0, 0]);
   return {
     title: `Monthly attendance summary — ${fmtMonth(month)}`,
     subtitle: `${users.length} employees · period ${from} to ${to}`,
     filename: `attendance-summary-${from.slice(0, 7)}`,
     sheets: [{
       name: 'Summary',
-      columns: ['Employee', 'Login ID', 'Designation', 'Days worked', `Short days (<${minDayMins() / 60}h)`, 'Off days', 'Absent', 'Total time', 'Hours (decimal)',
-        'Avg / day', 'Site visits', 'Sites', 'Flagged', 'Avg start', 'Weekly off'],
-      widths: [22, 12, 16, 11, 13, 9, 8, 11, 13, 10, 10, 30, 8, 10, 12],
+      columns: ['Employee', 'Login ID', 'Designation', 'Days worked', `Short days (<${minDayMins() / 60}h)`, 'Off days', 'Absent', 'Work (on site)', 'Travel between sites',
+        'Total incl. travel', 'Work h', 'Total h', 'Avg total / day', 'Site visits', 'Sites', 'Flagged', 'Avg start', 'Weekly off'],
+      widths: [22, 12, 16, 11, 13, 9, 8, 12, 12, 12, 8, 8, 11, 10, 30, 8, 10, 12],
       rows,
-      totals: ['TOTAL', '', '', tot[0], tot[6], tot[1], tot[2], fmtMins(tot[3] * 60), Math.round(tot[3] * 100) / 100, '', tot[4], '', tot[5], '', ''],
+      totals: ['TOTAL', '', '', tot[0], tot[6], tot[1], tot[2], fmtMins(Math.round(tot[3] * 60)), fmtMins(Math.round((tot[7] - tot[3]) * 60)), fmtMins(Math.round(tot[7] * 60)),
+        Math.round(tot[3] * 100) / 100, Math.round(tot[7] * 100) / 100, '', tot[4], '', tot[5], '', ''],
+      pdfColumns: [0, 3, 4, 5, 6, 7, 8, 9, 12, 13, 16],
     }],
   };
 }
@@ -320,67 +323,76 @@ export function filterReport(rep, q) {
 }
 
 // ================================================================== external workers
+// Two times per worker per day:
+//   Work  = time on site (entries merged, never counted twice)
+//   Total = first entry to last exit — work plus the travel between sites. Short days and pay use the total.
 const entryEnd = (e) => e.checkOut || new Date();
-/** Minutes per worker per day, with overlapping entries merged (a worker is never counted twice). */
-function workerDayMinutes(entries) {
-  const by = new Map();
-  for (const e of entries) {
-    const k = `${e.workerId}|${e.date}`;
-    if (!by.has(k)) by.set(k, []);
-    by.get(k).push([e.checkIn.getTime(), entryEnd(e).getTime()]);
-  }
-  const out = new Map();
-  for (const [k, iv] of by) {
-    iv.sort((a, b) => a[0] - b[0]);
-    let total = 0, [cs, ce] = iv[0];
-    for (const [s, e] of iv.slice(1)) {
-      if (s <= ce) ce = Math.max(ce, e); else { total += ce - cs; cs = s; ce = e; }
-    }
-    total += ce - cs;
-    out.set(k, Math.max(0, Math.round(total / 60000)));
-  }
-  return out;
-}
 const workerInfo = (id, e) => {
   const w = store.worker(id);
   return { name: w?.name || e?.workerName || 'Worker', company: w?.company || e?.company || '', trade: w?.trade || e?.trade || '', code: w?.code || '' };
 };
+const zero = { work: 0, total: 0, travel: 0, sites: [] };
+const outTxt = (e) => (e?.checkOut ? t2(e.outLocal) : 'ON SITE');
+/** One row per worker per day: sites in order, first in, last out, work, travel, total. */
+function workerDaySheet(list, times, name = 'By day') {
+  const rows = [...times.entries()].map(([k, t]) => {
+    const [id, date] = k.split('|');
+    const w = workerInfo(id, list.find((e) => e.workerId === id));
+    const sh = isShortDay(date, t.total, t.open);
+    return [date, w.name, w.company, t.sites.join(' → '), t.sites.length, t2(t.firstEntry.inLocal), outTxt(t.lastEntry),
+      fmtMins(t.work), fmtMins(t.travel), fmtMins(t.total), hoursDec(t.work), hoursDec(t.total), sh ? `SHORT by ${hoursDec(minDayMins() - t.total)} h` : 'OK'];
+  }).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+  return {
+    name,
+    columns: ['Date', 'Worker', 'Company', 'Sites (in order)', 'Sites', 'First in', 'Last out', 'Work (on site)', 'Travel between sites', 'Total incl. travel',
+      'Work h', 'Total h', 'Minimum check'],
+    widths: [11, 22, 18, 36, 6, 8, 9, 11, 12, 12, 7, 7, 16],
+    rows,
+    pdfColumns: [0, 1, 3, 5, 6, 7, 8, 9, 12],
+  };
+}
 
 export async function workerAttendanceReport(from, to, workerId = null, siteId = null) {
   const all = await workerEntriesInRange(from, to);
-  const list = all.filter((e) => (!workerId || e.workerId === workerId) && (!siteId || e.siteId === siteId));
+  // A site filter keeps the whole day of the workers who were there, so travel to / from that site is still counted.
+  const list = all.filter((e) => (!workerId || e.workerId === workerId)
+    && (!siteId || all.some((x) => x.siteId === siteId && x.workerId === e.workerId && x.date === e.date)));
   const mins = (e) => Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000));
   const log = list.map((e) => {
     const w = workerInfo(e.workerId, e);
     return [e.date, w.name, w.company, w.trade, e.siteName, e.employeeName, t2(e.inLocal), e.checkOut ? t2(e.outLocal) : 'ON SITE', tzLabel(e.tz) || 'viewer time',
       fmtMins(mins(e)), hoursDec(mins(e)), e.note];
   });
-  const dayMins = workerDayMinutes(list);
+  const times = workerDayTimes(list);
   const ids = [...new Set(list.map((e) => e.workerId))];
+  let gWork = 0, gTotal = 0, gDays = 0;
   const summary = ids.map((id) => {
     const w = workerInfo(id, list.find((e) => e.workerId === id));
     const mine = list.filter((e) => e.workerId === id);
     const days = [...new Set(mine.map((e) => e.date))];
-    const m = days.reduce((a, d) => a + (dayMins.get(`${id}|${d}`) || 0), 0);
-    return [w.name, w.code, w.company, w.trade, days.length, fmtMins(m), hoursDec(m), [...new Set(mine.map((e) => e.siteName))].join(', '),
-      [...new Set(mine.map((e) => e.employeeName))].join(', ')];
+    const work = days.reduce((a, d) => a + (times.get(`${id}|${d}`) || zero).work, 0);
+    const total = days.reduce((a, d) => a + (times.get(`${id}|${d}`) || zero).total, 0);
+    gWork += work; gTotal += total; gDays += days.length;
+    return [w.name, w.code, w.company, w.trade, days.length, fmtMins(work), fmtMins(total - work), fmtMins(total), hoursDec(work), hoursDec(total),
+      [...new Set(mine.map((e) => e.siteName))].join(', '), [...new Set(mine.map((e) => e.employeeName))].join(', ')];
   }).sort((a, b) => a[0].localeCompare(b[0]));
-  const totalM = summary.reduce((a, r) => a + r[6], 0);
   const who = workerId ? workerInfo(workerId).name : null;
   const where = siteId ? store.site(siteId)?.name : null;
   return {
     title: `External workers attendance${who ? ` — ${who}` : ''}${where ? ` — ${where}` : ''}`,
-    subtitle: `${from} to ${to} · ${ids.length} workers · ${Math.round(totalM * 100) / 100} hours`,
+    subtitle: `${from} to ${to} · ${ids.length} workers · work ${hoursDec(gWork)} h · total incl. travel ${hoursDec(gTotal)} h`,
     filename: `workers-attendance-${from}-to-${to}`,
     orientation: 'landscape',
     sheets: [
       {
         name: 'By worker',
-        columns: ['Worker', 'Code', 'Company', 'Trade', 'Days', 'Total time', 'Hours', 'Sites', 'Added by'],
-        widths: [24, 10, 20, 14, 7, 11, 8, 34, 26],
+        columns: ['Worker', 'Code', 'Company', 'Trade', 'Days', 'Work (on site)', 'Travel between sites', 'Total incl. travel', 'Work h', 'Total h', 'Sites', 'Added by'],
+        widths: [24, 10, 20, 14, 7, 12, 12, 12, 8, 8, 34, 26],
         rows: summary,
-        totals: ['TOTAL', '', '', '', summary.reduce((a, r) => a + r[4], 0), fmtMins(totalM * 60), Math.round(totalM * 100) / 100, '', ''],
+        totals: ['TOTAL', '', '', '', gDays, fmtMins(gWork), fmtMins(gTotal - gWork), fmtMins(gTotal), hoursDec(gWork), hoursDec(gTotal), '', ''],
+        pdfColumns: [0, 2, 4, 5, 6, 7, 10],
       },
+      workerDaySheet(list, times),
       {
         name: 'Daily log',
         columns: ['Date', 'Worker', 'Company', 'Trade', 'Site', 'Added by (employee)', 'In (local)', 'Out (local)', 'Time zone', 'Duration', 'Hours', 'Note'],
@@ -395,104 +407,112 @@ export async function workerAttendanceReport(from, to, workerId = null, siteId =
 export async function workerRegisterReport(month) {
   const from = dateKey(startOfMonth(month)), to = dateKey(endOfMonth(month));
   const list = await workerEntriesInRange(from, to);
-  const dayMins = workerDayMinutes(list);
+  const times = workerDayTimes(list);
   const n = daysInMonth(month);
   const ids = [...new Set([...store.workers.filter((w) => w.active).map((w) => w.id), ...list.map((e) => e.workerId)])];
   const rows = ids.map((id) => {
     const w = workerInfo(id, list.find((e) => e.workerId === id));
-    let days = 0, mins = 0, short = 0;
+    let days = 0, work = 0, total = 0, short = 0;
     const cells = [];
     for (let i = 1; i <= n; i++) {
       const dk = dateKey(new Date(month.getFullYear(), month.getMonth(), i));
-      const m = dayMins.get(`${id}|${dk}`) || 0;
-      const sh = isShortDay(dk, m, list.some((e) => e.workerId === id && e.date === dk && e.open));
-      if (m) { days++; mins += m; if (sh) short++; }
-      cells.push(m ? (sh ? `${hoursDec(m)}*` : hoursDec(m)) : '');
+      const t = times.get(`${id}|${dk}`);
+      if (!t) { cells.push(''); continue; }
+      const sh = isShortDay(dk, t.total, t.open);
+      days++; work += t.work; total += t.total; if (sh) short++;
+      cells.push(sh ? `${hoursDec(t.total)}*` : hoursDec(t.total));
     }
-    return [w.name, w.company, ...cells, days, short, hoursDec(mins)];
+    return [w.name, w.company, ...cells, days, short, hoursDec(work), hoursDec(total - work), hoursDec(total)];
   }).sort((a, b) => a[0].localeCompare(b[0]));
   const cols = ['Worker', 'Company'];
   for (let i = 1; i <= n; i++) {
     const d = new Date(month.getFullYear(), month.getMonth(), i);
     cols.push(`${i} ${WEEKDAYS[d.getDay() === 0 ? 7 : d.getDay()][0]}`);
   }
-  cols.push('Days', 'Short', 'Hours');
+  cols.push('Days', 'Short', 'Work h', 'Travel h', 'Total h');
   return {
     title: `External workers register — ${fmtMonth(month)}`,
-    subtitle: `Numbers are hours on site each day · * = short day (under ${minDayMins() / 60} h)`,
+    subtitle: `Numbers are total hours each day (first in to last out, incl. travel between sites) · * = short day (under ${minDayMins() / 60} h) · Work h = on site only`,
     filename: `workers-register-${from.slice(0, 7)}`,
     orientation: 'landscape',
     pdfFont: 6,
-    sheets: [{ name: 'Register', columns: cols, widths: [22, 16, ...Array(n).fill(5), 6, 6, 8], rows }],
+    sheets: [
+      { name: 'Register', columns: cols, widths: [22, 16, ...Array(n).fill(5), 6, 6, 7, 7, 7], rows },
+      workerDaySheet(list, times),
+    ],
   };
 }
 
 // ================================================================== external workers: days, short days & pay
 /**
- * Per worker for a period: days worked, full / short days (minimum hours setting), hours,
+ * Per worker for a period: days worked, full / short days (minimum hours, on total time incl. travel), work / travel / total hours,
  * plus daily rate and amount for admins. Includes a day-by-day attendance sheet with short days marked.
  */
 export async function workerPayReport(from, to, onlyCompany = '') {
   const all = await workerEntriesInRange(from, to);
   const list = all.filter((e) => !onlyCompany || workerInfo(e.workerId, e).company === onlyCompany);
-  const dayMins = workerDayMinutes(list);
+  const times = workerDayTimes(list);
+  const T = (id, dk) => times.get(`${id}|${dk}`);
   const minM = minDayMins();
   const admin = isAdmin();
   const ids = [...new Set(list.map((e) => e.workerId))];
   const dates = [];
   for (let d = parseKey(from); dateKey(d) <= to; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) dates.push(dateKey(d));
-  const open = (id, dk) => list.some((e) => e.workerId === id && e.date === dk && e.open);
-  let gDays = 0, gFull = 0, gShort = 0, gMins = 0, gAmt = 0, gPro = 0;
+  let gDays = 0, gFull = 0, gShort = 0, gWork = 0, gTotal = 0, gAmt = 0, gPro = 0;
   const summary = ids.map((id) => {
     const w = workerInfo(id, list.find((e) => e.workerId === id));
-    const ds = dates.filter((dk) => dayMins.get(`${id}|${dk}`));
-    const mins = ds.reduce((a, dk) => a + dayMins.get(`${id}|${dk}`), 0);
-    const short = ds.filter((dk) => isShortDay(dk, dayMins.get(`${id}|${dk}`), open(id, dk))).length;
+    const ds = dates.filter((dk) => T(id, dk));
+    const work = ds.reduce((a, dk) => a + T(id, dk).work, 0);
+    const total = ds.reduce((a, dk) => a + T(id, dk).total, 0);
+    const short = ds.filter((dk) => isShortDay(dk, T(id, dk).total, T(id, dk).open)).length;
     const rate = store.rates[id] || 0;
     const amount = rate * ds.length;
-    const pro = Math.round(ds.reduce((a, dk) => a + rate * Math.min(1, dayMins.get(`${id}|${dk}`) / minM), 0) * 100) / 100;
-    gDays += ds.length; gFull += ds.length - short; gShort += short; gMins += mins; gAmt += amount; gPro += pro;
-    const row = [w.name, w.code, w.company, w.trade, ds.length, ds.length - short, short ? `SHORT ${short}` : 0, hoursDec(mins), ds.length ? hoursDec(mins / ds.length) : 0];
+    const pro = Math.round(ds.reduce((a, dk) => a + rate * Math.min(1, T(id, dk).total / minM), 0) * 100) / 100;
+    gDays += ds.length; gFull += ds.length - short; gShort += short; gWork += work; gTotal += total; gAmt += amount; gPro += pro;
+    const row = [w.name, w.code, w.company, w.trade, ds.length, ds.length - short, short ? `SHORT ${short}` : 0,
+      hoursDec(work), hoursDec(total - work), hoursDec(total), ds.length ? hoursDec(total / ds.length) : 0];
     if (admin) row.push(rate || '', rate ? amount : '', rate ? pro : '');
     return row;
   }).sort((a, b) => a[0].localeCompare(b[0]));
-  const cols = ['Worker', 'Code', 'Company', 'Trade', 'Days worked', `Full days (≥${minM / 60}h)`, `Short days (<${minM / 60}h)`, 'Total hours', 'Avg h / day'];
-  const totals = ['TOTAL', '', '', `${ids.length} workers`, gDays, gFull, gShort, hoursDec(gMins), gDays ? hoursDec(gMins / gDays) : 0];
+  const cols = ['Worker', 'Code', 'Company', 'Trade', 'Days worked', `Full days (≥${minM / 60}h)`, `Short days (<${minM / 60}h)`,
+    'Work hours (on site)', 'Travel hours', 'Total hours incl. travel', 'Avg total h / day'];
+  const totals = ['TOTAL', '', '', `${ids.length} workers`, gDays, gFull, gShort, hoursDec(gWork), hoursDec(gTotal - gWork), hoursDec(gTotal), gDays ? hoursDec(gTotal / gDays) : 0];
   if (admin) { cols.push('Daily rate (AED)', 'Amount — days × rate (AED)', 'Pro-rata for short days (AED)'); totals.push('', Math.round(gAmt * 100) / 100, Math.round(gPro * 100) / 100); }
 
-  const sheetCols = ['Worker', 'Company', ...dates.map((d) => d.slice(5)), 'Days', 'Short', 'Hours'];
+  const sheetCols = ['Worker', 'Company', ...dates.map((d) => d.slice(5)), 'Days', 'Short', 'Work h', 'Total h'];
   const sheetRows = ids.map((id) => {
     const w = workerInfo(id, list.find((e) => e.workerId === id));
-    let days = 0, short = 0, mins = 0;
+    let days = 0, short = 0, work = 0, total = 0;
     const cells = dates.map((dk) => {
-      const m = dayMins.get(`${id}|${dk}`) || 0;
-      if (!m) return '';
-      days++; mins += m;
-      if (isShortDay(dk, m, open(id, dk))) { short++; return `${hoursDec(m)}*`; }
-      return hoursDec(m);
+      const t = T(id, dk);
+      if (!t) return '';
+      days++; work += t.work; total += t.total;
+      if (isShortDay(dk, t.total, t.open)) { short++; return `${hoursDec(t.total)}*`; }
+      return hoursDec(t.total);
     });
-    return [w.name, w.company, ...cells, days, short, hoursDec(mins)];
+    return [w.name, w.company, ...cells, days, short, hoursDec(work), hoursDec(total)];
   }).sort((a, b) => a[0].localeCompare(b[0]));
 
   const log = list.map((e) => {
     const w = workerInfo(e.workerId, e);
-    const dm = dayMins.get(`${e.workerId}|${e.date}`) || 0;
-    const sh = isShortDay(e.date, dm, open(e.workerId, e.date));
+    const t = T(e.workerId, e.date) || zero;
+    const sh = isShortDay(e.date, t.total, t.open);
     return [e.date, w.name, w.company, e.siteName, e.employeeName, t2(e.inLocal), e.checkOut ? t2(e.outLocal) : 'ON SITE',
-      hoursDec(Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000))), hoursDec(dm), sh ? `SHORT by ${hoursDec(minM - dm)} h` : 'OK'];
-  }).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+      hoursDec(Math.max(0, Math.round((entryEnd(e) - e.checkIn) / 60000))), hoursDec(t.work), hoursDec(t.total), sh ? `SHORT by ${hoursDec(minM - t.total)} h` : 'OK'];
+  }).sort((a, b) => (a[0] + a[1] + a[5]).localeCompare(b[0] + b[1] + b[5]));
 
   return {
     title: `External workers — days${admin ? ' & pay' : ''}${onlyCompany ? ` — ${onlyCompany}` : ''}`,
-    subtitle: `${from} to ${to} · minimum ${minM / 60} h per day · * / SHORT = below minimum${admin ? ` · amount AED ${Math.round(gAmt * 100) / 100}` : ''}`,
+    subtitle: `${from} to ${to} · minimum ${minM / 60} h per day on total time (first in to last out, incl. travel between sites) · * / SHORT = below minimum${admin ? ` · amount AED ${Math.round(gAmt * 100) / 100}` : ''}`,
     filename: `external-workers-days${admin ? '-pay' : ''}-${from}-to-${to}`,
     orientation: 'landscape',
     pdfFont: dates.length > 16 ? 6 : 7.5,
     sheets: [
-      { name: 'Summary', columns: cols, widths: [24, 9, 20, 13, 11, 13, 14, 11, 10, 14, 20, 22], rows: summary, totals },
-      { name: 'Attendance sheet', columns: sheetCols, widths: [22, 16, ...dates.map(() => 6), 6, 6, 7], rows: sheetRows },
-      { name: 'Daily log', columns: ['Date', 'Worker', 'Company', 'Site', 'Added by', 'In', 'Out', 'Hours', 'Day total', 'Minimum check'],
-        widths: [11, 22, 18, 20, 18, 7, 9, 7, 9, 18], rows: log },
+      { name: 'Summary', columns: cols, widths: [24, 9, 20, 13, 9, 11, 12, 11, 9, 12, 10, 12, 18, 20], rows: summary, totals },
+      { name: 'Attendance sheet', columns: sheetCols, widths: [22, 16, ...dates.map(() => 6), 6, 6, 7, 7], rows: sheetRows },
+      workerDaySheet(list, times),
+      { name: 'Daily log', columns: ['Date', 'Worker', 'Company', 'Site', 'Added by', 'In', 'Out', 'Hours here', 'Day work', 'Day total incl. travel', 'Minimum check'],
+        widths: [11, 22, 18, 20, 18, 7, 9, 8, 8, 12, 18], rows: log },
     ],
   };
 }
@@ -616,7 +636,8 @@ export function workforce(sessions, entries) {
     add(`s:${s.employeeId}`, { type: 'staff', id: s.employeeId, name: s.employeeName, org: u?.designation || 'Staff' },
       s.date, sessionMinutes(s), s.siteName, s.checkIn);
   }
-  const dayMins = workerDayMinutes(entries);
+  // man-hours on site (travel between sites is not site time)
+  const dayMins = new Map([...workerDayTimes(entries)].map(([k, t]) => [k, t.work]));
   const seen = new Set();
   for (const e of entries) {
     const w = workerInfo(e.workerId, e);

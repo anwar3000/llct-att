@@ -39,6 +39,8 @@ export function employeeDays(user, sessions, offDays, from, to) {
     out.push({
       date: k, day: d, kind, sessions: s,
       minutes: s.reduce((a, x) => a + sessionMinutes(x, now), 0),
+      // first check-in to last check-out — work time plus the travel between sites
+      span: s.length ? Math.max(0, Math.round((Math.max(...s.map((x) => (x.checkOut || now).getTime())) - s[0].checkIn.getTime()) / 60000)) : 0,
       flagged: s.some(sessionFlagged),
       offReason: isOff ? (approved.has(k) ? 'Approved leave' : 'Weekly off') : '',
     });
@@ -50,6 +52,7 @@ export function employeeSummary(user, sessions, offDays, from, to) {
   const days = employeeDays(user, sessions, offDays, from, to);
   const worked = days.filter((d) => d.sessions.length);
   const minutes = days.reduce((a, d) => a + d.minutes, 0);
+  const span = days.reduce((a, d) => a + Math.max(d.span || 0, d.minutes), 0);
   const visits = worked.reduce((a, d) => a + d.sessions.length, 0);
   const sitesSet = new Set(worked.flatMap((d) => d.sessions.map((s) => s.siteName)));
   const firstIns = worked.map((d) => d.sessions[0].checkIn);
@@ -62,6 +65,9 @@ export function employeeSummary(user, sessions, offDays, from, to) {
     offDays: days.filter((d) => d.kind === 'off').length,
     absentDays: days.filter((d) => d.kind === 'absent').length,
     minutes,
+    /** total time including travel between sites (first in → last out each day) */
+    span,
+    travel: Math.max(0, span - minutes),
     avgMinutes: worked.length ? Math.round(minutes / worked.length) : 0,
     visits,
     sites: [...sitesSet],

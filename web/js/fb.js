@@ -565,6 +565,36 @@ export async function deleteTrip(id) {
 export const minDayMins = () => Math.round((store.settings?.minDailyHours || 8) * 60);
 /** A finished day (not today with someone still on site) that is below the minimum. */
 export const isShortDay = (date, mins, stillOpen = false) => mins > 0 && mins < minDayMins() && !(stillOpen && date === dateKey(new Date()));
+/**
+ * Per worker per day: on-site work (overlapping entries merged), total time from the first entry to the last exit
+ * (work + travel between sites) and the travel in between. Key `${workerId}|${date}`.
+ */
+export function workerDayTimes(entries) {
+  const by = new Map();
+  const now = Date.now();
+  for (const e of entries) {
+    const k = `${e.workerId}|${e.date}`;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push([e.checkIn.getTime(), e.checkOut ? e.checkOut.getTime() : now, e.siteName || '', e]);
+  }
+  const out = new Map();
+  for (const [k, iv] of by) {
+    iv.sort((a, b) => a[0] - b[0]);
+    let work = 0, [cs, ce] = iv[0];
+    for (const [s, e] of iv.slice(1)) {
+      if (s <= ce) ce = Math.max(ce, e); else { work += ce - cs; cs = s; ce = e; }
+    }
+    work += ce - cs;
+    const first = iv[0][0], last = Math.max(...iv.map((x) => x[1]));
+    const lastE = iv.reduce((m, x) => (x[1] >= m[1] ? x : m), iv[0])[3];
+    const w = Math.max(0, Math.round(work / 60000));
+    const total = Math.max(w, Math.round((last - first) / 60000));
+    const sites = [];
+    iv.forEach((x) => { if (x[2] && sites[sites.length - 1] !== x[2]) sites.push(x[2]); });
+    out.set(k, { work: w, total, travel: total - w, firstEntry: iv[0][3], lastEntry: lastE, open: iv.some((x) => !x[3].checkOut), sites });
+  }
+  return out;
+}
 export const saveSettings = (data) => setDoc(doc(db, 'settings', 'general'), data, { merge: true });
 export const saveWorkerRate = (workerId, dailyRate) =>
   setDoc(doc(db, 'workerRates', workerId), { dailyRate, updatedAt: serverTimestamp(), updatedBy: store.me?.name || '' });

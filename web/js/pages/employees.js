@@ -291,7 +291,8 @@ function detail(root, id, { setHeader }) {
       ${st && st.minutes ? `<b>Today ${fmtMins(st.minutes)}</b>` : ''}
     </div>
     <div class="grid kpis">
-      ${k('Total work time', sum ? fmtMins(sum.minutes) : '…', sum ? `Avg ${fmtMins(sum.avgMinutes)} / day` : '')}
+      ${k('Work time (on site)', sum ? fmtMins(sum.minutes) : '…', sum ? `Avg ${fmtMins(sum.avgMinutes)} / day` : '')}
+      ${k('Total incl. travel', sum ? fmtMins(sum.span) : '…', sum ? `First in → last out · travel ${fmtMins(sum.travel)}` : '')}
       ${k('Days worked', sum ? sum.workedDays : '…', sum ? `${sum.visits} site visits` : '')}
       ${k('Off days', sum ? `${sum.offDays} / ${u.monthlyOffQuota}` : '…', u.weeklyOffDays.length ? `Weekly: ${u.weeklyOffDays.map((w) => WEEKDAYS[w]).join(', ')}` : 'Flexible')}
       ${k('Absent', sum ? sum.absentDays : '…', sum && sum.flagged ? `${sum.flagged} flagged check-ins` : 'No flags')}
@@ -379,7 +380,7 @@ function detail(root, id, { setHeader }) {
     const lead = (sum.days[0].day.getDay() + 6) % 7;
     return `<div class="cal">${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => `<div class="h">${d}</div>`).join('')}
       ${'<div></div>'.repeat(lead)}
-      ${sum.days.map((d) => { const sh = d.sessions.length && isShortDay(d.date, d.minutes, d.sessions.some((x) => !x.checkOut)); return `<div data-day="${d.date}" title="${sh ? `SHORT DAY — ${fmtMins(d.minutes)} (min ${minDayMins() / 60} h)` : `${d.kind}${d.minutes ? ` · ${fmtMins(d.minutes)}` : ''}`}" style="cursor:pointer;background:${sh ? '#D6454522' : `${color[d.kind]}${d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '55' : '22'}`};color:${sh ? '#b23535' : d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '#8a96a0' : color[d.kind]};${sh ? 'box-shadow:inset 0 0 0 2px #D64545;' : ''}${d.date === day ? 'outline:2px solid #1c2a33' : ''}">
+      ${sum.days.map((d) => { const sh = d.sessions.length && isShortDay(d.date, Math.max(d.span, d.minutes), d.sessions.some((x) => !x.checkOut)); return `<div data-day="${d.date}" title="${sh ? `SHORT DAY — total ${fmtMins(Math.max(d.span, d.minutes))} (min ${minDayMins() / 60} h)` : `${d.kind}${d.minutes ? ` · work ${fmtMins(d.minutes)} · total ${fmtMins(Math.max(d.span, d.minutes))}` : ''}`}" style="cursor:pointer;background:${sh ? '#D6454522' : `${color[d.kind]}${d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '55' : '22'}`};color:${sh ? '#b23535' : d.kind === 'upcoming' || d.kind === 'beforeJoin' ? '#8a96a0' : color[d.kind]};${sh ? 'box-shadow:inset 0 0 0 2px #D64545;' : ''}${d.date === day ? 'outline:2px solid #1c2a33' : ''}">
         ${d.day.getDate()}${d.minutes ? `<div style="font-size:9.5px;font-weight:500">${(d.minutes / 60).toFixed(1)}h</div>` : ''}</div>`; }).join('')}</div>
       <div class="row small muted" style="margin-top:10px;gap:14px">
         <span style="color:#2E9E6A">■ Present</span><span style="color:#E08E2B">■ Off</span><span style="color:#D64545">■ Absent</span><span style="color:#3A7BD5">■ Today</span><span style="color:#b23535">▣ Short day (&lt; ${minDayMins() / 60} h)</span></div>`;

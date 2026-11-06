@@ -2,7 +2,7 @@
 // per-worker attendance, and ID downloads for customers.
 import {
   store, saveWorker, deleteWorker, saveIdInfo, uploadIdFile, releaseWorkerLock, workerEntriesInRange,
-  closeWorkerEntry, deleteWorkerEntry, isAdmin, addWorkersToSession, saveWorkerRate, isShortDay, minDayMins, entryMinutes,
+  closeWorkerEntry, deleteWorkerEntry, isAdmin, addWorkersToSession, saveWorkerRate, isShortDay, minDayMins, entryMinutes, workerDayTimes,
 } from '../fb.js';
 import {
   esc, fromTz, icon, avatar, pill, fmtMins, fmtTime, fmtDay, fmtMonth, dateKey, monthKey, startOfMonth, endOfMonth,
@@ -304,20 +304,26 @@ function detail(el, id, { setHeader }) {
     el.querySelector('#m-lbl').textContent = fmtMonth(month);
     el.querySelector('#m-next').disabled = monthKey(month) >= monthKey(new Date());
     const list = entries || [];
-    const mins = list.reduce((a, e) => a + Math.max(0, Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000)), 0);
-    const days = new Set(list.map((e) => e.date)).size;
-    const dayTot = new Map();
-    list.forEach((e) => dayTot.set(e.date, (dayTot.get(e.date) || 0) + entryMinutes(e)));
+    // Work = on site; total = first in to last out each day (incl. travel between sites). Short days use the total.
+    const times = workerDayTimes(list);
+    const T = (d) => times.get(`${id}|${d}`) || { work: 0, total: 0, travel: 0 };
+    const dates = [...new Set(list.map((e) => e.date))];
+    const mins = dates.reduce((a, d) => a + T(d).work, 0);
+    const totalMins = dates.reduce((a, d) => a + T(d).total, 0);
+    const days = dates.length;
+    const dayTot = new Map(dates.map((d) => [d, T(d).total]));
     const shortDays = [...dayTot].filter(([d, m]) => isShortDay(d, m, list.some((e) => e.date === d && e.open))).map(([d]) => d);
+    const lastOfDay = new Set(dates.map((d) => list.filter((e) => e.date === d).sort((a, b) => a.checkIn - b.checkIn).pop()?.id));
     const rate = store.rates[id];
     box.innerHTML = `<div class="row card-pad" style="gap:18px;padding-top:0"><span><b>${days}</b> days</span>
-      <span style="color:${shortDays.length ? '#b23535' : 'inherit'}"><b>${shortDays.length}</b> short (&lt; ${minDayMins() / 60} h)</span><span><b>${fmtMins(mins)}</b> total</span>
+      <span style="color:${shortDays.length ? '#b23535' : 'inherit'}"><b>${shortDays.length}</b> short (&lt; ${minDayMins() / 60} h)</span><span><b>${fmtMins(mins)}</b> work on site</span><span><b>${fmtMins(totalMins)}</b> total incl. travel</span>
       ${isAdmin() && rate ? `<span>Rate <b>AED ${rate}</b>/day · <b>AED ${Math.round(rate * days * 100) / 100}</b> this month</span>` : ''}
       <span><b>${new Set(list.map((e) => e.siteId)).size}</b> sites</span></div>
       <div class="table-wrap"><table class="t"><tr><th>Date</th><th>Site</th><th>Added by</th><th>In</th><th>Out</th><th class="num">Hours</th><th></th></tr>
       ${list.length ? [...list].reverse().map((e) => `<tr class="${shortDays.includes(e.date) ? 'short-day' : ''}"><td class="nowrap">${fmtDay(e.inLocal)}${shortDays.includes(e.date) ? ` <span class="pill red" title="Day total ${fmtMins(dayTot.get(e.date))} — below ${minDayMins() / 60} h">Short day</span>` : ''}</td><td><b>${esc(e.siteName)}</b></td>
         <td>${esc(e.employeeName)}</td><td>${fmtTime(e.inLocal)}</td><td>${e.checkOut ? fmtTime(e.outLocal) : pill('On site', 'green', true)}</td>
-        <td class="num"><b>${fmtMins(Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000))}</b></td>
+        <td class="num"><b>${fmtMins(Math.round(((e.checkOut || new Date()) - e.checkIn) / 60000))}</b>${lastOfDay.has(e.id) && list.filter((x) => x.date === e.date).length > 1
+          ? `<div class="small muted nowrap" title="First in to last out, incl. travel between sites">day ${fmtMins(T(e.date).work)} work · ${fmtMins(T(e.date).total)} total</div>` : ''}</td>
         <td class="right nowrap">${e.open ? `<button class="btn sm ghost" data-close="${e.id}">End</button>` : ''}
           ${isAdmin() ? `<button class="btn sm ghost icon" data-edit-e="${e.id}" title="Edit times">${icon('edit', 14)}</button>` : ''}
           <button class="btn sm ghost icon" data-del="${e.id}" title="Delete">${icon('trash', 14)}</button></td></tr>`).join('')
