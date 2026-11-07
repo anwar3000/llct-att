@@ -20,7 +20,10 @@ export function employeeDays(user, sessions, offDays, from, to) {
   const now = new Date();
   const todayKey = dateKey(now);
   const approved = new Set(offDays.filter((o) => o.employeeId === user.id && o.status === 'approved').map((o) => o.date));
-  const mine = sessions.filter((s) => s.employeeId === user.id);
+  // Sessions made invalid by a missed sign-out don't count: that day is absent until management accepts the explanation.
+  const mine = sessions.filter((s) => s.employeeId === user.id && !s.invalid);
+  const invalidDays = new Map();
+  sessions.filter((s) => s.employeeId === user.id && s.invalid).forEach((s) => invalidDays.set(s.date, s.missedFlag || 'red'));
   const byDate = new Map();
   for (const s of mine) { if (!byDate.has(s.date)) byDate.set(s.date, []); byDate.get(s.date).push(s); }
   const joined = user.createdAt ? dateKey(user.createdAt) : null;
@@ -36,6 +39,7 @@ export function employeeDays(user, sessions, offDays, from, to) {
     else if (k === todayKey) kind = 'today';
     else if (joined && k < joined) kind = 'beforeJoin';
     else kind = 'absent';
+    if (!s.length && invalidDays.has(k) && kind !== 'off') kind = 'absent'; // not signed out → absent (even today)
     out.push({
       date: k, day: d, kind, sessions: s,
       minutes: s.reduce((a, x) => a + sessionMinutes(x, now), 0),
@@ -43,6 +47,7 @@ export function employeeDays(user, sessions, offDays, from, to) {
       span: dayTimes(s.map((x) => [x.checkIn.getTime(), (x.checkOut || now).getTime()])).total,
       flagged: s.some(sessionFlagged),
       offReason: isOff ? (approved.has(k) ? 'Approved leave' : 'Weekly off') : '',
+      missedFlag: invalidDays.get(k) || '',
     });
   }
   return out;

@@ -344,6 +344,10 @@ class AttendanceSession {
   final bool mocked;
   /// Checked in although the previous working day had too many GPS violations.
   final bool violationMark;
+  /// Never signed out and flagged by management (yellow / red). [invalid] = the day counts as absent.
+  final bool missedOut;
+  final bool invalid;
+  final String missedFlag;
   final String violationNote;
   final String note;
   final int? tz;
@@ -369,6 +373,9 @@ class AttendanceSession {
     this.outOutside = false,
     this.mocked = false,
     this.violationMark = false,
+    this.missedOut = false,
+    this.invalid = false,
+    this.missedFlag = '',
     this.violationNote = '',
     this.note = '',
     this.tz,
@@ -380,7 +387,7 @@ class AttendanceSession {
   /// Check-in / check-out as local time at the site.
   DateTime get inLocal => atZone(checkIn, tz);
   DateTime? get outLocal => checkOut == null ? null : atZone(checkOut!, outTz ?? tz);
-  bool get flagged => inOutside || outOutside || mocked || violationMark;
+  bool get flagged => inOutside || outOutside || mocked || violationMark || missedOut;
 
   Duration worked([DateTime? now]) =>
       (checkOut ?? now ?? DateTime.now()).difference(checkIn);
@@ -407,6 +414,9 @@ class AttendanceSession {
       outOutside: m['outOutside'] == true,
       mocked: m['mocked'] == true,
       violationMark: m['violationMark'] == true,
+      missedOut: m['missedOut'] == true,
+      invalid: m['invalid'] == true,
+      missedFlag: _str(m['missedFlag']),
       violationNote: _str(m['violationNote']),
       note: _str(m['note']),
       tz: _tz(m['tz']),
@@ -749,7 +759,8 @@ class MonthSummary {
         .map((o) => o.date)
         .toSet();
     final byDate = <String, List<AttendanceSession>>{};
-    for (final s in sessions) {
+    // Check-ins made invalid by a missed sign-out don't count — that day is absent.
+    for (final s in sessions.where((x) => !x.invalid)) {
       byDate.putIfAbsent(s.date, () => []).add(s);
     }
     final joined = user.createdAt == null

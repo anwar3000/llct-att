@@ -10,6 +10,7 @@ import '../../services/db.dart';
 import '../../services/tracking_service.dart';
 import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
+import '../../widgets/missed_signout.dart';
 import '../../widgets/profile_prompt.dart';
 import '../../widgets/service_alerts.dart';
 import '../admin/accounts_tab.dart';
@@ -33,6 +34,7 @@ class EmployeeShell extends StatefulWidget {
 class _EmployeeShellState extends State<EmployeeShell> {
   int _index = 0;
   StreamSubscription<AttendanceSession?>? _openSub;
+  StreamSubscription? _missedSub;
   AttendanceSession? _open;
 
   static const _titles = ['Today', 'My Attendance', 'Site Updates', 'Petty Cash'];
@@ -43,6 +45,8 @@ class _EmployeeShellState extends State<EmployeeShell> {
     // Missing mobile / email / passport / Emirates ID? Ask once when the app opens.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ProfilePrompt.maybeAsk(context, widget.me);
+      // Management flagged a check-in I never signed out of → explain (red message).
+      if (mounted) _missedSub = MissedSignout.watch(context, widget.me.id);
     });
     // Single source of truth for live tracking: run it whenever a session is open.
     _openSub = Db.openSession(widget.me.id).listen((s) {
@@ -59,6 +63,7 @@ class _EmployeeShellState extends State<EmployeeShell> {
   @override
   void dispose() {
     _openSub?.cancel();
+    _missedSub?.cancel();
     super.dispose();
   }
 

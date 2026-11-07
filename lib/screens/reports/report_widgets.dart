@@ -47,8 +47,17 @@ class ItemEditor extends StatefulWidget {
   final VoidCallback onRemove;
   final VoidCallback onChanged;
   final bool compact; // sign-off: only status & serials
+  /// Opens the product list for this line (search button, or tapping an empty item name).
+  final VoidCallback? onFind;
   const ItemEditor(
-      {super.key, required this.index, required this.item, required this.kind, required this.onRemove, required this.onChanged, this.compact = false});
+      {super.key,
+      required this.index,
+      required this.item,
+      required this.kind,
+      required this.onRemove,
+      required this.onChanged,
+      this.compact = false,
+      this.onFind});
 
   @override
   State<ItemEditor> createState() => _ItemEditorState();
@@ -56,6 +65,7 @@ class ItemEditor extends StatefulWidget {
 
 class _ItemEditorState extends State<ItemEditor> {
   final _sn = TextEditingController();
+  bool _askedOnce = false; // the product list opens by itself only the first time an empty name is tapped
 
   @override
   void dispose() {
@@ -106,7 +116,19 @@ class _ItemEditorState extends State<ItemEditor> {
                 ? Text('${it['name']}', style: const TextStyle(fontWeight: FontWeight.w700))
                 : TextFormField(
                     initialValue: '${it['name'] ?? ''}',
-                    decoration: const InputDecoration(labelText: 'Item name', isDense: true),
+                    decoration: InputDecoration(
+                      labelText: 'Item name',
+                      isDense: true,
+                      suffixIcon: widget.onFind == null
+                          ? null
+                          : IconButton(tooltip: 'Choose from products', onPressed: widget.onFind, icon: const Icon(Icons.manage_search)),
+                    ),
+                    onTap: () {
+                      if ('${it['name'] ?? ''}'.trim().isEmpty && !_askedOnce && widget.onFind != null) {
+                        _askedOnce = true;
+                        widget.onFind!();
+                      }
+                    },
                     onChanged: (v) => it['name'] = v,
                   ),
           ),
@@ -375,6 +397,106 @@ class _ClientPickerState extends State<_ClientPicker> {
           ),
         ),
       ]),
+    );
+  }
+}
+
+
+/// Product list from LLCT Invoicing: search and pick one (null = closed, type it by hand).
+Future<Map<String, dynamic>?> pickProduct(BuildContext context, {String start = ''}) {
+  return showModalBottomSheet<Map<String, dynamic>>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (c) => _ProductPicker(start: start),
+  );
+}
+
+class _ProductPicker extends StatefulWidget {
+  final String start;
+  const _ProductPicker({required this.start});
+  @override
+  State<_ProductPicker> createState() => _ProductPickerState();
+}
+
+class _ProductPickerState extends State<_ProductPicker> {
+  late final _q = TextEditingController(text: widget.start);
+  late Future<List<Map<String, dynamic>>> _load = InvReports.products();
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.85,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+            child: Row(children: [
+              const Expanded(child: Text('Choose a product', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Type by hand')),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              controller: _q,
+              autofocus: true,
+              decoration: const InputDecoration(isDense: true, prefixIcon: Icon(Icons.search), hintText: 'Name, model, description, barcode…'),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _load,
+              builder: (c, snap) {
+                if (snap.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(children: [
+                      Text('Could not load the product list: ${snap.error}'),
+                      TextButton(onPressed: () => setState(() => _load = InvReports.products(fresh: true)), child: const Text('Try again')),
+                    ]),
+                  );
+                }
+                if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+                final words = _q.text.trim().toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                String txt(Map p) => [p['name'], p['desc'], p['category'], p['barcode'], p['sku']].where((x) => x != null).join(' ').toLowerCase();
+                final l = snap.data!.where((p) => words.every((w) => txt(p).contains(w))).take(200).toList();
+                if (l.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(snap.data!.isEmpty ? 'The product list is empty — type the item by hand.' : 'No product found — close this and type the item by hand.',
+                        textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted)),
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 20),
+                  itemCount: l.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (c, i) {
+                    final p = l[i];
+                    final sub = [p['desc'], p['category']].where((x) => x != null && '$x'.trim().isNotEmpty).join(' · ');
+                    return ListTile(
+                      leading: const CircleAvatar(radius: 18, child: Icon(Icons.inventory_2_outlined, size: 18)),
+                      title: Text('${p['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: sub.isEmpty ? null : Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
+                      trailing: Text('${p['unit'] ?? ''}', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                      onTap: () => Navigator.pop(context, p),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }

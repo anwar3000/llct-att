@@ -146,7 +146,7 @@ export function mount(el, _params, { setHeader }) {
       ${forgot.map((s) => `<div class="list-item">${avatar(s.employeeName, 32, '#D64545')}
         <div class="grow"><b>${esc(s.employeeName)}</b> never checked out
         <div class="small muted">${esc(s.siteName)} · in ${fmtDateTime(s.inLocal)}</div></div>
-        <button class="btn sm ghost" data-close="${s.id}">Close session</button></div>`).join('')}
+        <a class="btn sm" href="#/missed">⚑ Flag / review</a><button class="btn sm ghost" data-close="${s.id}">Close session</button></div>`).join('')}
       ${flagged.map((s) => `<div class="list-item">${avatar(s.employeeName, 32, '#E08E2B')}
         <div class="grow"><b>${esc(s.employeeName)}</b> · ${esc(s.siteName)}
         <div class="small muted">${fmtTime(s.inLocal)} – ${s.checkOut ? fmtTime(s.outLocal) : 'now'}</div></div>

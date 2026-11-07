@@ -203,9 +203,47 @@ async function loadReportAccess() {
   } catch { /* no report access */ }
 }
 
+// ================================================================== missed sign-out: explanation asked by management
+let missedShown = '';
+function showMissed(list) {
+  const m = list[0];
+  document.getElementById('st-missed')?.remove();
+  if (!m) { missedShown = ''; return; }
+  if (missedShown === m.id && document.getElementById('st-missed')) return;
+  missedShown = m.id;
+  const day = (() => { try { return fmtDate(parseKey(m.date)); } catch { return m.date; } })();
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.id = 'st-missed';
+  back.innerHTML = `<div class="modal st-missed">
+    <div class="st-missed-top">⚑ Attendance not valid</div>
+    <div class="modal-body">
+      <p style="margin-top:0">You did not sign out properly on <b>${esc(day)}</b>${m.siteName ? ` (${esc(m.siteName)})` : ''}, and no GPS activity was recorded.</p>
+      <p><b>Your attendance for that day is not valid and is marked ABSENT</b> — ${m.flag === 'red' ? 'red' : 'yellow'} flag from management.</p>
+      ${m.note ? `<p class="small" style="background:#fff3f3;padding:8px 10px;border-radius:8px">Management: ${esc(m.note)}</p>` : ''}
+      <p class="small">If there was a technical problem (phone, battery, app, network), explain it here. Management will review it — if accepted, the day counts again.</p>
+      <textarea id="st-missed-t" rows="4" style="width:100%" placeholder="Write your explanation…"></textarea>
+      <div class="small" id="st-missed-err" style="color:#b23535"></div>
+    </div>
+    <div class="modal-foot"><button class="st-btn primary block" id="st-missed-ok">Send explanation</button></div></div>`;
+  (document.getElementById('modal-root') || document.body).appendChild(back);
+  back.querySelector('#st-missed-ok').onclick = async (e) => {
+    const t = back.querySelector('#st-missed-t').value.trim();
+    if (t.length < 5) { back.querySelector('#st-missed-err').textContent = 'Please write what happened.'; return; }
+    e.currentTarget.disabled = true;
+    try {
+      await updateDoc(doc(db, 'missedOuts', m.id), { status: 'explained', explanation: t, explainedAt: serverTimestamp() });
+      back.remove(); missedShown = '';
+      toast('Explanation sent to management');
+    } catch (x) { e.currentTarget.disabled = false; back.querySelector('#st-missed-err').textContent = friendlyError(x); }
+  };
+}
+
 function start() {
   const uid = S.me.id;
   loadReportAccess();
+  S.subs.push(onSnapshot(query(C('missedOuts'), where('employeeId', '==', uid), where('status', '==', 'asked')),
+    (q) => showMissed(q.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => String(a.date).localeCompare(String(b.date)))), () => {}));
   const on = (q, fn) => S.subs.push(onSnapshot(q, fn, (e) => { console.error(e); toast(friendlyError(e), true); }));
   on(C('sites'), (s) => { S.sites = s.docs.map(mapSite).sort((a, b) => a.name.localeCompare(b.name)); draw(); });
   on(query(C('attendance'), where('employeeId', '==', uid), where('status', '==', 'open')), (s) => {

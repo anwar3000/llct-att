@@ -51,7 +51,7 @@ export async function dailyMatrixReport(month) {
     const days = employeeDays(u, sessions, offs, from, to);
     const cells = days.map((d) => (d.kind === 'worked' || (d.kind === 'today' && d.minutes)
       ? (isShortDay(d.date, d.minutes, d.sessions.some((x) => !x.checkOut)) ? `${hoursDec(d.minutes)}*` : hoursDec(d.minutes))
-      : d.kind === 'off' ? 'OFF' : d.kind === 'absent' ? 'A' : ''));
+      : d.kind === 'off' ? 'OFF' : d.kind === 'absent' ? (d.missedFlag ? 'A!' : 'A') : ''));
     const worked = days.filter((d) => d.sessions.length).length;
     const mins = days.reduce((a, d) => a + d.minutes, 0);
     return [u.name, ...cells, worked, days.filter((d) => d.kind === 'off').length, days.filter((d) => d.kind === 'absent').length, hoursDec(mins)];
@@ -64,7 +64,7 @@ export async function dailyMatrixReport(month) {
   cols.push('Worked', 'Off', 'Absent', 'Hours');
   return {
     title: `Daily attendance register — ${fmtMonth(month)}`,
-    subtitle: `Numbers are hours worked · * = short day (under ${minDayMins() / 60} h) · OFF = off day · A = absent`,
+    subtitle: `Numbers are hours worked · * = short day (under ${minDayMins() / 60} h) · OFF = off day · A = absent · A! = absent, not signed out (flagged)`,
     filename: `attendance-register-${from.slice(0, 7)}`,
     orientation: 'landscape',
     pdfFont: 6,
@@ -840,7 +840,7 @@ async function toPdf(rep) {
           d.cell.styles.textColor = [178, 53, 53]; d.cell.styles.fillColor = [251, 230, 230]; d.cell.styles.fontStyle = 'bold';
         }
         if (d.section === 'body' && rep.pdfFont && typeof d.cell.raw === 'string') {
-          if (d.cell.raw === 'A') d.cell.styles.textColor = [214, 69, 69];
+          if (d.cell.raw === 'A' || d.cell.raw === 'A!') d.cell.styles.textColor = [214, 69, 69];
           if (d.cell.raw === 'OFF') d.cell.styles.textColor = [224, 142, 43];
         }
       },

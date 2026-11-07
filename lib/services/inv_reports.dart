@@ -494,6 +494,29 @@ class InvReports {
     }
   }
 
+  static List<Map<String, dynamic>>? _products;
+  static DateTime? _productsAt;
+
+  /// LLCT Invoicing's product list (inv_products), cached for 10 minutes.
+  static Future<List<Map<String, dynamic>>> products({bool fresh = false}) async {
+    if (!fresh && _products != null && DateTime.now().difference(_productsAt!) < const Duration(minutes: 10)) return _products!;
+    final q = await _fs.collection('inv_products').get();
+    _products = q.docs.map((d) => {...d.data(), 'id': d.id}).toList()
+      ..sort((a, b) => '${a['name'] ?? ''}'.toLowerCase().compareTo('${b['name'] ?? ''}'.toLowerCase()));
+    _productsAt = DateTime.now();
+    return _products!;
+  }
+
+  /// Fills a report line from a product (name, description, unit; never the price).
+  static void fillFromProduct(Map<String, dynamic> it, Map<String, dynamic> p) {
+    it['name'] = '${p['name'] ?? ''}';
+    final desc = '${p['desc'] ?? ''}';
+    if (desc.isNotEmpty || '${it['desc'] ?? ''}'.isEmpty) it['desc'] = desc;
+    it['unit'] = '${p['unit'] ?? ''}'.isEmpty ? (it['unit'] ?? 'pcs') : '${p['unit']}';
+    it['pid'] = p['id'];
+    if ('${it['qty'] ?? ''}'.isEmpty || it['qty'] == 0) it['qty'] = 1;
+  }
+
   /// Product with this barcode or SKU in LLCT Invoicing's product list (inv_products), if any.
   static Future<Map<String, dynamic>?> findProduct(String code) async {
     for (final f in ['barcode', 'sku']) {

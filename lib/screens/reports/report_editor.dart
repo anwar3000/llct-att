@@ -357,6 +357,21 @@ class _ReportEditorState extends State<ReportEditor> {
     showSnack(context, p == null ? 'Code $code is not in the product list — added as a new line.' : 'Added ${p['name']}');
   }
 
+  /// Product list → a new line (or the first empty one).
+  Future<void> _addFromProducts() async {
+    final p = await pickProduct(context);
+    if (p == null || !mounted) return;
+    final items = _d!['items'] as List<Map<String, dynamic>>;
+    final blank = items.indexWhere((i) => '${i['name'] ?? ''}'.trim().isEmpty && '${i['desc'] ?? ''}'.trim().isEmpty);
+    setState(() {
+      final it = blank >= 0 ? items[blank] : InvReports.newItem(_kind);
+      InvReports.fillFromProduct(it, p);
+      if (blank < 0) items.add(it);
+      _gen++;
+    });
+    showSnack(context, 'Added ${p['name']}');
+  }
+
   Future<void> _chooseClient() async {
     final c = await pickInvClient(context, _clients);
     if (c != null) _pickClient(c, site: c.sites.length == 1 ? c.sites.first : null);
@@ -576,6 +591,7 @@ class _ReportEditorState extends State<ReportEditor> {
           RTitle(k.isService ? 'Parts / items used (optional)' : 'Items',
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(tooltip: 'Scan product barcode', onPressed: _scanProduct, icon: const Icon(Icons.qr_code_scanner)),
+                IconButton(tooltip: 'Add from products', onPressed: _addFromProducts, icon: const Icon(Icons.manage_search)),
                 TextButton.icon(
                     onPressed: () => setState(() {
                           items.add(InvReports.newItem(k));
@@ -596,7 +612,21 @@ class _ReportEditorState extends State<ReportEditor> {
                 _gen++;
               }),
               onChanged: () => setState(() {}),
+              onFind: () async {
+                final p = await pickProduct(context, start: '${items[i]['name'] ?? ''}');
+                if (p == null || !mounted) return;
+                setState(() {
+                  InvReports.fillFromProduct(items[i], p);
+                  _gen++;
+                });
+              },
             ),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+            onPressed: _addFromProducts,
+            icon: const Icon(Icons.manage_search),
+            label: const Text('Add from products'),
+          ),
         ]),
         const SizedBox(height: 12),
         PhotosCard(

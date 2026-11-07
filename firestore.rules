@@ -175,6 +175,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ------------------------------------------------------ missed sign-outs
+    // Management flags a check-in that was never signed out (yellow / red); the employee writes an
+    // explanation; management accepts it (valid day) or marks the day absent (red flag, salary).
+    match /missedOuts/{id} {
+      allow read: if isManagement() || owns();
+      allow create, delete: if isManagement();
+      allow update: if isManagement() || (owns() && resource.data.status == 'asked'
+                      && request.resource.data.status == 'explained'
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'explanation', 'explainedAt']));
+    }
+
     // ------------------------------------------------------ geofence alerts
     // Raised by the employee's phone when they leave the site while still checked in.
     match /alerts/{id} {

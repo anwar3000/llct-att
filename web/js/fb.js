@@ -91,7 +91,8 @@ export function mapSession(d) {
     checkIn: toDate(m.checkIn) || new Date(), checkOut: toDate(m.checkOut),
     inLat: m.inLat ?? null, inLng: m.inLng ?? null, inAccuracy: m.inAccuracy ?? null, inDistance: m.inDistance ?? null,
     inOutside: m.inOutside === true, outLat: m.outLat ?? null, outLng: m.outLng ?? null, outDistance: m.outDistance ?? null,
-    outOutside: m.outOutside === true, mocked: m.mocked === true, violationMark: m.violationMark === true, violationNote: m.violationNote || '', note: m.note || '', status: m.status || '',
+    outOutside: m.outOutside === true, mocked: m.mocked === true, violationMark: m.violationMark === true,
+    missedOut: m.missedOut === true, invalid: m.invalid === true, missedFlag: m.missedFlag || '', violationNote: m.violationNote || '', note: m.note || '', status: m.status || '',
     tz: tzOf(m.tz), outTz: tzOf(m.outTz) ?? tzOf(m.tz), editedAt: toDate(m.editedAt), editedBy: m.editedBy || '',
   });
 }
@@ -619,7 +620,7 @@ export const saveWorkerRate = (workerId, dailyRate) =>
 
 export const sessionMinutes = (s, now = new Date()) =>
   Math.max(0, Math.round(((s.checkOut || now) - s.checkIn) / 60000));
-export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked || s.violationMark;
+export const sessionFlagged = (s) => s.inOutside || s.outOutside || s.mocked || s.violationMark || s.missedOut;
 
 // ------------------------------------------------------------------ roles
 // admin   = full access incl. accounts (petty cash, budgets) and staff logins
@@ -1346,4 +1347,58 @@ export async function movePettyReceipts(progress = () => {}) {
   }
   if (inBatch) { await b.commit(); done += inBatch; progress(done, docs.length); }
   return done;
+}
+
+// ------------------------------------------------------------------ missed sign-outs
+// A check-in left open past its day. Management gives a yellow or red flag: the session is closed at the last
+// GPS point and marked invalid (the day counts as absent). The employee sees a red popup and writes an
+// explanation; management then accepts it (valid day, optional real check-out time) or keeps it absent (red flag).
+export function mapMissed(d) {
+  const m = d.data() || {};
+  return {
+    id: d.id, sessionId: m.sessionId || d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', date: m.date || '',
+    siteName: m.siteName || '', checkIn: toDate(m.checkIn), closedAt: toDate(m.closedAt), lastSeen: toDate(m.lastSeen),
+    flag: m.flag || 'yellow', status: m.status || 'asked', note: m.note || '', askedBy: m.askedBy || '', askedAt: toDate(m.askedAt),
+    explanation: m.explanation || '', explainedAt: toDate(m.explainedAt), decision: m.decision || '', decisionNote: m.decisionNote || '',
+    decidedBy: m.decidedBy || '', decidedAt: toDate(m.decidedAt),
+  };
+}
+export const watchMissed = (cb) => onSnapshot(C('missedOuts'), (s) => cb(s.docs.map(mapMissed)
+  .sort((a, b) => (b.askedAt || 0) - (a.askedAt || 0))), (e) => { console.error(e); cb(null, e); });
+/** Last GPS point of this person while checked in, after the check-in (or null). */
+export function lastSeenFor(s) {
+  const u = store.user(s.employeeId);
+  const ll = u?.lastLocation;
+  return ll?.at && ll.at > s.checkIn ? ll.at : null;
+}
+export async function flagMissed(s, flag, note = '') {
+  const end = lastSeenFor(s) || s.checkIn;
+  const b = writeBatch(db);
+  b.update(doc(db, 'attendance', s.id), {
+    checkOut: Timestamp.fromDate(end), durationMin: Math.round((end - s.checkIn) / 60000), status: 'closed',
+    missedOut: true, invalid: true, missedFlag: flag, note: `${s.note} [not signed out — ${flag} flag]`.trim(), ...(s.tz != null ? { outTz: s.tz } : {}),
+  });
+  b.set(doc(db, 'missedOuts', s.id), {
+    sessionId: s.id, employeeId: s.employeeId, employeeName: s.employeeName, date: s.date, siteName: s.siteName,
+    checkIn: Timestamp.fromDate(s.checkIn), closedAt: Timestamp.fromDate(end), lastSeen: lastSeenFor(s) ? Timestamp.fromDate(end) : null,
+    flag, status: 'asked', note, askedBy: store.me?.name || '', askedAt: serverTimestamp(),
+  });
+  await b.commit();
+  await closeWorkersForSession(s.id, end).catch(() => {});
+}
+/** Explanation accepted: the day is valid again (check-out at the time given), the flag stays on record. */
+export async function acceptMissed(m, outAt, note = '') {
+  const b = writeBatch(db);
+  const up = { invalid: false };
+  if (outAt && m.checkIn && outAt > m.checkIn) { up.checkOut = Timestamp.fromDate(outAt); up.durationMin = Math.round((outAt - m.checkIn) / 60000); }
+  b.update(doc(db, 'attendance', m.sessionId), up);
+  b.update(doc(db, 'missedOuts', m.id), { status: 'accepted', decision: 'accepted', decisionNote: note, decidedBy: store.me?.name || '', decidedAt: serverTimestamp() });
+  await b.commit();
+}
+/** Explanation not satisfactory (or none): absent with a red flag. */
+export async function rejectMissed(m, note = '') {
+  const b = writeBatch(db);
+  b.update(doc(db, 'attendance', m.sessionId), { invalid: true, missedFlag: 'red' });
+  b.update(doc(db, 'missedOuts', m.id), { status: 'absent', flag: 'red', decision: 'absent', decisionNote: note, decidedBy: store.me?.name || '', decidedAt: serverTimestamp() });
+  await b.commit();
 }

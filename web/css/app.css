@@ -590,3 +590,11 @@ table.t tr.boq-sec td { background: #fff4e2; font-weight: 700; letter-spacing: .
 .cd-card .cd-cap .cd-size { display: none; }
 .cd-card .cd-drop { grid-column: 1 / -1; min-height: 96px; }
 @media (max-width: 560px) { .cd-card .cd-file { flex-basis: auto; } .cd-card .cd-pv { height: 128px; } }
+
+/* ---------- Missed sign-outs */
+.ms-intro ol { margin: 6px 0 0; padding-left: 20px; line-height: 1.55; }
+.ms-hot { border-color: #f1c7c7; box-shadow: 0 0 0 3px rgba(214, 69, 69, .06); }
+.ms-row { align-items: flex-start; flex-wrap: wrap; }
+.ms-expl { margin-top: 6px; padding: 8px 10px; background: #fff8ec; border-left: 3px solid #E0A23A; border-radius: 6px; font-size: 13.5px; white-space: pre-wrap; }
+.btn.ms-y { background: #F2B544; border-color: #E0A23A; color: #3b2a05; }
+.btn.ms-r { background: #D64545; border-color: #D64545; color: #fff; }
