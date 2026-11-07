@@ -32,13 +32,13 @@ function fbConfig() {
   if (is_file($cache) && ($c = json_decode((string) file_get_contents($cache), true)) && !empty($c['apiKey'])) return $c;
   foreach (['https://anwar3000.github.io/llct-att/js/config.js', 'https://anwar3000.github.io/llct-invoice/js/config.js'] as $u) {
     $js = http('GET', $u)['body'] ?? '';
-    if (preg_match("/apiKey\s*:\s*['\"]([^'\"]+)/", $js, $k) && preg_match("/projectId\s*:\s*['\"]([^'\"]+)/", $js, $p)) {
+    if (preg_match("/[\"']?apiKey[\"']?\s*:\s*[\"']([^\"']+)/", $js, $k) && preg_match("/[\"']?projectId[\"']?\s*:\s*[\"']([^\"']+)/", $js, $p)) {
       $c = ['apiKey' => $k[1], 'projectId' => $p[1]];
       @file_put_contents($cache, json_encode($c));
       return $c;
     }
   }
-  fail(500, 'Firebase config not found — create config.php (see README).');
+  fail(500, 'Firebase config not found: this server could not read ' . (function_exists('curl_init') || ini_get('allow_url_fopen') ? 'the web app config' : 'the web (install php-curl)') . ' — create config.php (see README).');
 }
 function http($method, $url, $headers = []) {
   if (function_exists('curl_init')) {
