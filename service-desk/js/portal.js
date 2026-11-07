@@ -2,9 +2,9 @@
 // Installable as a phone app (the link is remembered on this device).
 import {
   db, doc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp,
-  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, DOC_MAX, DOC_MAX_SERVER, fileServer, COMPANY, icon, randToken,
+  SERVICE_TYPES, activeTypes, loadTypes, PRIORITIES, SLOTS, typeLabel, typesText, prio, st, slotLabel, clientMessage, publicView, prefText, faultLabel, amcStatus, RESULT_COLOR, DEVICE_LISTS, listOfOther, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, DOC_MAX, DOC_MAX_SERVER, fileServer, docApi, setDocSession, COMPANY, icon, randToken,
   $, $$, esc, fmtDate, fmtDT, ago, dateKey, hasGPS, newTicketNo, compressImage, toast, friendly, toDate,
-} from './sd.js?v=29';
+} from './sd.js?v=30';
 
 window.__sdStarted = true;
 
@@ -146,7 +146,84 @@ function footHtml() {
 const docBase = () => ['svcPortals', token, 'docs'];
 const docAlerts = () => groupDocs(S.docs).filter((g) => ['bad', 'warn'].includes(expiryStatus(g.head.expiry).tone)).length;
 const fileIcon = (d) => (/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE');
+// ---- documents sign-in (files.php on the server checks the passwords)
+const sessKey = () => 'llct-docs-' + token;
+const lsGetS = (k) => { try { return localStorage.getItem(k) || ''; } catch (_) { return ''; } };
+const lsSetS = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (_) { /* private mode */ } };
+async function checkDocAuth() {
+  const ok = await fileServer();
+  if (!ok) { S.docAuth = { server: false, required: false }; if (S.tab === 'docs') render(); return; }
+  setDocSession(lsGetS(sessKey()));
+  try { const j = await docApi('status', { t: token }); S.docAuth = { server: true, required: j.required, hasUsers: j.hasUsers, me: j.me }; if (!j.me) { setDocSession(''); lsSetS(sessKey(), ''); } }
+  catch (e) { S.docAuth = { server: true, required: true, err: friendly(e) }; }
+  if (S.tab === 'docs') render();
+}
+function docLoginHtml() {
+  const a = S.docAuth;
+  return `<div class="sheet docsheet"><div class="doclogin">
+    <div class="dlk">🔒</div><h2>Documents are password protected</h2>
+    <p class="small muted">${a.hasUsers ? 'Sign in with the username and password you were given.' : 'Ask Leaders Line for your documents login (call 055 238 2293).'}</p>
+    <form id="dl-f" class="stack" style="margin-top:12px" autocomplete="on">
+      <label class="field"><span>Username</span><input id="dl-u" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label class="field"><span>Password</span><input id="dl-p" type="password" autocomplete="current-password"></label>
+      <button class="btn primary block" id="dl-go" type="submit">Sign in</button>
+      ${a.err ? `<p class="small" style="color:var(--trim)">${esc(a.err)}</p>` : ''}
+    </form></div></div>`;
+}
+function docBarHtml() {
+  const a = S.docAuth || {}; if (!a.server) return '';
+  const me = a.me; const mgr = me && ['master', 'admin'].includes(me.role);
+  return `<div class="docbar">${me ? `<span>🔓 Signed in as <b>${esc(me.name || me.u)}</b>${me.role === 'master' ? ' <span class="muted">(master password)</span>' : me.role === 'admin' ? ' <span class="muted">(manages users)</span>' : ''}</span>
+      <span class="dbl">${me.role !== 'master' ? '<button type="button" class="linkbtn sm" id="db-pw">Change password</button>' : ''}${mgr ? `<button type="button" class="linkbtn sm" id="db-users">${S.docUsersOpen ? 'Hide users' : 'Users & password'}</button>` : ''}<button type="button" class="linkbtn sm" id="db-out">Sign out</button></span>`
+    : `<span class="muted">${a.required ? '' : 'Password is off for these documents.'}</span><span class="dbl"><button type="button" class="linkbtn sm" id="db-in">Sign in to manage users</button></span>`}</div>
+    ${S.docUsersOpen && mgr ? docUsersHtml() : ''}`;
+}
+function docUsersHtml() {
+  const u = S.docUsers;
+  if (!u) return '<div class="docusers"><p class="small muted">Loading users…</p></div>';
+  return `<div class="docusers">
+    <label class="pick reqrow"><input type="checkbox" id="du-req" ${u.required ? 'checked' : ''}> <span><b>Password required</b> to open these documents<br><span class="small muted">Untick to let anyone with this service link see the documents without a password.</span></span></label>
+    <div class="ulist">${u.users.length ? u.users.map((x) => `<div class="urow"><span class="uav">${esc((x.name || x.u).charAt(0).toUpperCase())}</span><span class="grow"><b>${esc(x.name || x.u)}</b> <span class="muted small">@${esc(x.u)}${x.admin ? ' · manages users' : ''}</span></span>
+        <button type="button" class="btn sm" data-upw="${esc(x.u)}">Reset password</button><button type="button" class="btn sm bad" data-udel="${esc(x.u)}" aria-label="Remove ${esc(x.u)}">✕</button></div>`).join('') : '<p class="small muted">No users yet — add the first one below.</p>'}</div>
+    <div class="uadd"><b>Add a user</b><div class="docgrid" style="margin-top:6px">
+      <label class="field"><span>Name</span><input id="ua-n" placeholder="e.g. Ahmed (Facilities)"></label>
+      <label class="field"><span>Username</span><input id="ua-u" autocapitalize="none" spellcheck="false" placeholder="ahmed"></label>
+      <label class="field"><span>Password</span><input id="ua-p" type="text" autocomplete="new-password" placeholder="at least 6 characters"></label></div>
+      <div class="row" style="margin-top:8px;justify-content:space-between"><label class="pick" style="border:0;padding:0"><input type="checkbox" id="ua-a"> Can add and remove users</label><button type="button" class="btn primary sm" id="ua-go">Add user</button></div></div>
+  </div>`;
+}
+async function loadDocUsers() { try { S.docUsers = await docApi('users', { t: token }); } catch (e) { toast(friendly(e), true); S.docUsersOpen = false; } if (S.tab === 'docs') render(); }
+function bindDocAuth() {
+  const lf = $('#dl-f');
+  if (lf) lf.onsubmit = async (ev) => {
+    ev.preventDefault(); const b = $('#dl-go'); b.disabled = true; b.textContent = 'Signing in…';
+    try { const j = await docApi('login', { t: token, u: $('#dl-u').value.trim(), p: $('#dl-p').value }, true); setDocSession(j.session); lsSetS(sessKey(), j.session); S.docAuth = { ...S.docAuth, me: { u: $('#dl-u').value.trim().toLowerCase() || 'master', name: j.name, role: j.role }, err: '' }; S.docLogin = false; render(); }
+    catch (e) { b.disabled = false; b.textContent = 'Sign in'; S.docAuth.err = friendly(e); const p2 = lf.querySelector('p.small'); if (p2) p2.textContent = S.docAuth.err; else lf.insertAdjacentHTML('beforeend', `<p class="small" style="color:var(--trim)">${esc(S.docAuth.err)}</p>`); }
+  };
+  const out = $('#db-out'); if (out) out.onclick = () => { setDocSession(''); lsSetS(sessKey(), ''); S.docAuth.me = null; S.docUsersOpen = false; S.docUsers = null; render(); };
+  const din = $('#db-in'); if (din) din.onclick = () => { S.docLogin = true; render(); };
+  const us = $('#db-users'); if (us) us.onclick = () => { S.docUsersOpen = !S.docUsersOpen; if (S.docUsersOpen) { S.docUsers = null; loadDocUsers(); } render(); };
+  const pw = $('#db-pw'); if (pw) pw.onclick = async () => {
+    const np = prompt('New password (at least 6 characters):'); if (!np) return;
+    try { await docApi('passwd', { t: token, u: S.docAuth.me.u, p: np }, true); toast('Password changed'); } catch (e) { toast(friendly(e), true); }
+  };
+  const rq = $('#du-req'); if (rq) rq.onchange = async () => {
+    if (!rq.checked && !confirm('Turn the password off? Anyone with this service link will be able to see and add documents.')) { rq.checked = true; return; }
+    try { const j = await docApi('required', { t: token, on: rq.checked ? '1' : '0' }, true); S.docAuth.required = j.required; S.docUsers.required = j.required; toast(j.required ? 'Password is on' : 'Password is off'); render(); } catch (e) { toast(friendly(e), true); rq.checked = !rq.checked; }
+  };
+  const ua = $('#ua-go'); if (ua) ua.onclick = async () => {
+    ua.disabled = true;
+    try { await docApi('useradd', { t: token, name: $('#ua-n').value.trim(), u: $('#ua-u').value.trim(), p: $('#ua-p').value, admin: $('#ua-a').checked ? '1' : '0' }, true); toast('User added — give them the username and password'); S.docAuth.hasUsers = true; await loadDocUsers(); }
+    catch (e) { toast(friendly(e), true); ua.disabled = false; }
+  };
+  $$('[data-udel]').forEach((b) => (b.onclick = async () => { if (!confirm(`Remove user ${b.dataset.udel}?`)) return; try { await docApi('userdel', { t: token, u: b.dataset.udel }, true); toast('User removed'); await loadDocUsers(); } catch (e) { toast(friendly(e), true); } }));
+  $$('[data-upw]').forEach((b) => (b.onclick = async () => { const np = prompt(`New password for ${b.dataset.upw} (at least 6 characters):`); if (!np) return; try { await docApi('passwd', { t: token, u: b.dataset.upw, p: np }, true); toast('Password reset'); } catch (e) { toast(friendly(e), true); } }));
+}
+
 function docsHtml() {
+  if (S.docAuth === undefined) { S.docAuth = null; checkDocAuth(); }
+  if (!S.docAuth) return '<div class="sheet docsheet"><p class="muted">Loading…</p></div>';
+  if (S.docAuth.server && ((S.docAuth.required && !S.docAuth.me) || S.docLogin)) return docLoginHtml();
   if (S.docMax === undefined) { S.docMax = DOC_MAX; fileServer().then((ok) => { if (ok) { S.docMax = DOC_MAX_SERVER; if (S.tab === 'docs' && !S.docBusy) render(); } }); }
   const f = S.docForm || (S.docForm = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' });
   const files = S.docFiles || (S.docFiles = []);
@@ -154,7 +231,7 @@ function docsHtml() {
   const into = S.docAddTo ? groups.find((g) => g.key === S.docAddTo) : null; // adding pages to an existing document
   const ty = docTypeOf(into ? into.head.type : f.type); const sites = S.portal.sites || [];
   const total = files.reduce((n, x) => n + x.size, 0);
-  return `<div class="sheet docsheet">
+  return `<div class="sheet docsheet">${docBarHtml()}
     <div class="dochead"><div><h2>Your documents</h2><p class="small muted">Trade licence, SIRA certificate and NOC, approved drawings and other papers for your sites. A document can have several files — e.g. every page of a drawing. Our team is reminded before anything expires.</p></div>
       <button type="button" class="btn primary" id="dn-open">${S.docAdd ? 'Close' : '+ Upload document'}</button></div>
     ${S.docAdd ? `<div class="docform">
@@ -183,6 +260,8 @@ function docsHtml() {
   </div>`;
 }
 function bindDocs() {
+  bindDocAuth();
+  if (!$('#dn-open')) return; // sign-in screen
   const f = S.docForm; S.docFiles = S.docFiles || [];
   const keep = () => { if (!$('#dn-type')) return; f.type = $('#dn-type').value; f.number = $('#dn-num').value.trim(); f.expiry = $('#dn-exp').value; f.notes = $('#dn-notes').value.trim(); f.siteId = $('#dn-site') ? $('#dn-site').value : ''; };
   $('#dn-open').onclick = () => { keep(); S.docAdd = !S.docAdd; S.docAddTo = null; if (!S.docAdd) S.docFiles = []; render(); };
@@ -214,7 +293,7 @@ function bindDocs() {
     } catch (e) { S.docFiles = S.docFiles.slice(done); toast(`${done ? done + ' uploaded; ' : ''}${friendly(e)}`, true); }
     S.docBusy = false; render();
   };
-  $$('[data-dv]').forEach((b) => (b.onclick = () => { const d = S.docs.find((x) => x.id === b.dataset.dv); if (d) openDocFile(docBase(), d).catch((e) => toast(friendly(e), true)); }));
+  $$('[data-dv]').forEach((b) => (b.onclick = () => { const d = S.docs.find((x) => x.id === b.dataset.dv); if (d) openDocFile(docBase(), d).catch((e) => { if (/sign in/i.test(e.message || '')) { S.docAuth.me = null; setDocSession(''); lsSetS(sessKey(), ''); render(); } toast(friendly(e), true); }); }));
   $$('[data-dd]').forEach((b) => (b.onclick = async () => {
     const g = groupDocs(S.docs).find((x) => x.key === b.dataset.dd); if (!g) return;
     if (!confirm(`Delete ${docTypeOf(g.head.type).t}${g.head.number ? ' ' + g.head.number : ''}${g.docs.length > 1 ? ` (all ${g.docs.length} files)` : ''}?`)) return;

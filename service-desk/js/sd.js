@@ -340,7 +340,23 @@ export async function fileServer() {
 let idTokenFn = null;
 /** The desk passes a function giving the signed-in staff member's Firebase ID token (sent to files.php). */
 export const setIdTokenProvider = (fn) => { idTokenFn = fn; };
-const authHeaders = async () => { try { const t = idTokenFn ? await idTokenFn() : ''; return t ? { 'X-Id-Token': t } : {}; } catch (_) { return {}; } };
+let docSession = '';
+/** The client's documents sign-in (from files.php), sent with every file request. */
+export const setDocSession = (s) => { docSession = s || ''; };
+const authHeaders = async () => {
+  const h = {}; if (docSession) h['X-Doc-Session'] = docSession;
+  try { const t = idTokenFn ? await idTokenFn() : ''; if (t) h['X-Id-Token'] = t; } catch (_) { /* not signed in */ }
+  return h;
+};
+/** Call files.php (documents sign-in and users). Throws with the server's message on failure. */
+export async function docApi(action, params, post) {
+  const q = new URLSearchParams({ a: action, ...(post ? {} : params) });
+  const init = { headers: await authHeaders(), cache: 'no-store' };
+  if (post) { const fd = new FormData(); Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v)); init.method = 'POST'; init.body = fd; }
+  const r = await fetch(`${FILES_URL}?${q}`, init); let j = null; try { j = await r.json(); } catch (_) { /* not JSON */ }
+  if (!r.ok || !j || !j.ok) { const e = new Error((j && j.error) || `Request failed (${r.status})`); e.status = r.status; throw e; }
+  return j;
+}
 /** Space used per customer on the server (staff). */
 export async function serverUsage() {
   if (!(await fileServer())) return null;

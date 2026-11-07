@@ -7,3 +7,5 @@ build/
 android/app/google-services.json
 lib/firebase_options.dart
 web/js/config.js
+service-desk/docpass.php
+service-desk/config.php

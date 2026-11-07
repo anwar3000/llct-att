@@ -9,9 +9,9 @@ import {
   SERVICE_TYPES, DEFAULT_TYPES, activeTypes, loadTypes, saveTypes, ICON_KEYS, icon, PRIORITIES, SLOTS, STATUS, OPEN_STATUSES, typeLabel, typesText, mirrorPath, hasClientPage, prio, st, slotLabel, clientMessage, publicView, prefText, RESULTS, RESULT_COLOR, faultLabel, leanEquipment, OTHER_TYPES, amcStatus, DEVICE_LISTS, listOfOther,
   $, $$, esc, toDate, fmtDate, fmtTime, fmtDT, ago, dateKey, localInput, hasGPS, distM, fmtDist, mapsLink, telLink, waLink,
   randToken, newTicketNo, reportLink, reportViewLink, toast, friendly, beep, compressImage,
-  collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, setIdTokenProvider, serverUsage, fileServer,
-} from './sd.js?v=29';
-import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=29';
+  collectionGroup, DOC_TYPES, docTypeOf, expiryStatus, uploadDocFile, openDocFile, deleteDocFile, fmtSize, groupDocs, newGroupId, setIdTokenProvider, serverUsage, fileServer, docApi,
+} from './sd.js?v=30';
+import { periodPdf, clientPdf, ticketPdf } from './pdf.js?v=30';
 window.__sdStarted = true;
 
 const auth = getAuth(app);
@@ -790,13 +790,22 @@ function docsModal(clientId) {
   const o = modal(`<h2 class="grow">${esc(c.name)} — documents</h2>`, '<div id="dm"></div>', '<button class="btn" data-x>Close</button>', { wide: true });
   o.dataset.docs = clientId;
   let add = false, into = null, busy = false, files = []; const f = { type: 'tl', number: '', expiry: '', siteId: '', notes: '' };
+  let acc = null, accErr = '', accOpen = false;
+  const loadAcc = async () => { if (!link || !(await fileServer())) { accErr = 'Passwords need files.php on the server.'; acc = null; return draw(); } try { acc = await docApi('users', { t: link.id }); accErr = ''; } catch (e) { accErr = friendly(e); } draw(); };
   const base = (d) => ['svcPortals', d.portal, 'docs'];
   const ficon = (d) => (/pdf/i.test(d.mime) ? 'PDF' : /image/i.test(d.mime) ? 'IMG' : 'FILE');
   const draw = () => {
     const groups = groupDocs(clientDocs(clientId)).sort((a, b) => DOC_TYPES.findIndex((x) => x.k === a.head.type) - DOC_TYPES.findIndex((x) => x.k === b.head.type));
     const g0 = into ? groups.find((g) => g.key === into) : null;
     const ty = docTypeOf(g0 ? g0.head.type : f.type);
-    $('#dm', o).innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="small muted">Clients upload these from their service link (Documents tab). A document can have several files, e.g. the pages of a drawing.</span>
+    $('#dm', o).innerHTML = `${link ? `<details class="pfsec" id="dm-acc" ${accOpen ? 'open' : ''}><summary><b>Client login for documents</b> <span class="small muted">${acc ? (acc.required ? `— password on · ${acc.users.length} user${acc.users.length === 1 ? '' : 's'}` : '— password off') : ''}</span></summary>
+        ${!acc ? `<p class="small muted">${accErr ? esc(accErr) : 'Loading…'}</p>` : `
+        <label class="pick reqrow"><input type="checkbox" id="ac-req" ${acc.required ? 'checked' : ''}> <span><b>Password required</b> on the client's Documents tab <span class="small muted">— the master password always works too</span></span></label>
+        <div class="ulist">${acc.users.map((x) => `<div class="urow"><span class="uav">${esc((x.name || x.u).charAt(0).toUpperCase())}</span><span class="grow"><b>${esc(x.name || x.u)}</b> <span class="muted small">@${esc(x.u)}${x.admin ? ' · manages users' : ''}${x.at ? ' · added ' + esc(x.at) : ''}</span></span>
+          <button class="btn sm" data-apw="${esc(x.u)}">Reset password</button><button class="btn sm bad" data-adel="${esc(x.u)}">✕</button></div>`).join('') || '<p class="small muted">No users yet. Add the client\'s first user (tick "Can add and remove users" so they can manage the rest).</p>'}</div>
+        <div class="docgrid" style="margin-top:8px"><label class="field"><span>Name</span><input id="ac-n"></label><label class="field"><span>Username</span><input id="ac-u" autocapitalize="none"></label><label class="field"><span>Password</span><input id="ac-p" autocomplete="new-password"></label></div>
+        <div class="row" style="margin-top:8px;justify-content:space-between"><label class="pick" style="border:0;padding:0"><input type="checkbox" id="ac-a" checked> Can add and remove users</label><button class="btn sm primary" id="ac-go">Add user</button></div>`}</details>` : ''}
+      <div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="small muted">Clients upload these from their service link (Documents tab). A document can have several files, e.g. the pages of a drawing.</span>
         ${link ? `<button class="btn sm primary" id="dm-add">${add ? 'Close' : '+ Upload for client'}</button>` : '<span class="small muted">Create a service link to upload documents.</span>'}</div>
       ${add ? `<div class="docform">${g0 ? `<div class="intohead">Adding files to <b>${esc(ty.t)}</b>${g0.head.number ? ' · ' + esc(g0.head.number) : ''} <span class="muted">(${g0.docs.length} already)</span></div>` : `<div class="docgrid">
         <label class="field"><span>Document type</span><select id="dm-type">${DOC_TYPES.map((x) => `<option value="${x.k}" ${x.k === f.type ? 'selected' : ''}>${esc(x.t)}</option>`).join('')}</select></label>
@@ -818,6 +827,18 @@ function docsModal(clientId) {
       }).join('')}</div>` : '<p class="muted">No documents yet.</p>'}`;
     const keep = () => { if (!$('#dm-type', o)) return; f.type = $('#dm-type', o).value; f.number = $('#dm-num', o).value.trim(); f.expiry = $('#dm-exp', o).value; f.notes = $('#dm-notes', o).value.trim(); f.siteId = $('#dm-site', o) ? $('#dm-site', o).value : ''; };
     const ad = $('#dm-add', o); if (ad) ad.onclick = () => { keep(); add = !add; into = null; files = []; draw(); };
+    const dacc = $('#dm-acc', o); if (dacc) dacc.ontoggle = () => { accOpen = dacc.open; };
+    const areq = $('#ac-req', o); if (areq) areq.onchange = async () => {
+      if (!areq.checked && !confirm('Turn the password off? Anyone with this client\'s service link will see the documents.')) { areq.checked = true; return; }
+      try { await docApi('required', { t: link.id, on: areq.checked ? '1' : '0' }, true); toast(areq.checked ? 'Password is on' : 'Password is off'); loadAcc(); } catch (e) { toast(friendly(e), true); areq.checked = !areq.checked; }
+    };
+    const ago = $('#ac-go', o); if (ago) ago.onclick = async () => {
+      ago.disabled = true;
+      try { await docApi('useradd', { t: link.id, name: $('#ac-n', o).value.trim(), u: $('#ac-u', o).value.trim(), p: $('#ac-p', o).value, admin: $('#ac-a', o).checked ? '1' : '0' }, true); toast('User added'); loadAcc(); }
+      catch (e) { toast(friendly(e), true); ago.disabled = false; }
+    };
+    $$('[data-adel]', o).forEach((b) => (b.onclick = async () => { if (!confirm(`Remove user ${b.dataset.adel}?`)) return; try { await docApi('userdel', { t: link.id, u: b.dataset.adel }, true); toast('Removed'); loadAcc(); } catch (e) { toast(friendly(e), true); } }));
+    $$('[data-apw]', o).forEach((b) => (b.onclick = async () => { const np = prompt(`New password for ${b.dataset.apw}:`); if (!np) return; try { await docApi('passwd', { t: link.id, u: b.dataset.apw, p: np }, true); toast('Password reset'); } catch (e) { toast(friendly(e), true); } }));
     const tsel = $('#dm-type', o); if (tsel) tsel.onchange = () => { keep(); draw(); };
     const fi = $('#dm-file', o); if (fi) fi.onchange = () => { keep(); files = [...files, ...fi.files].slice(0, 20); draw(); };
     $$('[data-frm]', o).forEach((b) => (b.onclick = () => { keep(); files.splice(+b.dataset.frm, 1); draw(); }));
@@ -858,7 +879,7 @@ function docsModal(clientId) {
     }));
   };
   o._redraw = () => { if (!busy && !add) draw(); };
-  draw();
+  draw(); loadAcc();
 }
 /** A checked trade licence fills the licence number and expiry of the customer profile. */
 async function syncTradeLicence(clientId, number, expiry) {

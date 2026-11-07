@@ -66,3 +66,12 @@ Up to 25 MB per file (`.user.ini` / `.htaccess` raise PHP's upload limit; with p
 Access is checked against Firestore with the caller's own rights (the client's link, or the staff member's sign-in),
 so the Firestore rules decide who can open what. Optional `config.php`:
 `<?php return ['apiKey' => '…', 'projectId' => '…'];` — otherwise read from the web app's config automatically.
+
+### Documents password
+
+The client's Documents tab asks for a sign-in (checked by files.php):
+- **Master password** (Leaders Line): stored as a hash in `docpass.php` (not in Git — it is in the deployed zip).
+  To change it: `php -r "echo password_hash('NEW-PASSWORD', PASSWORD_DEFAULT);"` and paste the result into docpass.php.
+- **Client users**: per customer in `files/<Customer>/.users.json` (passwords hashed). Users marked "can add and remove users"
+  manage the others; staff manage them from the desk (Customers → Documents → Client login for documents).
+- **Password required** can be switched off per customer (desk, or a client user who manages users).

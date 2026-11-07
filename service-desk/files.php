@@ -76,6 +76,45 @@ function folderOf($p) { return cleanName($p['clientName'] ?? '', 'Customer ' . s
 function inRoot($path) { global $ROOT; $r = realpath($ROOT); $p = realpath($path); return $r && $p && strpos($p, $r . DIRECTORY_SEPARATOR) === 0; }
 function findFile($dir, $d) { foreach (glob($dir . '/*/' . $d . '_*') ?: [] as $f) if (is_file($f)) return $f; return null; }
 
+// ------------------------------------------------------------------ document passwords
+// Per customer, in files/<Customer>/.users.json: { required: true|false, users: [{u, name, hash, admin}] }.
+// The master password (docpass.php, a bcrypt hash) opens every customer and manages their users.
+// A sign-in gives a session (signed with files/.secret, 12 hours) that the page sends with each request.
+function secret() {
+  global $ROOT; $f = $ROOT . '/.secret';
+  if (!is_file($f)) @file_put_contents($f, bin2hex(random_bytes(32)));
+  $s = (string) @file_get_contents($f); if (strlen($s) < 32) fail(500, 'Cannot keep sign-ins: make the files folder writable.'); return $s;
+}
+function masterHash() { $f = __DIR__ . '/docpass.php'; if (is_file($f)) { $h = include $f; if (is_string($h) && $h !== '') return $h; } return ''; }
+function usersFile($p) { global $ROOT; $d = $ROOT . '/' . folderOf($p); if (!is_dir($d)) @mkdir($d, 0775, true); return $d . '/.users.json'; }
+function usersOf($p) { $f = usersFile($p); $j = is_file($f) ? json_decode((string) file_get_contents($f), true) : null; return is_array($j) ? $j + ['required' => true, 'users' => []] : ['required' => true, 'users' => []]; }
+function saveUsers($p, $j) { if (@file_put_contents(usersFile($p), json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX) === false) fail(500, 'Could not save users.'); }
+function b64u($s) { return rtrim(strtr(base64_encode($s), '+/', '-_'), '='); }
+function makeSession($t, $u, $name, $role) {
+  $body = b64u(json_encode(['t' => $t, 'u' => $u, 'n' => $name, 'r' => $role, 'x' => time() + 12 * 3600]));
+  return $body . '.' . b64u(hash_hmac('sha256', $body, secret(), true));
+}
+/** The signed-in person for link $t: ['u','n','r'] (r = master | admin | user), or null. */
+function session($t) {
+  $s = (string) ($_REQUEST['s'] ?? ($_SERVER['HTTP_X_DOC_SESSION'] ?? ''));
+  if (!preg_match('/^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/', $s, $m)) return null;
+  if (!hash_equals(b64u(hash_hmac('sha256', $m[1], secret(), true)), $m[2])) return null;
+  $j = json_decode((string) base64_decode(strtr($m[1], '-_', '+/')), true);
+  if (!$j || ($j['t'] ?? '') !== $t || ($j['x'] ?? 0) < time()) return null;
+  return $j;
+}
+/** Signed-in staff member (desk): their Firebase sign-in can read the shared settings. */
+function isStaff() { static $ok = null; if ($ok !== null) return $ok; if (($_SERVER['HTTP_X_ID_TOKEN'] ?? '') === '') return $ok = false; [$st] = fsGet('settings/service'); return $ok = ($st === 200 || $st === 404); }
+/** May this request use the documents of link $t? (password off, a valid session, or staff) */
+function needAccess($t, $p) {
+  if (isStaff()) return ['r' => 'staff', 'n' => 'Leaders Line'];
+  $se = session($t); if ($se) return $se;
+  $j = usersOf($p);
+  if (empty($j['required'])) return ['r' => 'open', 'n' => ''];
+  fail(401, 'Please sign in to your documents.');
+}
+function needManager($t, $p) { $a = needAccess($t, $p); if (!in_array($a['r'] ?? '', ['staff', 'master', 'admin'], true)) fail(403, 'Only a user who can manage users may do this.'); return $a; }
+
 if (!is_dir($ROOT) && !@mkdir($ROOT, 0775, true)) fail(500, 'Cannot create the files folder — make it writable for the web server (see README).');
 if (!is_file($ROOT . '/.htaccess')) @file_put_contents($ROOT . '/.htaccess', "Require all denied\nDeny from all\n");
 
@@ -85,7 +124,7 @@ if ($a === 'ping') out(200, ['ok' => true, 'max' => MAX_BYTES, 'writable' => is_
 if ($a === 'up') {
   if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail(405, 'POST only');
   $t = token('t'); $d = token('d');
-  $p = portal($t);
+  $p = portal($t); needAccess($t, $p);
   $f = $_FILES['file'] ?? null;
   if (!$f || ($f['error'] ?? 1) !== UPLOAD_ERR_OK) fail(400, ($f && in_array($f['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) ? 'The file is larger than the server allows (see README: upload_max_filesize).' : 'No file received.');
   if ($f['size'] > MAX_BYTES) fail(413, 'The file is larger than 25 MB.');
@@ -101,7 +140,7 @@ if ($a === 'up') {
 
 if ($a === 'get') {
   $t = token('t'); $d = token('d');
-  $p = portal($t);
+  $p = portal($t); needAccess($t, $p);
   [$st, $m] = fsGet('svcPortals/' . $t . '/docs/' . $d);
   if ($st !== 200) fail(404, 'Document not found.');
   $file = !empty($m['path']) ? $ROOT . '/' . $m['path'] : findFile($ROOT . '/' . folderOf($p), $d);
@@ -117,12 +156,55 @@ if ($a === 'get') {
 
 if ($a === 'del') {
   $t = token('t'); $d = token('d');
-  $p = portal($t);
+  $p = portal($t); needAccess($t, $p);
   [$st] = fsGet('svcPortals/' . $t . '/docs/' . $d);
   if ($st === 200) fail(409, 'Delete the document first.');  // only files whose Firestore document was deleted
   $file = findFile($ROOT . '/' . folderOf($p), $d);
   if ($file && inRoot($file)) @unlink($file);
   out(200, ['ok' => true]);
+}
+
+// ---- sign-in and users
+if ($a === 'status') {            // is a password needed for this link, and is the session still good?
+  $t = token('t'); $p = portal($t); $j = usersOf($p); $se = session($t);
+  out(200, ['ok' => true, 'required' => !empty($j['required']), 'hasUsers' => count($j['users']) > 0, 'me' => $se ? ['u' => $se['u'], 'name' => $se['n'], 'role' => $se['r']] : null, 'staff' => isStaff()]);
+}
+if ($a === 'login') {
+  if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail(405, 'POST only');
+  $t = token('t'); $p = portal($t); $j = usersOf($p);
+  $u = strtolower(trim((string) ($_POST['u'] ?? ''))); $pw = (string) ($_POST['p'] ?? '');
+  $mh = masterHash();
+  if ($pw !== '' && $mh !== '' && password_verify($pw, $mh) && ($u === '' || $u === 'master' || $u === 'admin' || $u === 'leaders line')) out(200, ['ok' => true, 'session' => makeSession($t, 'master', 'Leaders Line', 'master'), 'name' => 'Leaders Line', 'role' => 'master']);
+  foreach ($j['users'] as $x) if ($x['u'] === $u && password_verify($pw, $x['hash'])) { $r = !empty($x['admin']) ? 'admin' : 'user'; out(200, ['ok' => true, 'session' => makeSession($t, $u, $x['name'] ?: $u, $r), 'name' => $x['name'] ?: $u, 'role' => $r]); }
+  usleep(800000);
+  fail(401, 'Wrong username or password.');
+}
+if ($a === 'users') {             // list (managers only)
+  $t = token('t'); $p = portal($t); needManager($t, $p); $j = usersOf($p);
+  out(200, ['ok' => true, 'required' => !empty($j['required']), 'users' => array_map(fn ($x) => ['u' => $x['u'], 'name' => $x['name'] ?? '', 'admin' => !empty($x['admin']), 'at' => $x['at'] ?? ''], $j['users'])]);
+}
+if ($a === 'useradd' || $a === 'userdel' || $a === 'passwd' || $a === 'required') {
+  if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail(405, 'POST only');
+  $t = token('t'); $p = portal($t);
+  $me = $a === 'passwd' ? needAccess($t, $p) : needManager($t, $p);
+  $j = usersOf($p); $u = strtolower(trim((string) ($_POST['u'] ?? '')));
+  if ($a === 'required') { $j['required'] = ($_POST['on'] ?? '1') === '1'; saveUsers($p, $j); out(200, ['ok' => true, 'required' => $j['required']]); }
+  if (!preg_match('/^[a-z0-9._@-]{3,40}$/', $u)) fail(400, 'Username: 3–40 letters, numbers, dot, dash or @.');
+  if ($u === 'master') fail(400, 'That username is reserved.');
+  $i = null; foreach ($j['users'] as $k => $x) if ($x['u'] === $u) $i = $k;
+  if ($a === 'userdel') { if ($i === null) fail(404, 'No such user.'); array_splice($j['users'], $i, 1); saveUsers($p, $j); out(200, ['ok' => true]); }
+  $pw = (string) ($_POST['p'] ?? '');
+  if (strlen($pw) < 6) fail(400, 'Password: at least 6 characters.');
+  if ($a === 'passwd') {
+    $mgr = in_array($me['r'] ?? '', ['staff', 'master', 'admin'], true);
+    if (!$mgr && ($me['u'] ?? '') !== $u) fail(403, 'You can only change your own password.');
+    if ($i === null) fail(404, 'No such user.');
+    $j['users'][$i]['hash'] = password_hash($pw, PASSWORD_DEFAULT); saveUsers($p, $j); out(200, ['ok' => true]);
+  }
+  if ($i !== null) fail(409, 'That username is taken.');
+  if (count($j['users']) >= 50) fail(400, 'Too many users.');
+  $j['users'][] = ['u' => $u, 'name' => mb_substr(trim((string) ($_POST['name'] ?? '')), 0, 60), 'hash' => password_hash($pw, PASSWORD_DEFAULT), 'admin' => ($_POST['admin'] ?? '') === '1', 'at' => date('Y-m-d H:i'), 'by' => $me['n'] ?? ''];
+  saveUsers($p, $j); out(200, ['ok' => true]);
 }
 
 if ($a === 'usage') {
@@ -133,7 +215,7 @@ if ($a === 'usage') {
   foreach (glob($ROOT . '/*', GLOB_ONLYDIR) ?: [] as $cdir) {
     $n = 0; $bytes = 0;
     $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($cdir, FilesystemIterator::SKIP_DOTS));
-    foreach ($it as $fi) if ($fi->isFile()) { $n++; $bytes += $fi->getSize(); }
+    foreach ($it as $fi) if ($fi->isFile() && $fi->getFilename()[0] !== '.') { $n++; $bytes += $fi->getSize(); }
     $res[basename($cdir)] = ['files' => $n, 'bytes' => $bytes]; $total += $bytes;
   }
   $free = @disk_free_space($ROOT); $size = @disk_total_space($ROOT);
