@@ -177,8 +177,6 @@ class BoqPdf {
   static const _ink = PdfColor.fromInt(0xFF1F2226);
   static const _muted = PdfColor.fromInt(0xFF5D6168);
   static const _line = PdfColor.fromInt(0xFFE3E1DC);
-  static const _soft = PdfColor.fromInt(0xFFF7F6F3);
-  static const _sec = PdfColor.fromInt(0xFFFFF4E2);
 
   static Future<Uint8List> build(Boq b, InvConfig cfg, {String siteName = ''}) async {
     final brand = _hex(cfg.s('brand'), const PdfColor.fromInt(0xFFB8285E));
@@ -206,12 +204,12 @@ class BoqPdf {
     var n = 0;
     pw.Widget cell(String s, {bool bold = false, pw.TextAlign align = pw.TextAlign.left, PdfColor color = _ink, double size = 8.8}) =>
         pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4), child: pw.Text(_c(s), textAlign: align, style: t(size, bold: bold, color: color)));
-    rows.add(pw.TableRow(decoration: pw.BoxDecoration(color: charcoal), children: [
-      for (final h in ['#', 'Item', 'Description', 'Qty', 'Unit', 'Done']) cell(h, bold: true, color: PdfColors.white, size: 8),
+    rows.add(pw.TableRow(decoration: pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: charcoal, width: 1))), children: [
+      for (final h in ['#', 'Item', 'Description', 'Qty', 'Unit', 'Done']) cell(h.toUpperCase(), bold: true, color: charcoal, size: 7.5),
     ]));
     for (final i in b.items) {
       if (i.isHeading) {
-        rows.add(pw.TableRow(decoration: const pw.BoxDecoration(color: _sec), children: [
+        rows.add(pw.TableRow(decoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: _line, width: 0.6))), children: [
           cell(''),
           cell(i.section.toUpperCase(), bold: true),
           cell(''),
@@ -222,7 +220,7 @@ class BoqPdf {
         continue;
       }
       n++;
-      rows.add(pw.TableRow(decoration: pw.BoxDecoration(color: n.isEven ? _soft : PdfColors.white), children: [
+      rows.add(pw.TableRow(children: [
         cell('$n', color: _muted),
         cell(i.name.isNotEmpty ? i.name : i.desc, bold: true),
         cell([if (i.section.isNotEmpty) '[${i.section}]', if (i.name.isNotEmpty) i.desc].where((x) => x.isNotEmpty).join(' ')),
@@ -253,11 +251,7 @@ class BoqPdf {
         ]),
       ]),
       build: (ctx) => [
-        pw.Row(children: [
-          pw.Expanded(flex: 28, child: pw.Container(height: 5, color: brand)),
-          pw.Expanded(flex: 72, child: pw.Container(height: 5, color: charcoal)),
-        ]),
-        pw.SizedBox(height: 12),
+        pw.SizedBox(height: 6),
         pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
           if (logo != null) ...[pw.Image(logo, height: 50), pw.SizedBox(width: 12)],
           pw.Expanded(child: pw.Text(_c(cfg.s('name')), style: t(14, color: charcoal, bold: true))),
@@ -269,7 +263,7 @@ class BoqPdf {
         pw.SizedBox(height: 12),
         pw.Container(
           padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: pw.BoxDecoration(color: _soft, border: pw.Border(left: pw.BorderSide(color: brand, width: 3))),
+          decoration: pw.BoxDecoration(border: pw.Border(left: pw.BorderSide(color: brand, width: 3), top: const pw.BorderSide(color: _line, width: 0.6), bottom: const pw.BorderSide(color: _line, width: 0.6))),
           child: pw.Row(children: [
             pw.Expanded(
               child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [

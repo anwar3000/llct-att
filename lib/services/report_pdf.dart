@@ -41,7 +41,6 @@ class ReportPdf {
   static const _ink = PdfColor.fromInt(0xFF1F2226);
   static const _muted = PdfColor.fromInt(0xFF5D6168);
   static const _line = PdfColor.fromInt(0xFFE3E1DC);
-  static const _soft = PdfColor.fromInt(0xFFF7F6F3);
   static const _good = PdfColor.fromInt(0xFF2F8A57);
 
   static Future<pw.MemoryImage?> _img(String ref) async {
@@ -100,10 +99,8 @@ class ReportPdf {
     pw.Widget hh(String s) => pw.Padding(
         padding: const pw.EdgeInsets.only(bottom: 4), child: pw.Text(s.toUpperCase(), style: t(7.5, color: brand, bold: true)));
 
-    pw.Widget band() => pw.Row(children: [
-          pw.Expanded(flex: 28, child: pw.Container(height: 5, color: brand)),
-          pw.Expanded(flex: 72, child: pw.Container(height: 5, color: charcoal)),
-        ]);
+    // Classic style (logo colours as fine accents only — no filled colour bars, prints cleanly on paper).
+    pw.Widget band() => pw.SizedBox(height: 0);
 
     pw.Widget foot(pw.Context ctx) => pw.Column(children: [
           pw.Divider(color: _line, thickness: 0.6),
@@ -119,25 +116,41 @@ class ReportPdf {
         if (logo != null) ...[pw.Image(logo, height: 58), pw.SizedBox(width: 12)],
         pw.Expanded(
           child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-            pw.Text(_c(cfg.s('name')), style: t(15, color: charcoal, bold: true)),
-            if (cfg.s('taxId').isNotEmpty) pw.Text(_c('${cfg.s('taxIdLabel')} ${cfg.s('taxId')}'), style: t(8, color: _muted)),
+            pw.Text(_c(cfg.s('name').toUpperCase()), style: t(15, color: charcoal, bold: true)),
+            if (cfg.s('taxId').isNotEmpty) ...[
+              pw.SizedBox(height: 4),
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: pw.BoxDecoration(border: pw.Border.all(color: _line, width: 0.7), borderRadius: pw.BorderRadius.circular(2)),
+                child: pw.Text(_c('${cfg.s('taxIdLabel')} ${cfg.s('taxId')}'.toUpperCase()), style: t(7.5, color: charcoal)),
+              ),
+            ],
           ]),
         ),
-        pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-          pw.Text(_c(cfg.s('address')), textAlign: pw.TextAlign.right, style: t(8, color: _muted)),
-          if (cfg.s('phone').isNotEmpty) pw.Text(_c('T ${cfg.s('phone')}'), style: t(8, color: _muted)),
-          if (cfg.s('website').isNotEmpty) pw.Text(_c('W ${cfg.s('website')}'), style: t(8, color: _muted)),
-        ]),
+        pw.Container(
+          padding: const pw.EdgeInsets.only(left: 10),
+          decoration: pw.BoxDecoration(border: pw.Border(left: pw.BorderSide(color: brand, width: 1.5))),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text(_c(cfg.s('address')), style: t(8, color: _ink)),
+            if (cfg.s('phone').isNotEmpty)
+              pw.RichText(text: pw.TextSpan(children: [pw.TextSpan(text: 'T   ', style: t(7, color: brand, bold: true)), pw.TextSpan(text: _c(cfg.s('phone')), style: t(8, color: _muted))])),
+            if (cfg.s('email').isNotEmpty)
+              pw.RichText(text: pw.TextSpan(children: [pw.TextSpan(text: 'E   ', style: t(7, color: brand, bold: true)), pw.TextSpan(text: _c(cfg.s('email')), style: t(8, color: _muted))])),
+            if (cfg.s('website').isNotEmpty)
+              pw.RichText(text: pw.TextSpan(children: [pw.TextSpan(text: 'W  ', style: t(7, color: brand, bold: true)), pw.TextSpan(text: _c(cfg.s('website')), style: t(8, color: _muted))])),
+          ]),
+        ),
       ]),
       pw.SizedBox(height: 12),
       pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: pw.BoxDecoration(color: _soft, border: pw.Border(left: pw.BorderSide(color: brand, width: 3))),
+        padding: const pw.EdgeInsets.symmetric(vertical: 8),
+        decoration: const pw.BoxDecoration(
+            border: pw.Border(top: pw.BorderSide(color: _line, width: 0.8), bottom: pw.BorderSide(color: _line, width: 0.8))),
         child: pw.Row(children: [
+          pw.Container(width: 3.5, height: 18, color: brand),
+          pw.SizedBox(width: 9),
           pw.Expanded(
-            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              pw.Text(k.title.toUpperCase(), style: t(16, color: charcoal, bold: true)),
-            ]),
+            child: pw.Text(k.title.toUpperCase(), style: t(17, color: charcoal, bold: true).copyWith(letterSpacing: 2.2)),
           ),
           pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
             if (r.number.isNotEmpty)
@@ -149,9 +162,14 @@ class ReportPdf {
       ),
     ]);
 
-    pw.Widget box(pw.Widget child) => pw.Container(
-        padding: const pw.EdgeInsets.all(10),
-        decoration: pw.BoxDecoration(border: pw.Border.all(color: _line, width: 0.8), borderRadius: pw.BorderRadius.circular(6)),
+    pw.Widget box(pw.Widget child, {bool accent = false}) => pw.Container(
+        padding: const pw.EdgeInsets.fromLTRB(10, 8, 10, 8),
+        decoration: pw.BoxDecoration(
+          border: accent
+              ? pw.Border(left: pw.BorderSide(color: brand, width: 2.5), top: const pw.BorderSide(color: _line, width: 0.6),
+                  right: const pw.BorderSide(color: _line, width: 0.6), bottom: const pw.BorderSide(color: _line, width: 0.6))
+              : pw.Border.all(color: _line, width: 0.6),
+        ),
         child: child);
 
     final custLines = [
@@ -169,7 +187,7 @@ class ReportPdf {
       pw.Expanded(
         child: box(pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
           hh(k.who),
-          pw.Text(_c(cv('name').isEmpty ? '-' : cv('name')), style: t(11.5, bold: true)),
+          pw.Text(_c(cv('name').isEmpty ? '-' : cv('name')), style: t(12, color: charcoal, bold: true)),
           if (custLines.isNotEmpty) pw.Text(_c(custLines), style: t(8.5, color: _muted)),
           if (r.s('deliveryAddress').isNotEmpty || gpsTxt.isNotEmpty) ...[
             pw.SizedBox(height: 7),
@@ -177,15 +195,17 @@ class ReportPdf {
             if (r.s('deliveryAddress').isNotEmpty) pw.Text(_c(r.s('deliveryAddress')), style: t(9)),
             if (gpsTxt.isNotEmpty) pw.Text('GPS $gpsTxt', style: t(8, color: _muted)),
           ],
-        ])),
+        ]), accent: true),
       ),
       pw.SizedBox(width: 12),
       pw.Expanded(
         child: box(pw.Table(columnWidths: const {0: pw.FlexColumnWidth(1.1), 1: pw.FlexColumnWidth(2)}, children: [
           for (final d in det)
             pw.TableRow(children: [
-              pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 2), child: pw.Text(_c(d.$1), style: t(8.5, color: _muted))),
-              pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 2), child: pw.Text(_c(d.$2), style: t(8.5, bold: true))),
+              pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 2.5), child: pw.Text(_c(d.$1.toUpperCase()), style: t(7.5, color: _muted))),
+              pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(vertical: 2.5),
+                  child: pw.Text(_c(d.$2), textAlign: pw.TextAlign.right, style: t(8.5, color: charcoal, bold: true))),
             ]),
         ])),
       ),
@@ -196,9 +216,13 @@ class ReportPdf {
       if (r.s('subject').isNotEmpty) ...[
         pw.SizedBox(height: 12),
         pw.Container(
-            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            color: _soft,
-            child: pw.Text(_c(r.s('subject')), style: t(10.5, color: charcoal, bold: true))),
+            padding: const pw.EdgeInsets.only(left: 9, top: 2, bottom: 2),
+            decoration: pw.BoxDecoration(border: pw.Border(left: pw.BorderSide(color: brand, width: 2.5))),
+            child: pw.RichText(
+                text: pw.TextSpan(children: [
+              pw.TextSpan(text: 'SUBJECT   ', style: t(7.5, color: _muted, bold: true)),
+              pw.TextSpan(text: _c(r.s('subject')), style: t(10.5, color: charcoal, bold: true)),
+            ]))),
       ],
       if (k.isService && (r.s('complaint').isNotEmpty || r.s('workDone').isNotEmpty)) ...[
         pw.SizedBox(height: 12),
@@ -223,12 +247,13 @@ class ReportPdf {
           },
           children: [
             pw.TableRow(
-              decoration: pw.BoxDecoration(color: charcoal),
+              decoration: pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: charcoal, width: 1))),
               children: [
                 for (final h in ['#', 'Item & description', 'Qty', 'Unit', 'Status'])
                   pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                    child: pw.Text(h, style: t(8, color: PdfColors.white, bold: true), textAlign: h == 'Qty' ? pw.TextAlign.right : pw.TextAlign.left),
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+                    child: pw.Text(h.toUpperCase(), style: t(7.5, color: charcoal, bold: true).copyWith(letterSpacing: 1),
+                        textAlign: h == 'Qty' ? pw.TextAlign.right : pw.TextAlign.left),
                   ),
               ],
             ),
@@ -326,7 +351,7 @@ class ReportPdf {
       pageTheme: theme,
       header: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
         band(),
-        pw.SizedBox(height: 18),
+        pw.SizedBox(height: 30),
         if (ctx.pageNumber == 1) ...[header, pw.SizedBox(height: 14)],
       ]),
       footer: foot,
@@ -361,7 +386,7 @@ class ReportPdf {
             pw.Container(
               height: h,
               width: w,
-              decoration: pw.BoxDecoration(color: _soft, border: pw.Border.all(color: _line, width: 0.6)),
+              decoration: pw.BoxDecoration(border: pw.Border.all(color: _line, width: 0.6)),
               child: pw.Center(child: pw.Image(p.$1, fit: pw.BoxFit.contain)),
             ),
             pw.SizedBox(height: 3),
@@ -378,7 +403,7 @@ class ReportPdf {
           pageTheme: theme,
           header: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
             band(),
-            pw.SizedBox(height: 18),
+            pw.SizedBox(height: 30),
             pw.Row(children: [
               pw.Expanded(
                 child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
