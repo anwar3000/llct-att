@@ -101,3 +101,15 @@ body.staff #toast-root { bottom: calc(88px + env(safe-area-inset-bottom)) !impor
 .st-btn.danger-o { color: #D64545; border-color: #f1c9c9; }
 .st-trip.on { border: 2px solid #2E9E6A; }
 .st-ride.on { border: 2px solid #7B4FC9; }
+
+/* service report / delivery note shortcut */
+.st-rep-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.st-rep-btns .st-btn { width: 100%; }
+.st-btn.ghost { background: #fff; }
+.st-rep-list { margin-top: 10px; border-top: 1px solid #eee9e1; }
+.st-rep-list .row-i { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #f0ede8; }
+.st-rep-list .row-i:first-child { border-top: 0; }
+.st-rep-a { color: inherit; text-decoration: none; min-width: 0; }
+.st-rep-a b, .st-rep-a div { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-rep-k { flex: 0 0 auto; font-size: 10px; font-weight: 800; padding: 3px 6px; border-radius: 6px; color: #fff; background: #2E7DB2; }
+.st-rep-k.sr { background: #D98A1A; }

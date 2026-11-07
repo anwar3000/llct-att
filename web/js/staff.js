@@ -29,6 +29,7 @@ const S = {
   busy: '', subs: [], sessSubs: [], monthSubs: [], lastAlertAt: 0, lastPush: 0,
   alertsToday: [], shownViol: -1, lastLocAt: null, gate: null,
   trip: null, tripsToday: [], tripsMonth: [], tripsDone: [], payments: [], tw: null, rate: null,
+  canReport: false, myReports: [],
 };
 
 // ================================================================== helpers
@@ -135,8 +136,76 @@ function stopAll() {
 }
 
 // ================================================================== data
+// ================================================================== service reports / delivery notes (LLCT Invoicing)
+// Opens the invoicing web app's own screens (same design, same login on this site) for new reports,
+// the report lists and copying an old report.
+const INV = new URL('../llct-invoice/', location.href).href;
+const invUrl = (view, p = {}) => `${INV}#/${view}${Object.keys(p).length ? `?${encodeURIComponent(JSON.stringify(p))}` : ''}`;
+const isService = (d) => (d.reportType || 'delivery') !== 'delivery';
+function openInv(view, p) { location.href = invUrl(view, p); }
+function newReport() {
+  const o = S.open;
+  openInv('edit', { type: 'delivery', rt: 'service', ...(o ? { attSite: o.siteId, attSession: o.id, attSiteName: o.siteName } : {}) });
+}
+function reportCardHtml() {
+  if (!S.canReport) return '';
+  const o = S.open;
+  const today = S.myReports.filter((d) => d.date === dateKey(new Date()) && (!o || d.attSessionId === o.id || d.attSiteId === o.siteId)).length;
+  const recent = S.myReports.slice(0, 4);
+  return `<div class="st-card pad st-rep">
+    <div class="row" style="flex-wrap:nowrap;gap:10px">
+      <div class="st-wico">${icon('doc', 22)}</div>
+      <div class="grow"><b>${o ? `Report for ${esc(o.siteName)}` : 'Service / delivery report'}</b>
+        <div class="small muted">${o && today ? `✓ ${today} made today` : o ? 'No report yet for this check-in' : 'Prepare it before you go — copy an old one'}</div></div>
+    </div>
+    <div class="st-rep-btns">
+      <button class="st-btn primary" id="st-rep-new">${icon('plus', 16)} New report</button>
+      <button class="st-btn ghost" id="st-rep-old">${icon('calendar', 16)} Old reports</button>
+    </div>
+    ${recent.length ? `<div class="st-rep-list">${recent.map((d) => `<div class="row-i">
+        <span class="st-rep-k ${isService(d) ? 'sr' : 'dn'}">${isService(d) ? (d.reportType === 'callout' ? 'CO' : 'SR') : 'DN'}</span>
+        <a class="grow st-rep-a" data-rv="${d.id}"><b class="small">${esc(d.client?.name || d.siteName || 'No client')}</b>
+          <div class="small muted">${esc(d.number || '')} · ${esc(fmtDate(parseKey(d.date || dateKey(new Date()))))}${(d.items || []).length ? ` · ${(d.items || []).length} item${(d.items || []).length === 1 ? '' : 's'}` : ''}</div></a>
+        <button class="st-btn sm" data-rc="${d.id}" title="Make a new report with the same client, site and items">Copy</button></div>`).join('')}</div>` : ''}
+  </div>`;
+}
+function wireReportCard(main) {
+  main.querySelector('#st-rep-new')?.addEventListener('click', newReport);
+  main.querySelector('#st-rep-old')?.addEventListener('click', () => openInv('docs', { tab: 'service' }));
+  main.querySelectorAll('[data-rv]').forEach((a) => { a.onclick = () => openInv('view', { id: a.dataset.rv }); });
+  main.querySelectorAll('[data-rc]').forEach((b) => {
+    b.onclick = () => {
+      const d = S.myReports.find((x) => x.id === b.dataset.rc);
+      if (!d) return;
+      const o = S.open;
+      openInv('edit', { type: 'delivery', ...(isService(d) ? { rt: d.reportType } : {}), copy: d.id,
+        ...(o ? { attSite: o.siteId, attSession: o.id, attSiteName: o.siteName } : {}) });
+    };
+  });
+}
+async function loadReportAccess() {
+  try {
+    let ok = S.me.role === 'admin';
+    if (!ok) {
+      const a = await getDoc(doc(db, 'inv_access', S.me.id));
+      const m = a.exists() ? a.data() : null;
+      ok = !!m && m.enabled !== false && m.perms?.delivery === true;
+    }
+    S.canReport = ok;
+    if (ok) {
+      S.subs.push(onSnapshot(query(C('inv_docs'), where('createdBy', '==', S.me.id)), (q) => {
+        S.myReports = q.docs.map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.type === 'delivery')
+          .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.number || '').localeCompare(String(a.number || '')));
+        if (S.tab === 'today') draw();
+      }, () => {}));
+    }
+    if (S.tab === 'today') draw();
+  } catch { /* no report access */ }
+}
+
 function start() {
   const uid = S.me.id;
+  loadReportAccess();
   const on = (q, fn) => S.subs.push(onSnapshot(q, fn, (e) => { console.error(e); toast(friendlyError(e), true); }));
   on(C('sites'), (s) => { S.sites = s.docs.map(mapSite).sort((a, b) => a.name.localeCompare(b.name)); draw(); });
   on(query(C('attendance'), where('employeeId', '==', uid), where('status', '==', 'open')), (s) => {
@@ -312,6 +381,7 @@ function drawToday(main) {
       <a data-go="petty">${icon('wallet', 20)}<span>Expense</span></a>
       <a data-go="me">${icon('idcard', 20)}<span>My IDs</span></a>
     </div>
+    ${reportCardHtml()}
     <h3 class="st-h">Check-ins today</h3>
     <div class="st-card list">${S.todaySessions.length ? S.todaySessions.map((s) => `<div class="row-i">
         <div class="grow"><b>${esc(s.siteName)}</b><div class="small muted">${fmtTime(s.inLocal)} – ${s.checkOut ? fmtTime(s.outLocal) : 'now'}</div></div>
@@ -324,6 +394,7 @@ function drawToday(main) {
   main.querySelectorAll('[data-po]').forEach((b) => { b.onclick = () => punchOut(S.myWorkers.filter((e) => e.id === b.dataset.po)); });
   main.querySelector('#st-poall')?.addEventListener('click', () => punchOut(S.myWorkers));
   main.querySelectorAll('[data-go]').forEach((a) => { a.onclick = () => { S.tab = a.dataset.go; draw(); }; });
+  wireReportCard(main);
 }
 function drawTimer() {
   const tt = document.getElementById('st-trip-time');
