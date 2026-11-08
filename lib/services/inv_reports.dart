@@ -501,7 +501,8 @@ class InvReports {
   static Future<List<Map<String, dynamic>>> products({bool fresh = false}) async {
     if (!fresh && _products != null && DateTime.now().difference(_productsAt!) < const Duration(minutes: 10)) return _products!;
     final q = await _fs.collection('inv_products').get();
-    _products = q.docs.map((d) => {...d.data(), 'id': d.id}).toList()
+    // products still waiting for admin / manager approval are left out
+    _products = q.docs.where((d) => d.data()['status'] != 'pending').map((d) => {...d.data(), 'id': d.id}).toList()
       ..sort((a, b) => '${a['name'] ?? ''}'.toLowerCase().compareTo('${b['name'] ?? ''}'.toLowerCase()));
     _productsAt = DateTime.now();
     return _products!;
@@ -521,8 +522,9 @@ class InvReports {
   static Future<Map<String, dynamic>?> findProduct(String code) async {
     for (final f in ['barcode', 'sku']) {
       try {
-        final q = await _fs.collection('inv_products').where(f, isEqualTo: code).limit(1).get();
-        if (q.docs.isNotEmpty) return {...q.docs.first.data(), 'id': q.docs.first.id};
+        final q = await _fs.collection('inv_products').where(f, isEqualTo: code).limit(5).get();
+        final ok = q.docs.where((d) => d.data()['status'] != 'pending');
+        if (ok.isNotEmpty) return {...ok.first.data(), 'id': ok.first.id};
       } catch (_) {}
     }
     return null;
