@@ -4,6 +4,7 @@ import {
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
 } from '../util.js';
 import { pettySummary } from '../calc.js';
+import { svcNewCount } from '../svcalert.js';
 
 const STATE = {
   onDuty: ['On duty', 'green'], done: ['Checked out', 'teal'], off: ['Off day', 'amber'], notIn: ['Not checked in', 'gray'],
@@ -111,7 +112,26 @@ export function mount(el, _params, { setHeader }) {
     const extMins = store.workersToday.reduce((a, e) => a + entryMinutes(e), 0);
     const extNow = store.extOnSite.length;
 
+    // ---- To do: only what is waiting for someone, most urgent first
+    const compDue = companyDue();
+    const todo = [
+      [forgot.length, 'Missed sign-outs', 'never checked out', '#/missed', '#D64545', 'warn'],
+      [store.alerts.length, 'Live alerts', 'GPS, left site, blocked check-ins', '#d-alerts', '#D64545', 'pin'],
+      [svcNewCount(), 'New service requests', 'from clients', '#/service', '#D64545', 'doc'],
+      [isAdmin() ? store.pendingPetty.length : 0, 'Petty cash to approve', pendingAmt ? fmtMoney(pendingAmt) : 'expenses & top-ups', '#/petty', '#E08E2B', 'wallet'],
+      [store.pendingOff.length + store.pendingSites.length, 'Off days & new sites', 'waiting for approval', '#d-approvals', '#E08E2B', 'calendar'],
+      [store.requests.length, 'Document changes', 'staff update requests', '#/requests', '#E08E2B', 'idcard'],
+      [compDue.length, 'Company documents', compDue.some((d) => companyDueState(d.expiry) === 'expired') ? 'expired / to renew' : 'renew within 15 days', '#/company', '#D98A1A', 'company'],
+      [flagged.length, 'Flagged check-ins today', 'outside site or fake GPS', '#d-alerts', '#8E5CC4', 'flag'],
+    ].filter((t) => t[0] > 0);
+
     body.innerHTML = `
+    <div class="dash-sec"><h3>To do</h3><span class="small muted">${todo.length ? `${todo.reduce((a, t) => a + t[0], 0)} waiting` : ''}</span></div>
+    ${todo.length ? `<div class="todo-grid">${todo.map(([n, label, sub, href, color, ic]) => `<a class="todo" ${href.startsWith('#d-') ? `href="javascript:void 0" data-scroll="${href.slice(1)}"` : `href="${href}"`} style="--tc:${color}">
+        <span class="todo-ic">${icon(ic, 18, color)}</span><span class="todo-n">${n}</span><span class="todo-t"><b>${label}</b><span>${esc(sub)}</span></span>${icon('chevron', 14)}</a>`).join('')}</div>`
+      : `<div class="todo-clear">${icon('check', 18, '#2E9E6A')} <b>All clear</b> <span class="muted">— nothing waiting for you right now.</span></div>`}
+
+    <div class="dash-sec"><h3>Today</h3><span class="small muted">${store.schedulesToday.length ? `${store.schedulesToday.length} visits scheduled` : ''}</span></div>
     <div class="quick">
       <a href="#/working">${icon('people', 16)} Working now</a>
       <a href="#/workers" data-qa="checkin">${icon('check', 16)} Check in workers</a>
@@ -121,23 +141,16 @@ export function mount(el, _params, { setHeader }) {
       <a href="#/documents">${icon('idcard', 16)} ID documents</a>
       <a href="#/reports">${icon('report', 16)} Reports</a>
     </div>
-    <div class="grid kpis">
+    <div class="grid kpis kpi4">
       ${kpi('On site now', store.open.length + extNow, `${store.open.length} staff · ${extNow} external`, 'pin', '#2E9E6A', 'working')}
-      ${kpi('Workforce today', present + extIds.size, `${present} staff · ${extIds.size} external`, 'people', '#D98A1A', 'attendance')}
+      ${kpi('Workforce today', present + extIds.size, `${present} staff · ${extIds.size} external (${store.workers.filter((w) => w.active).length} registered)`, 'people', '#D98A1A', 'attendance')}
       ${kpi('Man-hours today', fmtMins(minutes + extMins), `staff ${fmtMins(minutes)} · external ${fmtMins(extMins)}`, 'clock', '#3A7BD5')}
-      ${kpi('External workers', `${extNow} on site`, `${new Set(store.extOnSite.map((l) => l.siteId)).size} sites · ${store.workers.filter((w) => w.active).length} registered`, 'worker', EXT_COLOR, 'workers')}
-      ${kpi('Active sites', activeSites.size, `${store.schedulesToday.length} visits scheduled`, 'site', '#8E5CC4', 'sites')}
-      ${kpi('Active projects', activeProjects.length, `${store.projects.length} total`, 'project', '#C2557A', 'projects')}
-      ${isAdmin()
-        ? kpi('Pending approvals', store.pendingPetty.length + store.pendingOff.length + store.pendingSites.length + store.requests.length, `${store.requests.length} document changes · ${fmtMoney(pendingAmt)} petty`, 'pending', '#E08E2B', store.requests.length ? 'requests' : 'petty')
-        : kpi('Pending approvals', store.pendingOff.length + store.pendingSites.length + store.requests.length, `off days, new sites & ${store.requests.length} document changes`, 'pending', '#E08E2B', store.requests.length ? 'requests' : '')}
+      ${kpi('Active sites', activeSites.size, `${activeProjects.length} active projects`, 'site', '#8E5CC4', 'sites')}
     </div>
 
-    ${cashCard()}
-    ${companyCard()}
     ${forgot.length || flagged.length || store.alerts.length ? `
-    <div class="card mt">
-      <div class="card-head">${icon('warn', 18, '#D64545')}<h2>Needs attention</h2></div>
+    <div class="card mt" id="d-alerts">
+      <div class="card-head">${icon('warn', 18, '#D64545')}<h2>Live alerts</h2></div>
       ${store.alerts.map((a) => `<div class="list-item" style="${a.type === 'left_site' ? '' : 'background:#fff5f5'}">${avatar(a.employeeName, 32, a.type === 'left_site' ? '#E08E2B' : '#D64545')}
         <div class="grow"><b>${esc(a.employeeName)}</b> — ${esc(alertLabel(a))}
         <div class="small muted">${fmtDateTime(a.atLocal)}${a.lat != null ? ` · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lng}#map=17/${a.lat}/${a.lng}">GPS ${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}</a>` : ''}</div></div>
@@ -155,13 +168,16 @@ export function mount(el, _params, { setHeader }) {
         ${s.mocked ? pill('Fake GPS', 'red') : ''}</div>`).join('')}
     </div>` : ''}
 
-    <div class="grid cols-2-1 mt">
+    ${cashCard() ? `<div class="dash-sec"><h3>Money</h3><a class="small" href="#/accounts">Accounts →</a></div>${cashCard()}` : ''}
+
+    <div class="dash-sec"><h3>Trends & team</h3></div>
+    <div class="grid cols-2-1">
       <div class="card">
         <div class="card-head"><h2>Man-hours — last 14 days</h2><span class="small"><span class="wf-dot staff"></span> Staff &nbsp;<span class="wf-dot ext"></span> External</span></div>
         <div class="card-pad"><div class="chart-box"><canvas id="trend"></canvas></div></div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Approvals</h2>${isAdmin() ? '<a class="small" href="#/petty">All petty →</a>' : ''}</div>
+        <div class="card-head" id="d-approvals"><h2>Approvals</h2>${isAdmin() ? '<a class="small" href="#/petty">All petty →</a>' : ''}</div>
         ${approvalsHtml()}
       </div>
     </div>
@@ -227,6 +243,7 @@ export function mount(el, _params, { setHeader }) {
   }
 
   function wire() {
+    body.querySelectorAll('[data-scroll]').forEach((a) => { a.onclick = () => document.getElementById(a.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
     body.querySelectorAll('[data-qa]').forEach((a) => {
       a.onclick = async (e) => {
         e.preventDefault();

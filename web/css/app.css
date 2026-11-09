@@ -598,3 +598,40 @@ table.t tr.boq-sec td { background: #fff4e2; font-weight: 700; letter-spacing: .
 .ms-expl { margin-top: 6px; padding: 8px 10px; background: #fff8ec; border-left: 3px solid #E0A23A; border-radius: 6px; font-size: 13.5px; white-space: pre-wrap; }
 .btn.ms-y { background: #F2B544; border-color: #E0A23A; color: #3b2a05; }
 .btn.ms-r { background: #D64545; border-color: #D64545; color: #fff; }
+
+/* ---------- Sidebar: compact, grouped, foldable sections */
+.nav a { padding: 4px 10px 4px 8px; margin-bottom: 1px; font-size: 13.3px; gap: 10px; }
+.nav a .ni { width: 27px; height: 27px; border-radius: 8px; }
+.nav a .ni svg { width: 16px; height: 16px; }
+.nav a.active::before { top: 6px; bottom: 6px; }
+.nav .ng { margin-bottom: 2px; }
+.nav button.sep { width: 100%; background: none; border: 0; cursor: pointer; font-family: inherit; padding: 12px 8px 5px 10px; text-align: left; }
+.nav button.sep::after { order: 2; }
+.nav button.sep .badge { order: 3; margin-left: 0; font-size: 10px; letter-spacing: 0; }
+.nav button.sep .chev { order: 4; flex: 0 0 auto; color: #6b6b6e; transition: transform .2s; }
+.nav button.sep:hover { color: #cfcfd1; }
+.nav button.sep:hover .chev { color: #cfcfd1; }
+.nav .ng.shut .chev { transform: rotate(-90deg); }
+.nav .ng.shut .ngi { display: none; }
+.nav .ng:first-child button.sep { padding-top: 4px; }
+
+/* ---------- Dashboard: sections, To do strip */
+.dash-sec { display: flex; align-items: baseline; gap: 10px; margin: 22px 2px 10px; }
+.dash-sec:first-child { margin-top: 0; }
+.dash-sec h3 { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #6b6b6e; }
+.dash-sec .small { margin-left: auto; }
+.todo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.todo { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--tc);
+  border-radius: 12px; color: inherit; text-decoration: none; transition: box-shadow .15s, transform .15s; }
+.todo:hover { box-shadow: 0 6px 16px rgba(30, 30, 30, .08); transform: translateY(-1px); }
+.todo-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--tc) 12%, #fff); flex: 0 0 auto; }
+.todo-n { font-size: 24px; font-weight: 800; color: var(--tc); min-width: 26px; }
+.todo-t { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.todo-t b { font-size: 13.5px; }
+.todo-t span { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.todo > svg:last-child { color: #b5b2ab; flex: 0 0 auto; }
+.todo-clear { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: #eef8f2; border: 1px solid #cfe8da; border-radius: 12px; }
+.kpis.kpi4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .kpis.kpi4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .kpis.kpi4 { grid-template-columns: 1fr; } .todo-grid { grid-template-columns: 1fr; } }
+.quick { margin-bottom: 12px; }

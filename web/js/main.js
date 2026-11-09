@@ -1,5 +1,5 @@
 import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, canPushBoq, ROLE_LABEL } from './fb.js';
-import { esc, icon, avatar, friendlyError } from './util.js';
+import { esc, icon, avatar, friendlyError, dateKey } from './util.js';
 import { startServiceAlerts, stopServiceAlerts, svcNewCount, onSvcChange } from './svcalert.js';
 import * as dashboard from './pages/dashboard.js';
 import * as livemap from './pages/livemap.js';
@@ -52,30 +52,31 @@ const NAV_ICONS = {
 const navIcon = (k) => `<span class="ni"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ''}</svg></span>`;
 
 const NAV = [
+  { sep: 'Today' },
   { path: '', label: 'Dashboard', icon: 'dashboard', page: dashboard },
   { path: 'working', label: 'Working now', icon: 'working', page: working, badge: () => store.open.length + store.extOnSite.length, badgeColor: 'green' },
   { path: 'map', label: 'Live map', icon: 'map', page: livemap },
-  { sep: 'Work' },
+  { sep: 'Operations' },
   { path: 'projects', label: 'Projects', icon: 'projects', page: projects },
-  { path: 'boq', label: 'BOQ', icon: 'boq', page: boq, boq: true },
   { path: 'sites', label: 'Sites', icon: 'sites', page: sites },
   { path: 'schedule', label: 'Schedule', icon: 'schedule', page: schedule },
+  { path: 'boq', label: 'BOQ', icon: 'boq', page: boq, boq: true },
+  { path: 'service', label: 'Service & reports', icon: 'requests', page: svcreports, badge: () => svcNewCount(), badgeColor: 'red' },
   { path: 'updates', label: 'Site updates', icon: 'updates', page: updates },
   { path: 'trips', label: 'Trips & rides', icon: 'trips', page: trips, badge: () => store.tripsActive.length, badgeColor: 'green' },
-  { sep: 'Service' },
-  { path: 'service', label: 'Service & reports', icon: 'requests', page: svcreports, badge: () => svcNewCount(), badgeColor: 'red' },
   { sep: 'People' },
   { path: 'employees', label: 'Employees', icon: 'employees', page: employees },
   { path: 'workers', label: 'External workers', icon: 'workers', page: workers },
   { path: 'attendance', label: 'Attendance', icon: 'attendance', page: attendance },
-  { path: 'missed', label: 'Missed sign-outs', icon: 'flag', page: missed },
+  { path: 'missed', label: 'Missed sign-outs', icon: 'flag', page: missed, badge: () => store.open.filter((x) => x.date < dateKey(new Date())).length, badgeColor: 'red' },
+  { path: 'requests', label: 'Change requests', icon: 'requests', page: requests, badge: () => store.requests.length },
+  { sep: 'Documents' },
   { path: 'documents', label: 'ID documents', icon: 'idcard', page: documents },
   { path: 'company', label: 'Company documents', icon: 'company', page: company },
-  { path: 'requests', label: 'Change requests', icon: 'requests', page: requests, badge: () => store.requests.length },
   { sep: 'Finance', adminOnly: true, accounts: true },
   { path: 'petty', label: 'Petty cash', icon: 'petty', page: petty, badge: () => store.pendingPetty.length, adminOnly: true },
   { path: 'accounts', label: 'Accounts', icon: 'accounts', page: accounts, adminOnly: true, accounts: true },
-  { sep: 'Output' },
+  { sep: 'Reports & admin' },
   { path: 'reports', label: 'Reports', icon: 'reports', page: reports },
   { path: 'backup', label: 'Backup & storage', icon: 'backup', page: backup, adminOnly: true },
 ];
@@ -203,7 +204,7 @@ function renderWarn() {
 
 /** Which menu items this person sees: managers everything but admin pages; Accounts also for people allowed to view it. */
 function navAllowed(n) {
-  if (isLimited()) return (!!n.accounts && canSeeAccounts()) || (!!n.boq && canPushBoq()) || (n.sep === 'Work' && canPushBoq());
+  if (isLimited()) return (!!n.accounts && canSeeAccounts()) || (!!n.boq && canPushBoq()) || (n.sep === 'Operations' && canPushBoq());
   if (n.accounts) return canSeeAccounts();
   return !n.adminOnly || isAdmin();
 }
@@ -213,11 +214,38 @@ function renderNav() {
   const nav = document.getElementById('nav');
   if (!nav) return;
   const { base } = currentPath();
-  nav.innerHTML = NAV.filter(navAllowed).map((n) => {
-    if (n.sep) return `<div class="sep">${n.sep}</div>`;
-    const b = n.badge ? n.badge() : 0;
-    return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}" title="${n.label}">${navIcon(n.icon)}<span class="nl">${n.label}</span>${b ? `<span class="badge${n.badgeColor ? ` ${n.badgeColor}` : ''}">${b}</span>` : ''}</a>`;
+  // Sections fold away (remembered per browser); the section of the open page always stays open,
+  // and a folded section still shows the total of its badges.
+  let closed = [];
+  try { closed = JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { /* */ }
+  const groups = [];
+  for (const n of NAV.filter(navAllowed)) {
+    if (n.sep) groups.push({ label: n.sep, items: [] });
+    else if (groups.length) groups[groups.length - 1].items.push(n);
+    else groups.push({ label: '', items: [n] });
+  }
+  nav.innerHTML = groups.filter((g) => g.items.length).map((g) => {
+    const active = g.items.some((n) => n.path === base);
+    const shut = !active && closed.includes(g.label);
+    let total = 0;
+    const items = g.items.map((n) => {
+      const b = n.badge ? n.badge() : 0;
+      if (n.badgeColor !== 'green') total += b || 0;
+      return `<a href="#/${n.path}" class="${n.path === base ? 'active' : ''}" title="${n.label}">${navIcon(n.icon)}<span class="nl">${n.label}</span>${b ? `<span class="badge${n.badgeColor ? ` ${n.badgeColor}` : ''}">${b}</span>` : ''}</a>`;
+    }).join('');
+    return `<div class="ng${shut ? ' shut' : ''}">${g.label ? `<button class="sep" type="button" data-ng="${g.label}" aria-expanded="${!shut}">
+        <span>${g.label}</span>${shut && total ? `<span class="badge">${total}</span>` : ''}<svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>` : ''}
+      <div class="ngi">${items}</div></div>`;
   }).join('');
+  nav.querySelectorAll('[data-ng]').forEach((b) => {
+    b.onclick = () => {
+      const k = b.dataset.ng;
+      const i = closed.indexOf(k);
+      if (i >= 0) closed.splice(i, 1); else closed.push(k);
+      try { localStorage.setItem('navClosed', JSON.stringify(closed)); } catch { /* */ }
+      renderNav();
+    };
+  });
 }
 
 export function setHeader(title, sub = '', actions = '') {
