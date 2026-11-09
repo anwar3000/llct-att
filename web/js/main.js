@@ -22,6 +22,7 @@ import * as company from './pages/company.js';
 import * as svcreports from './pages/svcreports.js';
 import * as boq from './pages/boq.js';
 import * as missed from './pages/missed.js';
+import * as tv from './pages/tv.js';
 
 const app = document.getElementById('app');
 window.__appStarted = true;
@@ -39,6 +40,7 @@ const NAV_ICONS = {
   trips: '<path d="M3.6 16.6v-3.9a2 2 0 0 1 .5-1.3L6 9.2l1.4-3.3A1.5 1.5 0 0 1 8.8 5h6.4a1.5 1.5 0 0 1 1.4.9L18 9.2l1.9 2.2a2 2 0 0 1 .5 1.3v3.9a1 1 0 0 1-1 1H4.6a1 1 0 0 1-1-1z"/><path d="M6 9.2h12M6 17.6v2M18 17.6v2"/><circle cx="7.6" cy="13.4" r="1.1"/><circle cx="16.4" cy="13.4" r="1.1"/>',
   employees: '<circle cx="9" cy="8" r="3.6"/><path d="M2.6 20.2c.8-3.6 3.3-5.6 6.4-5.6s5.6 2 6.4 5.6"/><path d="M15.8 4.6a3.6 3.6 0 0 1 0 6.9M18.3 14.9c1.7.9 2.7 2.6 3.1 5.3"/>',
   workers: '<path d="M3 17.2h18"/><path d="M5.2 17.2v-3.4a6.8 6.8 0 0 1 13.6 0v3.4"/><path d="M10 7.3v3.4M14 7.3v3.4"/><path d="M4 17.2v1.6A1.2 1.2 0 0 0 5.2 20h13.6a1.2 1.2 0 0 0 1.2-1.2v-1.6"/>',
+  tv: '<rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 17v3.5"/>',
   flag: '<path d="M5 21V4"/><path d="M5 4h11l-1.8 3.8L16 11.6H5"/>',
   attendance: '<circle cx="12" cy="12.5" r="8.5"/><path d="M12 7.8v4.7l3.1 1.9"/><path d="M9.5 2.5h5"/>',
   idcard: '<rect x="2.5" y="4.8" width="19" height="14.4" rx="2.2"/><circle cx="8.5" cy="10.8" r="2.3"/><path d="M5.3 16c.5-1.7 1.7-2.7 3.2-2.7s2.7 1 3.2 2.7"/><path d="M14.5 9.8h4.2M14.5 13.2h3"/>',
@@ -56,6 +58,7 @@ const NAV = [
   { path: '', label: 'Dashboard', icon: 'dashboard', page: dashboard },
   { path: 'working', label: 'Working now', icon: 'working', page: working, badge: () => store.open.length + store.extOnSite.length, badgeColor: 'green' },
   { path: 'map', label: 'Live map', icon: 'map', page: livemap },
+  { path: 'tv', label: 'TV screen', icon: 'tv', page: tv },
   { sep: 'Operations' },
   { path: 'projects', label: 'Projects', icon: 'projects', page: projects },
   { path: 'sites', label: 'Sites', icon: 'sites', page: sites },
