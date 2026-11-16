@@ -404,6 +404,15 @@ service cloud.firestore {
       allow create, update: if invHas('payments');
       allow delete: if isAdmin() || (invHas('payments') && invHas('delete'));
     }
+    // Price list. inv_pricing holds cost, markup and vendor references: admin and staff given 'pricing' only.
+    // inv_prices is the same list with the selling price only, for everyone who makes quotations or invoices.
+    match /inv_pricing/{id} {
+      allow read, write: if invHas('pricing');
+    }
+    match /inv_prices/{id} {
+      allow read: if invHas('pricing') || invHas('quotation') || invHas('invoice');
+      allow write: if invHas('pricing');
+    }
     match /inv_docs/{id} {
       allow read: if invHas('viewAll')
                   || (invOn() && resource.data.createdBy == request.auth.uid)
