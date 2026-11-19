@@ -316,7 +316,14 @@ class BoqPdf {
     return doc.save();
   }
 
-  static String fileName(Boq b) => 'BOQ_${b.title.replaceAll(RegExp(r'[^\w-]+'), '_')}.pdf';
+  /// "BOQ - title - customer.pdf"
+  static String fileName(Boq b) {
+    final n = 'BOQ - ${b.title}${b.client.isNotEmpty && b.client != b.title ? ' - ${b.client}' : ''}'
+        .replaceAll(RegExp(r'[\\/:*?"<>|\n\r\t]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return '${n.length > 150 ? n.substring(0, 150).trim() : n}.pdf';
+  }
 
   /// Opens the phone's print dialog (printer or "Save as PDF").
   static Future<void> printIt(Boq b, {String siteName = ''}) async {

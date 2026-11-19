@@ -431,7 +431,17 @@ class ReportPdf {
   static Future<void> share(InvReport r) async {
     final cfg = await InvConfig.load();
     final data = await build(r, cfg);
-    final name = '${r.kind.title.replaceAll(' ', '_')}_${r.number}.pdf';
-    await IdSheet.shareFiles([(name: name, data: data, mime: 'application/pdf')], subject: '${r.kind.title} ${r.number}');
+    await IdSheet.shareFiles([(name: fileName(r), data: data, mime: 'application/pdf')],
+        subject: '${r.kind.title} ${r.number}${r.clientName.isEmpty ? '' : ' - ${r.clientName}'}');
+  }
+
+  /// PDF file name: type, number, customer and site, e.g. "Service Report SR-0012 - Client - Site.pdf".
+  static String fileName(InvReport r) {
+    final cn = r.clientName.trim();
+    final site = r.s('siteName').trim();
+    var n = '${r.kind.title} ${r.number}${cn.isEmpty ? '' : ' - $cn'}${site.isNotEmpty && site != cn ? ' - $site' : ''}';
+    n = n.replaceAll(RegExp(r'[\\/:*?"<>|\n\r\t]'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (n.length > 150) n = n.substring(0, 150).trim();
+    return '$n.pdf';
   }
 }

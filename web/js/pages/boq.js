@@ -143,7 +143,7 @@ export function boqReport(b) {
   return {
     title: `BOQ — ${b.title}`,
     subtitle: [b.projectName || project(b.projectId)?.name, b.client, b.ref && `Ref ${b.ref}`].filter(Boolean).join('  ·  '),
-    filename: `BOQ_${b.title.replace(/[^\w-]+/g, '_').slice(0, 60)}`,
+    filename: `BOQ - ${b.title}${b.client && b.client !== b.title ? ` - ${b.client}` : ''}`.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 150),
     sheets: [
       { name: 'Details', columns: ['Item', 'Value'], widths: [16, 70], rows: summary },
       { name: 'Bill of quantities', columns: ['#', 'Item', 'Description', 'Qty', 'Unit'], widths: [5, 34, 60, 8, 8], rows },
