@@ -34,6 +34,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned: Flutter 3.50.0 (Nov 2026) breaks the release build (Android lint crash in image_picker).
+          # Move up only after a test build passes.
+          flutter-version: '3.47.9'
           cache: true
 
       - name: Generate Android project files
