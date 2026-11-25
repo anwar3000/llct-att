@@ -1,6 +1,6 @@
 // Driver trips and staff rides — live trips in progress, daily list with km and cost, route map, admin corrections.
 import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel,
-  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES, reviewDriverPayment } from '../fb.js';
+  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES, reviewDriverPayment, updateDriverPayment } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError, parseKey } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -100,12 +100,38 @@ export function mount(el, _p, { setHeader }) {
           ${p.status === 'rejected' ? `<div class="small" style="color:#b23535">Rejected · driver's reason: ${esc(p.reason)}</div>` : p.status !== 'exception' && p.reason ? `<div class="small muted">${esc(p.reason)}</div>` : ''}</div>
         <b style="${p.status === 'rejected' ? 'text-decoration:line-through;color:#b23535' : p.status === 'exception' ? 'color:#b23535' : ''}">${fmtMoney(p.claimed)}</b>
         ${p.status === 'exception' ? `<button class="btn sm ghost" data-prej="${p.id}">Reject</button><button class="btn sm success" data-pacc="${p.id}">${icon('check', 14)} Accept</button>` : ''}
-        <button class="btn sm ghost icon" data-delpay="${p.id}" title="Delete payment">${icon('trash', 15)}</button></div>`).join('')
+        ${p.status !== 'exception' ? `<button class="btn sm ghost icon" data-editpay="${p.id}" title="Change amount / date">${icon('edit', 15)}</button>` : ''}<button class="btn sm ghost icon" data-delpay="${p.id}" title="Delete payment">${icon('trash', 15)}</button></div>`).join('')
         : '<div class="empty">No payments recorded yet</div>'}
     </div>`;
     wireTabs();
     el.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.pay); if (r) payDialog(r.u, r.balance); }; });
     el.querySelectorAll('[data-stmt]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.stmt); if (r) statementDialog(r.u, r.tr, r.pays); }; });
+    el.querySelectorAll('[data-editpay]').forEach((b) => {
+      b.onclick = () => {
+        const p = store.payments.find((x) => x.id === b.dataset.editpay);
+        if (!p) return;
+        modal({
+          title: `Change payment · ${esc(p.employeeName)}`,
+          body: `<div class="grid cols-2" style="gap:10px">
+            <label class="f"><span>Amount (AED)</span><input id="ep-amt" type="number" min="0" step="0.01" value="${p.claimed}"></label>
+            <label class="f"><span>Date</span><input id="ep-date" type="date" value="${esc(p.date)}"></label>
+            <label class="f"><span>Method</span><select id="ep-m">${['Bank transfer', 'Cash', 'Cheque', 'Other'].map((m) => `<option ${m === p.method ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+            <label class="f"><span>Note / reference</span><input id="ep-note" value="${esc(p.note)}"></label></div>`,
+          foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Save</button>',
+          onMount: (m, close) => {
+            m.querySelector('[data-no]').onclick = close;
+            m.querySelector('[data-yes]').onclick = async () => {
+              const amount = Number(m.querySelector('#ep-amt').value), date = m.querySelector('#ep-date').value;
+              if (!(amount > 0) || !date) { toast('Enter the amount and date', true); return; }
+              try {
+                await updateDriverPayment(p.id, { amount, date, method: m.querySelector('#ep-m').value, note: m.querySelector('#ep-note').value.trim() });
+                toast('Payment updated'); close();
+              } catch (e) { toast(friendlyError(e), true); }
+            };
+          },
+        });
+      };
+    });
     el.querySelectorAll('[data-pacc],[data-prej]').forEach((b) => {
       b.onclick = async () => {
         const acc = !!b.dataset.pacc, p = store.payments.find((x) => x.id === (b.dataset.pacc || b.dataset.prej));

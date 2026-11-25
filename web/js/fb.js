@@ -385,6 +385,9 @@ export const addDriverPayment = ({ driver, amount, date, method, note }) => addD
   employeeId: driver.id, employeeName: driver.name, amount: Math.round(amount * 100) / 100, date, method, note,
   createdBy: store.me?.name || '', createdById: store.me?.id || '', createdAt: serverTimestamp(),
 });
+export const updateDriverPayment = (id, { amount, date, method, note }) => updateDoc(doc(db, 'driverPayments', id), {
+  amount: Math.round(amount * 100) / 100, date, method, note, editedBy: store.me?.name || '', editedAt: serverTimestamp(),
+});
 export const deleteDriverPayment = (id) => deleteDoc(doc(db, 'driverPayments', id));
 /** Every finished trip of these drivers (all time) — for earned / paid / balance. */
 export async function finishedTripsFor(ids) {
