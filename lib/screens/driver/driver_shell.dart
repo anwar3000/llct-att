@@ -9,6 +9,7 @@ import '../../services/auth_service.dart';
 import '../../services/db.dart';
 import '../../services/trip_service.dart';
 import '../../widgets/common.dart';
+import '../../widgets/ride_charge.dart';
 import '../../widgets/profile_prompt.dart';
 import '../../widgets/trip_card.dart';
 import '../admin/accounts_tab.dart';
@@ -218,8 +219,14 @@ class _DriverShellState extends State<DriverShell> {
       ]),
     );
 
-    // Tally: everything earned on finished trips minus everything paid by the office.
-    final totalEarned = _allDone.fold<double>(0, (a, t) => a + (t.cost ?? 0)) + _rides.fold<double>(0, (a, t) => a + (t.cost ?? 0));
+    // Tally: approved trips and charged staff rides minus everything paid by the office. Unapproved ones are shown apart.
+    double costOf(Trip t) => t.cost ?? 0;
+    final rides = _rides.where((r) => r.costEntered || r.isApproved).toList();
+    final approved = [..._allDone.where((t) => t.isApproved), ...rides.where((r) => r.isApproved)];
+    final waiting = [..._allDone.where((t) => t.awaitingApproval), ...rides.where((r) => r.awaitingApproval && r.costEntered)];
+    final toCharge = _rides.where((r) => r.needsCharge && !r.isApproved).toList();
+    final totalEarned = approved.fold<double>(0, (a, t) => a + costOf(t));
+    final waitingAmt = waiting.fold<double>(0, (a, t) => a + costOf(t));
     final totalPaid = _payments.fold<double>(0, (a, p) => a + p.amount);
     final balance = ((totalEarned - totalPaid) * 100).round() / 100;
     final tally = Card(
@@ -229,14 +236,28 @@ class _DriverShellState extends State<DriverShell> {
           const Text('My account', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
           const SizedBox(height: 10),
           Row(children: [
-            _tallyBox('Earned', fmtMoney((totalEarned * 100).round() / 100),
-                '${_allDone.length} trips${_rides.isEmpty ? '' : ' + ${_rides.length} rides'}', AppColors.primary),
+            _tallyBox('Earned (approved)', fmtMoney((totalEarned * 100).round() / 100),
+                '${approved.length} trips & rides', AppColors.primary),
             const SizedBox(width: 8),
             _tallyBox('Paid', fmtMoney((totalPaid * 100).round() / 100), '${_payments.length} payments', AppColors.success),
             const SizedBox(width: 8),
             _tallyBox(balance >= 0 ? 'Balance due' : 'Overpaid', fmtMoney(balance.abs()), 'earned − paid',
                 balance > 0 ? AppColors.warning : AppColors.success),
           ]),
+          if (waiting.isNotEmpty || toCharge.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFFFFF4E2), borderRadius: BorderRadius.circular(10)),
+              child: Text(
+                  [
+                    if (waiting.isNotEmpty) '${fmtMoney((waitingAmt * 100).round() / 100)} waiting for admin approval (${waiting.length})',
+                    if (toCharge.isNotEmpty) '${toCharge.length} staff trip${toCharge.length == 1 ? '' : 's'} need your charge',
+                  ].join(' · '),
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF8A5A10))),
+            ),
+          ],
           if (_payments.isNotEmpty) ...[
             const SizedBox(height: 12),
             const Text('Payments received', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
@@ -290,7 +311,7 @@ class _DriverShellState extends State<DriverShell> {
               if (i > 0) const Divider(height: 1, indent: 16),
               ListTile(
                 dense: true,
-                onTap: () => editTripCost(context, done[i]),
+                onTap: done[i].isApproved ? null : () => editTripCost(context, done[i]),
                 title: Text(
                     '${done[i].startSiteName.isEmpty ? 'GPS' : done[i].startSiteName} → ${done[i].endSiteName.isEmpty ? 'GPS' : done[i].endSiteName}',
                     maxLines: 1,
@@ -301,8 +322,9 @@ class _DriverShellState extends State<DriverShell> {
                     '${done[i].purpose.isEmpty ? '' : ' · ${done[i].purpose}'}'),
                 trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text('${done[i].km.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w800)),
-                  Text(done[i].cost == null ? 'Add cost ✎' : '${fmtMoney(done[i].cost!)} ✎',
+                  Text(done[i].cost == null ? 'Add cost ✎' : '${fmtMoney(done[i].cost!)}${done[i].isApproved ? '' : ' ✎'}',
                       style: const TextStyle(fontSize: 12, color: AppColors.accentDark, fontWeight: FontWeight.w700)),
+                  approvalPill(done[i]),
                 ]),
               ),
             ],
@@ -310,24 +332,38 @@ class _DriverShellState extends State<DriverShell> {
         ),
     ];
 
-    if (_rides.isNotEmpty) {
+    // Staff rides with me (or with a driver I sent): add my charge, then admin approves.
+    final toCharge2 = _rides.where((r) => r.needsCharge && !r.isApproved).toList();
+    final charged = _rides.where((r) => !toCharge2.contains(r)).toList();
+    Widget rideTile(Trip r, {bool charge = false}) => ListTile(
+          dense: true,
+          onTap: r.isApproved || r.groupedWith.isNotEmpty ? null : () => chargeRideDialog(context, r, rides: _rides, ownTrips: _allDone, by: widget.me.name),
+          leading: Icon(r.byOther ? Icons.swap_horiz : Icons.directions_car, color: const Color(0xFF7B4FC9)),
+          title: Text('${r.employeeName}${r.byOther ? ' · driven by ${r.actualDriver.isEmpty ? 'other driver' : r.actualDriver}' : ''}',
+              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('${fmtDateShort(r.startLocal)} · ${fmtTime(r.startLocal)}–${r.endLocal == null ? '…' : fmtTime(r.endLocal!)} · ${tripRoute(r)}',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          trailing: charge
+              ? FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12)),
+                  onPressed: () => chargeRideDialog(context, r, rides: _rides, ownTrips: _allDone, by: widget.me.name),
+                  child: const Text('Add charge'))
+              : Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text(r.groupedWith.isNotEmpty ? 'same journey' : (r.cost == null ? '—' : fmtMoney(r.cost!)),
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                  approvalPill(r),
+                ]),
+        );
+    if (toCharge2.isNotEmpty) {
+      right.addAll([
+        SectionTitle('Trips to charge (${toCharge2.length})'),
+        Card(child: Column(children: [for (final r in toCharge2) rideTile(r, charge: true)])),
+      ]);
+    }
+    if (charged.isNotEmpty) {
       right.addAll([
         const SectionTitle('Staff rides with me'),
-        Card(
-          child: Column(children: [
-            for (final r in _rides.take(15))
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.directions_car, color: Color(0xFF7B4FC9)),
-                title: Text(r.employeeName, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text('${fmtDateShort(r.startLocal)} · ${fmtTime(r.startLocal)} · '
-                    '${r.startSiteName.isEmpty ? 'GPS' : r.startSiteName} → ${r.endSiteName.isEmpty ? 'GPS' : r.endSiteName}',
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: Text('${r.km.toStringAsFixed(1)} km${r.cost == null ? '' : '\n${fmtMoney(r.cost!)}'}',
-                    textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
-              ),
-          ]),
-        ),
+        Card(child: Column(children: [for (final r in charged.take(20)) rideTile(r)])),
       ]);
     }
 

@@ -55,6 +55,7 @@ class TripService {
     String kind = 'driver',
     AppUser? driver,
     double? ratePerKm,
+    Map<String, dynamic> extra = const {},
   }) async {
     final p = await LocationService.current();
     final site = siteAt(p.latitude, p.longitude, sites);
@@ -68,6 +69,7 @@ class TripService {
       kind: kind,
       driver: driver,
       ratePerKm: ratePerKm,
+      extra: extra,
     );
     _trip = Trip(
       id: id,
@@ -199,7 +201,14 @@ class TripService {
   /// Ends the trip, works out the drop-off site and the cost.
   /// Driver trip: the cost the driver entered ([fare]), else km × rate. Taxi ride: the [fare] the employee entered. With a company driver: no cost
   /// here (the driver's own trip is what gets paid), so it isn't counted twice.
-  Future<Trip> stop({required AppUser user, required Trip trip, required List<Site> sites, String note = '', double? fare, String? vehicle}) async {
+  Future<Trip> stop(
+      {required AppUser user,
+      required Trip trip,
+      required List<Site> sites,
+      String note = '',
+      double? fare,
+      String? vehicle,
+      String? receipt}) async {
     if (_trip?.id != trip.id) {
       _trip = trip;
       distance.value = trip.distanceM;
@@ -214,18 +223,41 @@ class TripService {
     final site = p == null ? null : siteAt(p.latitude, p.longitude, sites);
     // Ride with a company driver: km × that driver's rate (saved when the ride started).
     final rate = trip.isTaxi ? null : (trip.isWithDriver ? (trip.ratePerKm ?? 0) : await Db.tripRate(user));
+    // Taxi / RTA fare paid by the employee → a petty cash expense (approved by admin like any other).
+    String? pettyId;
+    if (trip.isTaxi && fare != null && fare > 0) {
+      final from = trip.startSiteName.isNotEmpty ? trip.startSiteName : 'GPS';
+      final to = site?.name ?? 'GPS';
+      final rta = trip.mode == 'rta';
+      pettyId = await Db.addPetty(
+        employeeId: user.id,
+        employeeName: user.name,
+        type: 'expense',
+        amount: fare,
+        category: rta ? 'Transport - RTA' : 'Transport - Taxi',
+        note: '${rta ? 'RTA (metro / bus)' : 'Taxi'}: $from → $to${vehicle != null && vehicle.isNotEmpty ? ' · $vehicle' : ''} · ${(distance.value / 1000).toStringAsFixed(1)} km',
+        status: 'pending',
+        createdBy: user.id,
+        createdByName: user.name,
+        site: site,
+        receipt: receipt,
+        tripId: trip.id,
+      );
+    }
     await Db.endTrip(
       trip: trip,
       distanceM: distance.value,
       points: _points,
       ratePerKm: rate,
-      cost: fare ?? (trip.isTaxi ? 0 : null),
+      // Staff ride with a driver / provider: no cost here — the provider adds the charge, admin approves.
+      cost: fare ?? (trip.isTaxi || trip.isWithDriver ? 0 : null),
       vehicle: vehicle,
       costEntered: !trip.isRide && fare != null,
       lat: p?.latitude,
       lng: p?.longitude,
       site: site,
       note: note,
+      pettyId: pettyId,
     );
     await PositionHub.instance.remove('trip');
     _fallback?.cancel();

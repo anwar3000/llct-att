@@ -1,4 +1,4 @@
-import { acctPositionNow, canSeeAccounts, watchCompanyDocs, companyDueState, daysUntil, store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes } from '../fb.js';
+import { acctPositionNow, canSeeAccounts, watchCompanyDocs, companyDueState, daysUntil, store, isAdmin, alertLabel, resolveAlert, clearViolations, violationsToday, approveSite, staffStatuses, sessionFlagged, sessionsInRange, reviewPetty, reviewOff, closeSession, recentUpdates, workerEntriesInRange, entryMinutes, tripCost, tripHead, tripApproved, tripRejected, tripNeedsCharge } from '../fb.js';
 import {
   esc, fromTz, STAFF_COLOR, EXT_COLOR, icon, avatar, pill, fmtMins, fmtTime, fmtDateTime, fmtMoney, fmtDate, timeAgo, progressBar,
   dateKey, addDays, toast, promptBox, friendlyError, parseKey, b64img, photoViewer,
@@ -123,6 +123,7 @@ export function mount(el, _params, { setHeader }) {
       [store.requests.length, 'Document changes', 'staff update requests', '#/requests', '#E08E2B', 'idcard'],
       [compDue.length, 'Company documents', compDue.some((d) => companyDueState(d.expiry) === 'expired') ? 'expired / to renew' : 'renew within 15 days', '#/company', '#D98A1A', 'company'],
       [flagged.length, 'Flagged check-ins today', 'outside site or fake GPS', '#d-alerts', '#8E5CC4', 'flag'],
+      [isAdmin() ? store.tripsToApprove.length : 0, 'Trips to approve', (() => { const n = store.tripsToApprove.filter(tripNeedsCharge).length; return n ? `${n} still need the provider's charge` : 'drivers, providers, taxi & RTA'; })(), '#/trips', '#7B4FC9', 'car'],
     ].filter((t) => t[0] > 0);
 
     body.innerHTML = `
@@ -169,6 +170,7 @@ export function mount(el, _params, { setHeader }) {
     </div>` : ''}
 
     ${cashCard() ? `<div class="dash-sec"><h3>Money</h3><a class="small" href="#/accounts">Accounts →</a></div>${cashCard()}` : ''}
+    ${isAdmin() ? travelCard() : ''}
 
     <div class="dash-sec"><h3>Trends & team</h3></div>
     <div class="grid cols-2-1">
@@ -351,5 +353,34 @@ function pettyStatusHtml() {
         <td class="num">${r.s.pendingCount ? `${fmtMoney(r.s.pending)} <span class="small muted">(${r.s.pendingCount})</span>` : '—'}</td>
         <td class="num"><b style="color:${r.s.balance < 0 ? '#D64545' : 'inherit'}">${fmtMoney(r.s.balance)}</b></td></tr>`).join('')}
       </table></div>${rows.length > 12 ? `<div class="card-pad small muted">+ ${rows.length - 12} more on the Petty cash page</div>` : ''}` : ''}
+  </div>`;
+}
+
+// ---- Travel spend: today, by head (each driver / transport provider, Taxi, RTA), with the last 7 days.
+function travelCard() {
+  const all = (store.tripsRecent || []).filter((t) => t.status === 'done' && !tripRejected(t));
+  const today = dateKey(new Date());
+  const m = (v) => fmtMoney(Math.round(v * 100) / 100);
+  const sum = (l) => l.reduce((a, t) => a + tripCost(t), 0);
+  const tToday = all.filter((t) => t.date === today);
+  const heads = new Map();
+  tToday.forEach((t) => { const h = tripHead(t); const c = heads.get(h) || { v: 0, n: 0, un: 0 }; c.v += tripCost(t); c.n++; if (!tripApproved(t)) c.un++; heads.set(h, c); });
+  const days = [];
+  for (let i = 6; i >= 0; i--) { const k = dateKey(addDays(new Date(), -i)); days.push([k, sum(all.filter((t) => t.date === k))]); }
+  const max = Math.max(1, ...days.map((d) => d[1]));
+  const week = days.reduce((a, d) => a + d[1], 0);
+  const unap = all.filter((t) => !tripApproved(t));
+  const icon2 = (h) => (h.startsWith('Taxi') ? '🚕' : h.startsWith('RTA') ? '🚇' : '🚗');
+  return `<div class="dash-sec"><h3>Travel</h3><a class="small" href="#/trips">Trips & rides →</a></div>
+  <div class="card trv">
+    <div class="trv-top">
+      <div><span class="trv-l">Spent on travel today</span><b class="trv-big">${m(sum(tToday))}</b>
+        <span class="trv-s">${tToday.length} trip${tToday.length === 1 ? '' : 's'} · this week ${m(week)}</span></div>
+      <div class="trv-bars" title="Last 7 days">${days.map(([k, v]) => `<div class="trv-bar${k === today ? ' on' : ''}"><i style="height:${Math.max(3, Math.round((v / max) * 100))}%"></i><span>${parseKey(k).toLocaleDateString('en-GB', { weekday: 'narrow' })}</span><em>${v ? m(v) : ''}</em></div>`).join('')}</div>
+    </div>
+    <div class="trv-heads">${heads.size ? [...heads.entries()].sort((a, b) => b[1].v - a[1].v).map(([h, c]) => `<a class="trv-h" href="#/trips">
+        <span class="trv-hi">${icon2(h)}</span><span class="trv-hn"><b>${esc(h)}</b><i>${c.n} trip${c.n === 1 ? '' : 's'}${c.un ? ` · ${c.un} unapproved` : ''}</i></span><b class="trv-hv">${m(c.v)}</b></a>`).join('')
+      : '<div class="small muted" style="padding:6px 2px">No travel recorded today yet.</div>'}</div>
+    ${unap.length ? `<a class="trv-warn" href="#/trips">${unap.length} trip${unap.length === 1 ? '' : 's'} not yet approved · ${m(sum(unap))} — they don't count in driver balances until approved →</a>` : ''}
   </div>`;
 }

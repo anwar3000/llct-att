@@ -1145,8 +1145,29 @@ class Trip {
   /// Driver typed the cost themselves (instead of km × rate).
   final bool costEntered;
   final String note, editedBy;
+  /// Admin approval: 'approved' | 'rejected' | '' (not yet approved). Trips before [kTripApprovalFrom] count as approved.
+  final String approval;
+  final String approvedBy;
+  /// Ride with a driver / transport provider who sent someone else: [actualDriver] drove.
+  final bool byOther;
+  final String actualDriver;
+  /// Taxi ride paid by the employee: 'taxi' or 'rta' (metro / bus); [pettyId] = its petty cash expense.
+  final String mode;
+  final String pettyId;
+  /// Same car journey as this trip / ride (charged once there).
+  final String groupedWith;
+  final String costNote, chargedBy;
 
   Trip({
+    this.approval = '',
+    this.approvedBy = '',
+    this.byOther = false,
+    this.actualDriver = '',
+    this.mode = '',
+    this.pettyId = '',
+    this.groupedWith = '',
+    this.costNote = '',
+    this.chargedBy = '',
     this.note = '',
     this.editedBy = '',
     this.costEntered = false,
@@ -1184,7 +1205,16 @@ class Trip {
   bool get isTaxi => kind == 'taxi';
   bool get isWithDriver => kind == 'withDriver';
   bool get isRide => isTaxi || isWithDriver;
-  String get kindLabel => isTaxi ? 'Taxi' : (isWithDriver ? 'Company driver${driverName.isEmpty ? '' : ' · $driverName'}' : 'Driver trip');
+  bool get isRta => isTaxi && mode == 'rta';
+  String get date => dateKey(startLocal);
+  bool get isApproved => approval == 'approved' || (approval.isEmpty && date.compareTo(kTripApprovalFrom) < 0);
+  bool get isRejected => approval == 'rejected';
+  bool get awaitingApproval => !isApproved && !isRejected;
+  /// A staff ride with a provider that still needs the provider's charge.
+  bool get needsCharge => isWithDriver && status == 'done' && !costEntered && groupedWith.isEmpty && !isRejected;
+  String get kindLabel => isTaxi
+      ? (isRta ? 'RTA (metro / bus)' : 'Taxi')
+      : (isWithDriver ? '${driverName.isEmpty ? 'Company driver' : driverName}${byOther ? ' (sent ${actualDriver.isEmpty ? 'another driver' : actualDriver})' : ''}' : 'Driver trip');
   double get km => distanceM / 1000;
   Duration get duration => (endAt ?? DateTime.now()).difference(startAt);
   DateTime get startLocal => atZone(startAt, tz);
@@ -1224,9 +1254,21 @@ class Trip {
       costEntered: m['costEntered'] == true,
       note: _str(m['note']),
       editedBy: _str(m['editedBy']),
+      approval: _str(m['approval']),
+      approvedBy: _str(m['approvedBy']),
+      byOther: m['byOther'] == true,
+      actualDriver: _str(m['actualDriver']),
+      mode: _str(m['mode']),
+      pettyId: _str(m['pettyId']),
+      groupedWith: _str(m['groupedWith']),
+      costNote: _str(m['costNote']),
+      chargedBy: _str(m['chargedBy']),
     );
   }
 }
+
+/// Trips from this day on need admin approval; earlier ones count as approved.
+const kTripApprovalFrom = '2026-11-25';
 
 /// Money paid to a driver by admin. Balance = trip costs − payments.
 class DriverPayment {

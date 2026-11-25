@@ -102,7 +102,7 @@ export function mapPetty(d) {
   const m = d.data() || {};
   return {
     id: d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', type: m.type || 'expense',
-    amount: num(m.amount), category: m.category || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '',
+    amount: num(m.amount), category: m.category || '', note: m.note || '', siteId: m.siteId || '', siteName: m.siteName || '', tripId: m.tripId || '',
     receipt: m.receipt || '', hasReceipt: m.hasReceipt === true || !!m.receipt, status: m.status || 'pending', reviewNote: m.reviewNote || '', reviewedBy: m.reviewedBy || '',
     createdByName: m.createdByName || '', createdAt: toDate(m.createdAt), date: m.date || '',
     tz: tzOf(m.tz), createdLocal: atTz(toDate(m.createdAt), tzOf(m.tz)),
@@ -221,18 +221,57 @@ export function mapTrip(d) {
     kind: m.kind || 'driver', driverId: m.driverId || '', driverName: m.driverName || '',
     editedAt: toDate(m.editedAt), editedBy: m.editedBy || '', originalDistanceM: n(m.originalDistanceM),
     costEntered: m.costEntered === true, costEditedAt: toDate(m.costEditedAt),
+    approval: m.approval || '', approvedBy: m.approvedBy || '', approvedAt: toDate(m.approvedAt),
+    byOther: m.byOther === true, actualDriver: m.actualDriver || '', mode: m.mode || '', pettyId: m.pettyId || '',
+    groupedWith: m.groupedWith || '', costNote: m.costNote || '', chargedBy: m.chargedBy || '',
   };
 }
+// ---- approval: every trip / ride from TRIP_APPROVAL_FROM needs admin approval; earlier ones count as approved.
+export const TRIP_APPROVAL_FROM = '2026-11-25';
+export const tripApproved = (t) => t.approval === 'approved' || (!t.approval && (t.date || '') < TRIP_APPROVAL_FROM);
+export const tripRejected = (t) => t.approval === 'rejected';
+export const tripAwaiting = (t) => !tripApproved(t) && !tripRejected(t);
+/** Staff ride with a driver / transport provider still waiting for the provider's charge. */
+export const tripNeedsCharge = (t) => t.kind === 'withDriver' && t.status === 'done' && !t.costEntered && !t.groupedWith && !tripRejected(t) && !tripApproved(t);
+/** Travel head of a trip: provider / driver name, 'Taxi' or 'RTA'. */
+export const tripHead = (t) => (t.kind === 'taxi' ? (t.mode === 'rta' ? 'RTA (metro / bus)' : 'Taxi')
+  : t.kind === 'withDriver' ? (t.driverName || 'Company driver') : (t.employeeName || 'Driver'));
+export async function setTripApproval(t, approval) {
+  const b = writeBatch(db);
+  b.update(doc(db, 'trips', t.id), { approval, approvedBy: store.me?.name || '', approvedAt: serverTimestamp() });
+  if (t.pettyId && approval) {
+    b.update(doc(db, 'petty', t.pettyId), { status: approval === 'approved' ? 'approved' : 'rejected', reviewedBy: store.me?.name || '', reviewedAt: serverTimestamp() });
+  }
+  await b.commit();
+}
+/** Admin adds the provider's charge for a staff ride; [groupIds] = other rides of the same car journey (charged once). */
+export async function chargeRide(t, amount, { note = '', groupIds = [], actualDriver } = {}) {
+  const b = writeBatch(db);
+  b.update(doc(db, 'trips', t.id), { cost: Math.round(amount * 100) / 100, costEntered: true, costNote: note, chargedBy: store.me?.name || '',
+    groupedWith: '', costEditedAt: serverTimestamp(), ...(actualDriver ? { byOther: true, actualDriver } : {}) });
+  groupIds.forEach((id) => b.update(doc(db, 'trips', id), { cost: 0, costEntered: true, groupedWith: t.id, chargedBy: store.me?.name || '', costEditedAt: serverTimestamp() }));
+  await b.commit();
+}
+export const tripsOverlap = (a, b) => {
+  const slack = 10 * 60000;
+  const ae = (a.endAt || a.startAt), be = (b.endAt || b.startAt);
+  return a.startAt && b.startAt && a.startAt - slack <= be && b.startAt - slack <= ae;
+};
 export const tripKm = (t) => (t.distanceM || 0) / 1000;
 export const TRIP_KINDS = { driver: 'Driver trip', taxi: 'Taxi', withDriver: 'With company driver' };
-export const tripKindLabel = (t) => (t.kind === 'withDriver' && t.driverName ? `With ${t.driverName}` : TRIP_KINDS[t.kind] || 'Driver trip');
+export const tripKindLabel = (t) => (t.kind === 'withDriver' && t.driverName ? `With ${t.driverName}${t.byOther ? ` (${t.actualDriver || 'other driver'})` : ''}`
+  : t.kind === 'taxi' && t.mode === 'rta' ? 'RTA (metro / bus)' : TRIP_KINDS[t.kind] || 'Driver trip');
 /**
  * Cost of a trip. Driver trip: saved cost, or (still running) km × the rate that will apply.
  * Taxi: the fare entered. Ride with a company driver: km × that driver's rate.
  */
 export const tripCost = (t) => {
   if (t.kind === 'taxi') return t.cost || 0;
-  if (t.kind === 'withDriver') return t.cost != null ? t.cost : Math.round(tripKm(t) * (t.ratePerKm ?? tripRateFor(t.driverId)) * 100) / 100;
+  // Staff ride: the provider's charge (from TRIP_APPROVAL_FROM); older rides were km × the driver's rate.
+  if (t.kind === 'withDriver') {
+    if ((t.date || '') >= TRIP_APPROVAL_FROM) return t.costEntered ? (t.cost || 0) : 0;
+    return t.cost != null ? t.cost : Math.round(tripKm(t) * (t.ratePerKm ?? tripRateFor(t.driverId)) * 100) / 100;
+  }
   return t.cost != null ? t.cost : Math.round(tripKm(t) * tripRateFor(t.employeeId) * 100) / 100;
 };
 export const tripRateFor = (uid) => {
@@ -697,6 +736,11 @@ export const store = {
     // Driver trips: today's plus any still running from before midnight.
     sub(query(C('trips'), where('date', '==', this._day)), '_tToday', mapTrip);
     sub(query(C('trips'), where('status', '==', 'active')), '_tActive', mapTrip);
+    // Last 45 days of trips (from the approval start) — for "trips to approve" and travel spend.
+    if (isAdmin()) {
+      const since = [TRIP_APPROVAL_FROM, dateKey(new Date(Date.now() - 45 * 86400000))].sort().pop();
+      sub(query(C('trips'), where('date', '>=', since)), 'tripsRecent', mapTrip);
+    }
     sub(C('idInfo'), 'idInfo', mapIdInfo);
     sub(C('idFiles'), 'idFiles', mapIdFile, (l) => l.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0)));
     this._tick = setInterval(() => {
@@ -717,6 +761,8 @@ export const store = {
     [...this._wToday, ...this._wOpen].forEach((e) => m.set(e.id, e));
     return [...m.values()];
   },
+  /** Finished trips / rides waiting for admin approval (last 45 days). */
+  get tripsToApprove() { return (this.tripsRecent || []).filter((t) => t.status === 'done' && tripAwaiting(t)); },
   get tripsToday() {
     const m = new Map();
     [...this._tToday, ...this._tActive].forEach((t) => m.set(t.id, t));
@@ -1114,9 +1160,12 @@ export function addPetty({ emp, type, amount, category, note, site, me }) {
     createdBy: me.id, createdByName: me.name, date: dateKey(now), month: monthKey(now), createdAt: serverTimestamp(),
   });
 }
-export const reviewPetty = (id, approve, reviewer, note = '') => updateDoc(doc(db, 'petty', id), {
-  status: approve ? 'approved' : 'rejected', reviewedBy: reviewer, reviewNote: note, reviewedAt: serverTimestamp(),
-});
+export async function reviewPetty(id, approve, reviewer, note = '') {
+  await updateDoc(doc(db, 'petty', id), { status: approve ? 'approved' : 'rejected', reviewedBy: reviewer, reviewNote: note, reviewedAt: serverTimestamp() });
+  // A taxi / RTA fare from a ride: the ride follows the petty decision.
+  const t = [...(store.pendingPetty || []), ...(store.petty || [])].find((x) => x.id === id);
+  if (t?.tripId) updateDoc(doc(db, 'trips', t.tripId), { approval: approve ? 'approved' : 'rejected', approvedBy: reviewer, approvedAt: serverTimestamp() }).catch(() => {});
+}
 export async function deletePetty(id) {
   await deleteDoc(doc(db, 'petty', id));
   deleteDoc(doc(db, 'pettyFiles', id)).catch(() => {}); // its receipt photo, if any

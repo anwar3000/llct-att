@@ -149,6 +149,80 @@ class _OverviewTabState extends State<OverviewTab> {
   String _m(double v) => '${v < 0 ? '−' : ''}${fmtMoney((v.abs() * 100).round() / 100)}';
 
   /// Current cash position (all dates) + pending to pay / receive. Tap → Accounts.
+  /// Today's travel spend by head (each driver / transport provider, Taxi, RTA) and trips waiting for approval.
+  Widget _travelCard(AdminLive live) {
+    final done = live.tripsToday.where((t) => !t.isActive && !t.isRejected).toList();
+    double costOf(Trip t) => t.isWithDriver ? (t.costEntered ? (t.cost ?? 0) : 0) : (t.cost ?? 0);
+    final heads = <String, ({double v, int n, int un})>{};
+    for (final t in done) {
+      final h = t.isTaxi ? (t.isRta ? 'RTA (metro / bus)' : 'Taxi') : (t.isWithDriver ? (t.driverName.isEmpty ? 'Company driver' : t.driverName) : t.employeeName);
+      final c = heads[h] ?? (v: 0.0, n: 0, un: 0);
+      heads[h] = (v: c.v + costOf(t), n: c.n + 1, un: c.un + (t.isApproved ? 0 : 1));
+    }
+    final total = heads.values.fold<double>(0, (a, c) => a + c.v);
+    final unap = done.where((t) => !t.isApproved).length;
+    final sorted = heads.entries.toList()..sort((a, b) => b.value.v.compareTo(a.value.v));
+    const purple = Color(0xFF7B4FC9);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE6DCF6))),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: const Border(top: BorderSide(color: purple, width: 4)),
+          gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFBF8FF), Colors.white]),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.directions_car, color: purple, size: 20),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('TRAVEL TODAY', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1, color: AppColors.muted))),
+            Text('${done.length} trip${done.length == 1 ? '' : 's'}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ]),
+          const SizedBox(height: 4),
+          Text(fmtMoney((total * 100).round() / 100), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: Color(0xFF4B2D86))),
+          const SizedBox(height: 8),
+          if (sorted.isEmpty)
+            const Text('No travel recorded today yet.', style: TextStyle(color: AppColors.muted, fontSize: 13))
+          else
+            for (final e in sorted)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(color: const Color(0xFFF1EBFB), borderRadius: BorderRadius.circular(8)),
+                    child: Icon(e.key.startsWith('Taxi') ? Icons.local_taxi : (e.key.startsWith('RTA') ? Icons.directions_subway : Icons.directions_car),
+                        size: 17, color: purple),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text('${e.value.n} trip${e.value.n == 1 ? '' : 's'}${e.value.un > 0 ? ' · ${e.value.un} unapproved' : ''}',
+                          style: TextStyle(fontSize: 11.5, color: e.value.un > 0 ? AppColors.warning : AppColors.muted)),
+                    ]),
+                  ),
+                  Text(fmtMoney((e.value.v * 100).round() / 100), style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF4B2D86))),
+                ]),
+              ),
+          if (unap > 0) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(color: const Color(0xFFFFF7E8), borderRadius: BorderRadius.circular(10)),
+              child: Text('$unap trip${unap == 1 ? '' : 's'} today not yet approved — approve them in Trips.',
+                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF8A5A10), fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+
   Widget _cashCard() => FutureBuilder<({double inc, double exp, int nIn, int nOut, double cash, double bank})>(
         future: _cashPos,
         builder: (context, snap) {
@@ -315,6 +389,7 @@ class _OverviewTabState extends State<OverviewTab> {
                   ),
                 ),
               if (widget.me.seesAccounts) _cashCard(),
+              if (widget.me.isAdmin) _travelCard(live),
               _companyReminder(),
               StatGrid(children: [
                 StatTile(

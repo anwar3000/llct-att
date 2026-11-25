@@ -9,6 +9,7 @@ import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
 import '../../widgets/common.dart';
+import '../../widgets/ride_charge.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/trip_card.dart' show kDialogButton;
 import 'admin_live.dart';
@@ -89,6 +90,8 @@ class _TripsTabState extends State<TripsTab> {
 
   /// Driver trip: km × driver's rate. Company-driver ride: km × that driver's rate. Taxi: the fare.
   double _costOf(Trip t) {
+    // Staff rides from the approval start: only the provider's charge counts.
+    if (t.isWithDriver && t.date.compareTo(kTripApprovalFrom) >= 0) return t.costEntered ? (t.cost ?? 0) : 0;
     if (t.cost != null) return t.cost!;
     if (t.isTaxi) return 0;
     final u = widget.live.userById(t.isWithDriver ? t.driverId : t.employeeId);
@@ -254,11 +257,26 @@ class _TripsTabState extends State<TripsTab> {
                 Text(fmtMoney((cost * 100).round() / 100), style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.accentDark)),
               ],
             ]),
-            if (t.costEntered)
-              const Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text('Cost entered by driver', style: TextStyle(fontSize: 11.5, color: AppColors.warning)),
-              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(children: [
+                approvalPill(t),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      [
+                        if (t.byOther) 'Driven by ${t.actualDriver.isEmpty ? 'other driver' : t.actualDriver}',
+                        if (t.needsCharge && !t.isApproved) 'Needs ${t.driverName.split(' ').first}\'s charge',
+                        if (t.costEntered && t.groupedWith.isEmpty) 'Charge entered${t.chargedBy.isEmpty ? ' by driver' : ' by ${t.chargedBy}'}',
+                        if (t.groupedWith.isNotEmpty) 'Same journey as another trip',
+                        if (t.pettyId.isNotEmpty) 'In petty cash',
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, color: AppColors.warning)),
+                ),
+              ]),
+            ),
           ]),
         ),
       ),
@@ -435,8 +453,11 @@ class _TripsTabState extends State<TripsTab> {
           InfoRow(Icons.flag_outlined, 'Drop-off', t.isActive ? '—' : (t.endSiteName.isEmpty ? 'GPS location' : t.endSiteName)),
           InfoRow(Icons.location_city_outlined, 'Charged to', t.siteName.isEmpty ? '—' : t.siteName),
           InfoRow(Icons.straighten, 'Distance', '${t.km.toStringAsFixed(2)} km (${t.pointsCount} GPS points)'),
-          if (t.isWithDriver) InfoRow(Icons.person_pin, 'Company driver', '${t.driverName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'),
-          if (t.isTaxi) InfoRow(Icons.local_taxi, 'Taxi', t.vehicle.isEmpty || t.vehicle == 'Taxi' ? 'Not entered' : t.vehicle),
+          if (t.isWithDriver) InfoRow(Icons.person_pin, 'Driver / provider', '${t.driverName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'),
+          if (t.byOther) InfoRow(Icons.swap_horiz, 'Driven by', '${t.actualDriver.isEmpty ? 'another driver' : t.actualDriver} (sent by ${t.driverName})'),
+          if (t.groupedWith.isNotEmpty) const InfoRow(Icons.group_work_outlined, 'Charged', 'With another trip of the same car journey'),
+          if (t.isTaxi) InfoRow(t.isRta ? Icons.directions_subway : Icons.local_taxi, t.isRta ? 'RTA' : 'Taxi',
+              '${t.vehicle.isEmpty || t.vehicle == 'Taxi' || t.vehicle == 'RTA' ? 'Not entered' : t.vehicle}${t.pettyId.isNotEmpty ? ' · in petty cash' : ''}'),
           if (!t.isRide && t.vehicle.isNotEmpty) InfoRow(Icons.directions_car_outlined, 'Vehicle', t.vehicle),
           if (t.purpose.isNotEmpty) InfoRow(Icons.notes, 'Purpose', t.purpose),
           if (_money) ...[
@@ -445,7 +466,65 @@ class _TripsTabState extends State<TripsTab> {
                 '${fmtMoney((_costOf(t) * 100).round() / 100)}${t.costEntered ? ' (entered by driver)' : (t.isActive ? ' (estimate)' : '')}'),
           ],
           if (t.note.isNotEmpty) InfoRow(Icons.sticky_note_2_outlined, 'Note', t.note),
+          if (t.costNote.isNotEmpty) InfoRow(Icons.sticky_note_2_outlined, 'Charge note', t.costNote),
           if (t.editedBy.isNotEmpty) InfoRow(Icons.edit_note, 'Edited by', t.editedBy),
+          const SizedBox(height: 10),
+          Row(children: [
+            const Text('Approval  ', style: TextStyle(color: AppColors.muted)),
+            approvalPill(t),
+            if (t.approvedBy.isNotEmpty) Text('  by ${t.approvedBy}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ]),
+          if (widget.me.isAdmin && !t.isActive) ...[
+            const SizedBox(height: 8),
+            if (t.needsCharge && !t.isApproved)
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(c);
+                  chargeRideDialog(context, t, rides: _trips.where((x) => x.isWithDriver).toList(), by: widget.me.name);
+                },
+                icon: const Icon(Icons.payments_outlined),
+                label: Text('Add charge for ${t.driverName}'),
+              ),
+            Row(children: [
+              if (!t.isApproved)
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.success, minimumSize: const Size(0, 44)),
+                    onPressed: t.needsCharge
+                        ? null
+                        : () async {
+                            Navigator.pop(c);
+                            try {
+                              await Db.setTripApproval(t, 'approved', by: widget.me.name);
+                              if (mounted) showSnack(context, 'Approved');
+                            } catch (e) {
+                              if (mounted) showSnack(context, 'Could not approve: $e', error: true);
+                            }
+                          },
+                    icon: const Icon(Icons.check),
+                    label: Text(t.needsCharge ? 'Needs the charge first' : 'Approve'),
+                  ),
+                ),
+              if (!t.isApproved && !t.isRejected) const SizedBox(width: 8),
+              if (!t.isRejected)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger, minimumSize: const Size(0, 44)),
+                    onPressed: () async {
+                      Navigator.pop(c);
+                      try {
+                        await Db.setTripApproval(t, t.isApproved ? '' : 'rejected', by: widget.me.name);
+                        if (mounted) showSnack(context, t.isApproved ? 'Back to unapproved' : 'Rejected');
+                      } catch (e) {
+                        if (mounted) showSnack(context, 'Could not save: $e', error: true);
+                      }
+                    },
+                    icon: Icon(t.isApproved ? Icons.undo : Icons.close),
+                    label: Text(t.isApproved ? 'Unapprove' : 'Reject'),
+                  ),
+                ),
+            ]),
+          ],
           const SizedBox(height: 14),
           if (t.isActive)
             OutlinedButton.icon(
@@ -661,7 +740,8 @@ class _AccountsState extends State<_Accounts> {
     if (drivers.isEmpty) return const Card(child: EmptyState(icon: Icons.no_crash_outlined, title: 'No drivers yet'));
     final rows = drivers.map((u) {
       // Driver's own trips + staff rides with this driver (costed at the driver's rate).
-      final tr = _done.where((t) => (!t.isRide && t.employeeId == u.id) || (t.isWithDriver && t.driverId == u.id)).toList();
+      // Only approved trips count; unapproved ones wait.
+      final tr = _done.where((t) => t.isApproved && ((!t.isRide && t.employeeId == u.id) || (t.isWithDriver && t.driverId == u.id))).toList();
       final pays = _pays.where((p) => p.employeeId == u.id).toList();
       final earned = tr.fold<double>(0, (a, t) => a + (t.cost ?? 0));
       final paid = pays.fold<double>(0, (a, p) => a + p.amount);

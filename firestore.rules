@@ -96,11 +96,20 @@ service cloud.firestore {
                       && request.resource.data.employeeId == request.auth.uid
                       && onlyChanges(['distanceM', 'pointsCount', 'lastLat', 'lastLng', 'lastAt', 'endAt', 'endLat', 'endLng',
                            'endSiteId', 'endSiteName', 'siteId', 'siteName', 'durationMin', 'ratePerKm', 'cost', 'status',
-                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt', 'vehicle']))
-                    // A driver can enter / change the cost of their own trip at any time (flagged for admin).
+                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt', 'vehicle', 'pettyId']))
+                    // A driver can enter / change the cost of their own trip until admin approves it.
                     || (owns() && resource.data.get('kind', 'driver') == 'driver'
+                        && resource.data.get('approval', '') != 'approved'
                         && request.resource.data.employeeId == request.auth.uid
-                        && onlyChanges(['cost', 'costEntered', 'costEditedAt', 'costNote']));
+                        && onlyChanges(['cost', 'costEntered', 'costEditedAt', 'costNote']))
+                    // A driver / transport provider adds the charge for a staff ride taken with them (their own
+                    // or a substitute they sent), groups rides of the same car journey — until admin approves.
+                    || (isActive() && resource.data.get('driverId', '') == request.auth.uid
+                        && resource.data.get('kind', '') == 'withDriver' && resource.data.status == 'done'
+                        && resource.data.get('approval', '') != 'approved'
+                        && onlyChanges(['cost', 'costEntered', 'costEditedAt', 'costNote', 'chargedBy', 'groupedWith', 'byOther', 'actualDriver']))
+                    // The employee links the petty cash expense created from their taxi / RTA fare.
+                    || (owns() && resource.data.get('kind', '') == 'taxi' && onlyChanges(['pettyId']));
       allow delete: if isAdmin();
       match /points/{pid} {
         allow read: if isManagement() || (isActive() && get(/databases/$(database)/documents/trips/$(id)).data.employeeId == request.auth.uid);

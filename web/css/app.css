@@ -717,3 +717,32 @@ body.tv-mode .layout, body.tv-mode .app { display: block !important; }
 .tv-k i { display: inline; margin-left: .4em; }
 .tv-mrow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .tv-mrow span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Travel card (dashboard) */
+.trv { padding: 16px 18px; background: linear-gradient(180deg, #fbf8ff 0%, #fff 60%); border-top: 4px solid #7B4FC9; }
+.trv-top { display: flex; gap: 20px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
+.trv-l { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.trv-big { display: block; font-size: 30px; font-weight: 800; color: #4b2d86; line-height: 1.15; margin: 2px 0; }
+.trv-s { font-size: 12.5px; color: var(--muted); }
+.trv-bars { display: flex; gap: 8px; align-items: flex-end; height: 86px; }
+.trv-bar { position: relative; width: 30px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.trv-bar i { display: block; width: 100%; background: #ddd0f3; border-radius: 6px 6px 3px 3px; }
+.trv-bar.on i { background: #7B4FC9; }
+.trv-bar span { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+.trv-bar em { position: absolute; top: -14px; font-style: normal; font-size: 9.5px; color: var(--muted); white-space: nowrap; opacity: 0; transition: opacity .15s; }
+.trv-bar:hover em { opacity: 1; }
+.trv-heads { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 14px; }
+.trv-h { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; color: inherit; text-decoration: none; }
+.trv-h:hover { border-color: #7B4FC9; }
+.trv-hi { width: 34px; height: 34px; border-radius: 10px; background: #f1ebfb; display: grid; place-items: center; font-size: 17px; flex: 0 0 auto; }
+.trv-hn { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.trv-hn b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trv-hn i { font-style: normal; font-size: 11.5px; color: var(--muted); }
+.trv-hv { font-size: 15px; color: #4b2d86; white-space: nowrap; }
+.trv-warn { display: block; margin-top: 12px; padding: 9px 12px; background: #fff7e8; border: 1px solid #f3d9a6; border-radius: 10px; color: #8a5a10; font-size: 12.5px; font-weight: 600; text-decoration: none; }
+/* travel spend per day (Trips page) */
+.tsp-heads { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; padding: 4px 14px 12px; }
+.tsp-h { position: relative; padding: 9px 12px 12px; border: 1px solid var(--line); border-radius: 10px; border-left: 4px solid var(--c); overflow: hidden; }
+.tsp-h span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tsp-h b { font-size: 16px; }
+.tsp-h i { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--c); opacity: .5; }

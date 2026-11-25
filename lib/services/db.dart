@@ -702,7 +702,7 @@ class Db {
       q.docs.map(PettyTxn.fromDoc).toList()
         ..sort((a, b) => (b.createdAt ?? DateTime(2100)).compareTo(a.createdAt ?? DateTime(2100)));
 
-  static Future<void> addPetty({
+  static Future<String> addPetty({
     required String employeeId,
     required String employeeName,
     required String type,
@@ -714,6 +714,7 @@ class Db {
     required String createdByName,
     Site? site,
     String? receipt,
+    String? tripId,
   }) async {
     final now = DateTime.now();
     // The receipt photo goes to pettyFiles/{id}; the petty record only says it has one (keeps lists fast).
@@ -740,8 +741,10 @@ class Db {
       'month': monthKey(now),
       'tz': now.timeZoneOffset.inMinutes,
       'createdAt': FieldValue.serverTimestamp(),
+      if (tripId != null) 'tripId': tripId,
     });
     await b.commit();
+    return ref.id;
   }
 
   static final Map<String, Future<String?>> _receipts = {};
@@ -1243,6 +1246,7 @@ class Db {
     String kind = 'driver',
     AppUser? driver,
     double? ratePerKm,
+    Map<String, dynamic> extra = const {},
   }) async {
     final now = DateTime.now();
     final ref = trips.doc();
@@ -1272,6 +1276,7 @@ class Db {
       'driverId': driver?.id ?? '',
       'driverName': driver?.name ?? '',
       if (ratePerKm != null) 'ratePerKm': ratePerKm,
+      ...extra,
     });
     batch.set(ref.collection('points').doc(), {'lat': lat, 'lng': lng, 'at': FieldValue.serverTimestamp()});
     await batch.commit();
@@ -1305,6 +1310,7 @@ class Db {
     double? lng,
     Site? site,
     String note = '',
+    String? pettyId,
   }) async {
     final now = DateTime.now();
     // The trip's cost is charged to the drop-off site, or the pick-up site if the drop isn't at a site.
@@ -1335,9 +1341,52 @@ class Db {
       if (costEntered) 'costEntered': true,
       if (vehicle != null && vehicle.isNotEmpty) 'vehicle': vehicle,
       if (note.isNotEmpty) 'note': note,
+      if (pettyId != null) 'pettyId': pettyId,
     });
     await batch.commit();
   }
+
+  /// Driver / transport provider (or admin) adds the charge for a staff ride. [grouped] = other rides of the same
+  /// car journey: they are linked to this one and not charged again.
+  static Future<void> chargeRide(Trip ride, double amount, {String note = '', List<Trip> grouped = const [], String by = '', String? actualDriver}) async {
+    final b = _fs.batch();
+    b.update(trips.doc(ride.id), {
+      'cost': (amount * 100).round() / 100,
+      'costEntered': true,
+      'costEditedAt': FieldValue.serverTimestamp(),
+      'costNote': note,
+      'chargedBy': by,
+      'groupedWith': '',
+      if (actualDriver != null) ...{'byOther': actualDriver.isNotEmpty, 'actualDriver': actualDriver},
+    });
+    for (final g in grouped) {
+      b.update(trips.doc(g.id), {'cost': 0, 'costEntered': true, 'groupedWith': ride.id, 'chargedBy': by, 'costEditedAt': FieldValue.serverTimestamp()});
+    }
+    await b.commit();
+  }
+
+  /// Admin approves / rejects a trip or ride ('' = back to unapproved). A taxi / RTA ride follows its petty expense.
+  static Future<void> setTripApproval(Trip t, String approval, {required String by}) async {
+    final b = _fs.batch();
+    b.update(trips.doc(t.id), {'approval': approval, 'approvedBy': by, 'approvedAt': FieldValue.serverTimestamp()});
+    if (t.pettyId.isNotEmpty && approval.isNotEmpty) {
+      b.update(petty.doc(t.pettyId), {
+        'status': approval == 'approved' ? 'approved' : 'rejected',
+        'reviewedBy': by,
+        'reviewedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    await b.commit();
+  }
+
+  /// The ride is part of the driver's own recorded trip — nothing more to charge.
+  static Future<void> linkRideToTrip(Trip ride, String tripId, {String by = ''}) => trips.doc(ride.id).update({
+        'cost': 0,
+        'costEntered': true,
+        'groupedWith': tripId,
+        'chargedBy': by,
+        'costEditedAt': FieldValue.serverTimestamp(),
+      });
 
   // ---------------------------------------------------------------- accounts (admin only)
   static CollectionReference<Map<String, dynamic>> get acct => _fs.collection('acctEntries');

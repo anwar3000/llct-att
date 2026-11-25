@@ -8,6 +8,7 @@ import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/db.dart';
 import '../services/location_service.dart';
+import '../services/photo_service.dart';
 import '../services/trip_service.dart';
 import 'common.dart';
 import 'tiles.dart';
@@ -48,7 +49,7 @@ class _RideCardState extends State<RideCard> {
   }
 
   Future<void> _start() async {
-    final choice = await showModalBottomSheet<({String kind, AppUser? driver})>(
+    final choice = await showModalBottomSheet<_RideChoice>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -61,14 +62,24 @@ class _RideCardState extends State<RideCard> {
       final rate = choice.driver == null ? null : await Db.tripRate(choice.driver!);
       await TripService.instance.start(
         user: widget.me,
-        vehicle: choice.kind == 'taxi' ? 'Taxi' : (choice.driver?.vehicle ?? ''),
+        vehicle: choice.kind == 'taxi' ? (choice.mode == 'rta' ? 'RTA' : 'Taxi') : (choice.driver?.vehicle ?? ''),
         purpose: '',
         sites: widget.sites,
         kind: choice.kind,
         driver: choice.driver,
         ratePerKm: rate,
+        extra: {
+          if (choice.kind == 'taxi') 'mode': choice.mode,
+          if (choice.actualDriver != null) ...{'byOther': true, 'actualDriver': choice.actualDriver},
+        },
       );
-      if (mounted) showSnack(context, choice.kind == 'taxi' ? 'Taxi ride started' : 'Ride with ${choice.driver?.name} started');
+      if (mounted) {
+        showSnack(
+            context,
+            choice.kind == 'taxi'
+                ? (choice.mode == 'rta' ? 'RTA ride started' : 'Taxi ride started')
+                : 'Ride with ${choice.actualDriver ?? choice.driver?.name} started${choice.actualDriver != null ? ' (for ${choice.driver?.name})' : ''}');
+      }
     } on LocationException catch (e) {
       if (mounted) showSnack(context, e.message, error: true);
     } catch (e) {
@@ -81,27 +92,28 @@ class _RideCardState extends State<RideCard> {
   Future<void> _end(Trip t) async {
     double? fare;
     String? taxiNo;
+    String? receipt;
     if (t.isTaxi) {
-      final r = await _askFare();
+      final r = await _askFare(t.isRta);
       if (r == null) return;
       fare = r.fare;
-      taxiNo = r.taxiNo.isEmpty ? null : 'Taxi ${r.taxiNo}';
+      taxiNo = r.taxiNo.isEmpty ? null : '${t.isRta ? 'RTA' : 'Taxi'} ${r.taxiNo}';
+      receipt = r.receipt;
     } else {
       final km = TripService.instance.distance.value / 1000;
-      final rate = t.ratePerKm ?? 0;
       if (!await confirm(
           context,
           'End ride',
-          'End this ride with ${t.driverName.isEmpty ? 'the driver' : t.driverName}?\n\n'
-              '${km.toStringAsFixed(1)} km${rate > 0 ? ' × ${fmtMoney(rate)}/km = ${fmtMoney((km * rate * 100).round() / 100)}' : ''}',
+          'End this ride with ${t.byOther ? '${t.actualDriver} (for ${t.driverName})' : (t.driverName.isEmpty ? 'the driver' : t.driverName)}?\n\n'
+              '${km.toStringAsFixed(1)} km · the driver adds the charge, then admin approves it.',
           ok: 'End ride')) {
         return;
       }
     }
     setState(() => _busy = true);
     try {
-      await TripService.instance.stop(user: widget.me, trip: t, sites: widget.sites, fare: fare, vehicle: taxiNo);
-      if (mounted) showSnack(context, 'Ride saved${fare != null ? ' · ${fmtMoney(fare)}' : ''}');
+      await TripService.instance.stop(user: widget.me, trip: t, sites: widget.sites, fare: fare, vehicle: taxiNo, receipt: receipt);
+      if (mounted) showSnack(context, fare != null ? 'Ride saved · ${fmtMoney(fare)} added to your petty cash (waiting for approval)' : 'Ride saved');
     } catch (e) {
       if (mounted) showSnack(context, 'Could not end ride: $e', error: true);
     } finally {
@@ -109,15 +121,16 @@ class _RideCardState extends State<RideCard> {
     }
   }
 
-  Future<({double fare, String taxiNo})?> _askFare() async {
+  Future<({double fare, String taxiNo, String? receipt})?> _askFare(bool rta) async {
     final ctrl = TextEditingController();
     final taxi = TextEditingController();
     String? err;
-    return showDialog<({double fare, String taxiNo})>(
+    String? photo;
+    return showDialog<({double fare, String taxiNo, String? receipt})>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
-          title: const Text('Taxi fare'),
+          title: Text(rta ? 'RTA fare (metro / bus)' : 'Taxi fare'),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             ValueListenableBuilder<double>(
               valueListenable: TripService.instance.distance,
@@ -136,9 +149,26 @@ class _RideCardState extends State<RideCard> {
             TextField(
               controller: taxi,
               textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                  labelText: 'Taxi no. / company (optional)', hintText: 'e.g. DXB T 12345, Careem', prefixIcon: Icon(Icons.local_taxi_outlined)),
+              decoration: InputDecoration(
+                  labelText: rta ? 'Line / route (optional)' : 'Taxi no. / company (optional)',
+                  hintText: rta ? 'e.g. Red line, bus 27' : 'e.g. DXB T 12345, Careem',
+                  prefixIcon: Icon(rta ? Icons.directions_subway_outlined : Icons.local_taxi_outlined)),
             ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () async {
+                try {
+                  final b = await PhotoService.pick();
+                  if (b != null) set(() => photo = b);
+                } catch (e) {
+                  set(() => err = '$e');
+                }
+              },
+              icon: Icon(photo == null ? Icons.receipt_long_outlined : Icons.check_circle, color: photo == null ? null : AppColors.success),
+              label: Text(photo == null ? 'Photo of receipt (optional)' : 'Receipt added — retake'),
+            ),
+            const SizedBox(height: 6),
+            const Text('The fare goes to your petty cash as an expense for approval.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
@@ -150,7 +180,7 @@ class _RideCardState extends State<RideCard> {
                   set(() => err = 'Enter the fare');
                   return;
                 }
-                Navigator.pop(c, (fare: v, taxiNo: taxi.text.trim()));
+                Navigator.pop(c, (fare: v, taxiNo: taxi.text.trim(), receipt: photo));
               },
               child: const Text('SAVE & END'),
             ),
@@ -178,7 +208,7 @@ class _RideCardState extends State<RideCard> {
               const SizedBox(width: 12),
               const Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Taxi / company driver', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  Text('Taxi / RTA / company driver', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
                   SizedBox(height: 2),
                   Text('Start when you get in, end when you arrive',
                       style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
@@ -223,7 +253,7 @@ class _RideCardState extends State<RideCard> {
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(t.isTaxi ? 'Taxi ride in progress' : 'Ride with ${t.driverName.isEmpty ? 'company driver' : t.driverName}',
+                Text(t.isTaxi ? (t.isRta ? 'RTA ride in progress' : 'Taxi ride in progress') : 'Ride with ${t.byOther ? '${t.actualDriver} (for ${t.driverName})' : (t.driverName.isEmpty ? 'company driver' : t.driverName)}',
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
                 Text('From ${t.startSiteName.isNotEmpty ? t.startSiteName : 'GPS location'} · ${fmtTime(t.startLocal)}',
                     style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
@@ -269,7 +299,10 @@ class _RideCardState extends State<RideCard> {
       );
 }
 
-/// Taxi, or pick one of the company drivers.
+typedef _RideChoice = ({String kind, String mode, AppUser? driver, String? actualDriver});
+
+/// Taxi / RTA (paid by the employee → petty cash), or a company driver / transport provider
+/// (charged on their account) — who may have sent someone else.
 class _RidePicker extends StatefulWidget {
   @override
   State<_RidePicker> createState() => _RidePickerState();
@@ -277,6 +310,45 @@ class _RidePicker extends StatefulWidget {
 
 class _RidePickerState extends State<_RidePicker> {
   bool _drivers = false;
+
+  Future<void> _who(AppUser d) async {
+    final ctrl = TextEditingController();
+    final r = await showDialog<String?>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: const Text('Who is driving?'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              onPressed: () => Navigator.pop(c, ''),
+              icon: const Icon(Icons.person),
+              label: Text('${d.name} himself'),
+            ),
+            const SizedBox(height: 14),
+            Text('Someone else sent by ${d.name.split(' ').first}:', style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: ctrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: "Driver's name (and car no.)", prefixIcon: Icon(Icons.badge_outlined)),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+              onPressed: () {
+                if (ctrl.text.trim().isEmpty) return;
+                Navigator.pop(c, ctrl.text.trim());
+              },
+              child: Text('Other driver — charge to ${d.name.split(' ').first}'),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (r == null || !mounted) return;
+    Navigator.pop(context, (kind: 'withDriver', mode: '', driver: d, actualDriver: r.isEmpty ? null : r));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -287,18 +359,21 @@ class _RidePickerState extends State<_RidePicker> {
             ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 const Text('How are you travelling?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 14),
-                _option(Icons.local_taxi, 'Taxi', 'Enter the fare when you arrive',
-                    () => Navigator.pop(context, (kind: 'taxi', driver: null))),
-                const SizedBox(height: 10),
-                _option(Icons.directions_car, 'Company driver', 'Choose the driver',
+                _option(Icons.directions_car, 'Company driver / transport provider', 'Choose the driver — the trip is charged on their account',
                     () => setState(() => _drivers = true)),
+                const SizedBox(height: 10),
+                _option(Icons.local_taxi, 'Taxi', 'You pay — enter the fare when you arrive (goes to your petty cash)',
+                    () => Navigator.pop(context, (kind: 'taxi', mode: 'taxi', driver: null, actualDriver: null))),
+                const SizedBox(height: 10),
+                _option(Icons.directions_subway, 'RTA metro / bus', 'You pay — enter the fare when you arrive (goes to your petty cash)',
+                    () => Navigator.pop(context, (kind: 'taxi', mode: 'rta', driver: null, actualDriver: null))),
               ])
             : ConstrainedBox(
                 constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
                 child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   Row(children: [
                     IconButton(onPressed: () => setState(() => _drivers = false), icon: const Icon(Icons.arrow_back)),
-                    const Text('Choose the driver', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    const Text('Choose the driver / provider', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   ]),
                   Flexible(
                     child: StreamBuilder<List<AppUser>>(
@@ -321,7 +396,7 @@ class _RidePickerState extends State<_RidePicker> {
                               title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w700)),
                               subtitle: Text([d.vehicle, d.phone].where((x) => x.isNotEmpty).join(' · ')),
                               trailing: const Icon(Icons.chevron_right),
-                              onTap: () => Navigator.pop(context, (kind: 'withDriver', driver: d)),
+                              onTap: () => _who(d),
                             ),
                         ]);
                       },

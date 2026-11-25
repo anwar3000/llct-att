@@ -1,5 +1,6 @@
 // Driver trips — live trips in progress, daily list with km and cost, route map, admin corrections.
-import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel } from '../fb.js';
+import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel,
+  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError, parseKey } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -12,7 +13,7 @@ export function mount(el, _p, { setHeader }) {
     `<button class="btn ghost" id="tr-xlsx">${icon('download', 16)} Excel</button><button class="btn ghost" id="tr-pdf">${icon('download', 16)} PDF</button>`);
   const today = dateKey(new Date());
   // Default: this month, so the full list of trips & rides is visible.
-  let from = dateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to = today, driver = '', site = '', kind = '';
+  let from = dateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to = today, driver = '', site = '', kind = '', appr = '';
   let fetched = [];
   let loading = false;
   let view = 'trips', acctTrips = null, acctLoading = false;
@@ -28,7 +29,9 @@ export function mount(el, _p, { setHeader }) {
     const m = new Map(fetched.map((t) => [t.id, t]));
     for (const t of store.tripsToday) if (t.date >= from && t.date <= to) m.set(t.id, t);
     return [...m.values()]
-      .filter((t) => (!kind || (t.kind || 'driver') === kind) && (!driver || t.employeeId === driver || t.driverId === driver) && (!site || t.siteId === site || t.startSiteId === site || t.endSiteId === site))
+      .filter((t) => (!kind || (kind === 'rta' ? t.kind === 'taxi' && t.mode === 'rta' : kind === 'taxi' ? t.kind === 'taxi' && t.mode !== 'rta' : (t.kind || 'driver') === kind))
+        && (!driver || t.employeeId === driver || t.driverId === driver) && (!site || t.siteId === site || t.startSiteId === site || t.endSiteId === site)
+        && (!appr || (appr === 'pending' ? t.status === 'done' && tripAwaiting(t) : appr === 'charge' ? tripNeedsCharge(t) : appr === 'approved' ? tripApproved(t) : tripRejected(t))))
       .sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
   }
 
@@ -53,11 +56,15 @@ export function mount(el, _p, { setHeader }) {
     const drivers = store.users.filter((u) => u.isDriver);
     const all = acctTrips || [];
     const rows = drivers.map((u) => {
-      const tr = all.filter((t) => (t.kind === 'withDriver' ? t.driverId : t.employeeId) === u.id);
+      const mine = all.filter((t) => (t.kind === 'withDriver' ? t.driverId : t.employeeId) === u.id);
+      // Only approved trips count in the balance; unapproved ones are shown apart.
+      const tr = mine.filter(tripApproved);
+      const waiting = mine.filter((t) => tripAwaiting(t));
       const pays = store.payments.filter((p) => p.employeeId === u.id);
       const earned = tr.reduce((a, t) => a + tripCost(t), 0);
+      const waitAmt = waiting.reduce((a, t) => a + tripCost(t), 0);
       const paid = pays.reduce((a, p) => a + p.amount, 0);
-      return { u, tr, pays, earned, paid, balance: Math.round((earned - paid) * 100) / 100, km: tr.reduce((a, t) => a + tripKm(t), 0),
+      return { u, tr, pays, earned, paid, waiting: waiting.length, waitAmt, toCharge: mine.filter(tripNeedsCharge).length, balance: Math.round((earned - paid) * 100) / 100, km: tr.reduce((a, t) => a + tripKm(t), 0),
         edited: tr.filter((t) => t.costEntered).length };
     }).sort((a, b) => b.balance - a.balance);
     const T = (k) => rows.reduce((a, r) => a + r[k], 0);
@@ -68,12 +75,13 @@ export function mount(el, _p, { setHeader }) {
       ${kpi('Balance due', fmtMoney(Math.round(T('balance') * 100) / 100), 'earned − paid', '#D98A1A')}
     </div>
     <div class="card mt"><div class="card-head"><h2>Driver accounts</h2><span class="spacer"></span><span class="small muted">${acctLoading ? 'Loading…' : 'All time'}</span></div>
-      ${drivers.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Driver</th><th class="num">Trips</th><th class="num">Km</th><th class="num">Earned</th><th class="num">Paid</th><th class="num">Balance</th><th>Last payment</th><th></th></tr></thead><tbody>
+      ${drivers.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Driver / provider</th><th class="num">Trips</th><th class="num">Km</th><th class="num">Earned (approved)</th><th class="num">Waiting approval</th><th class="num">Paid</th><th class="num">Balance</th><th>Last payment</th><th></th></tr></thead><tbody>
       ${rows.map((r) => `<tr>
         <td><div class="person">${avatar(r.u.name, 30, TRIP_COLOR)}<div><b>${esc(r.u.name)}</b><div class="small muted">${esc(r.u.vehicle || '')} · ${tripRateFor(r.u.id)} AED/km</div></div></div></td>
         <td class="num">${r.tr.length}${r.edited ? `<div class="small muted" title="Trips where the driver entered the cost">${r.edited} entered</div>` : ''}</td>
         <td class="num">${r.km.toFixed(1)}</td>
         <td class="num">${fmtMoney(Math.round(r.earned * 100) / 100)}</td>
+        <td class="num">${r.waiting ? `<span style="color:#a8640f">${fmtMoney(Math.round(r.waitAmt * 100) / 100)}</span><div class="small muted">${r.waiting} trip${r.waiting === 1 ? '' : 's'}${r.toCharge ? ` · ${r.toCharge} need charge` : ''}</div>` : '<span class="muted">—</span>'}</td>
         <td class="num" style="color:#1f7a50">${fmtMoney(Math.round(r.paid * 100) / 100)}</td>
         <td class="num"><b style="color:${r.balance > 0 ? '#a8640f' : '#1f7a50'}">${r.balance < 0 ? 'Overpaid ' : ''}${fmtMoney(Math.abs(r.balance))}</b></td>
         <td class="small">${r.pays[0] ? `${esc(r.pays[0].date)} · ${fmtMoney(r.pays[0].amount)}` : '—'}</td>
@@ -127,7 +135,8 @@ export function mount(el, _p, { setHeader }) {
       <div class="seg">${[['today', 'Today'], ['yday', 'Yesterday'], ['7', 'Last 7 days'], ['month', 'This month']].map(([k, l]) => `<button class="btn sm ghost" data-quick="${k}">${l}</button>`).join('')}</div>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">From <input type="date" id="tr-from" value="${from}" style="width:150px"></label>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">To <input type="date" id="tr-to" value="${to}" style="width:150px"></label>
-      <select id="tr-kind" style="width:auto;min-width:140px">${[['', 'All types'], ['driver', 'Driver trips'], ['taxi', 'Taxi rides'], ['withDriver', 'Rides with driver']].map(([v, l]) => `<option value="${v}" ${v === kind ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="tr-appr" style="width:auto;min-width:150px">${[['', 'All approvals'], ['pending', `Unapproved (${store.tripsToApprove.length})`], ['charge', 'Needs provider charge'], ['approved', 'Approved'], ['rejected', 'Rejected']].map(([v, l]) => `<option value="${v}" ${v === appr ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="tr-kind" style="width:auto;min-width:140px">${[['', 'All types'], ['driver', 'Driver trips'], ['withDriver', 'Rides with driver / provider'], ['taxi', 'Taxi rides'], ['rta', 'RTA metro / bus']].map(([v, l]) => `<option value="${v}" ${v === kind ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <select id="tr-driver" style="width:auto;min-width:150px"><option value="">All people</option>${people.map((u) => `<option value="${u.id}" ${u.id === driver ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>
       <select id="tr-site" style="width:auto;min-width:150px"><option value="">All sites</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === site ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
       <span class="spacer"></span>
@@ -149,29 +158,31 @@ export function mount(el, _p, { setHeader }) {
         <button class="btn sm ghost" data-route="${t.id}">${icon('map', 14)} Route</button>
         <button class="btn sm ghost" data-end="${t.id}" title="End a trip the driver forgot to stop">End</button>
       </div>`).join('')}</div>` : ''}
-    <div class="grid cols-2-1 mt">
-      <div class="card"><div class="card-head"><h2>Trips</h2><span class="spacer"></span><span class="small muted">${loading ? 'Loading…' : `${list.length} trip${list.length === 1 ? '' : 's'}`}</span></div>
-        ${list.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th>' : ''}<th></th></tr></thead><tbody>
+    ${admin ? spendCard(list) : ''}
+    <div class="mt">
+      <div class="card"><div class="card-head"><h2>Trips</h2><span class="spacer"></span>${admin && list.some((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t)) ? `<button class="btn sm" id="tr-appall">${icon('check', 14)} Approve all shown (${list.filter((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t)).length})</button>` : ''}<span class="small muted">${loading ? 'Loading…' : `${list.length} trip${list.length === 1 ? '' : 's'}`}</span></div>
+        ${list.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th><th>Approval</th>' : ''}<th></th></tr></thead><tbody>
         ${list.map((t) => `<tr class="click" data-row="${t.id}">
           <td>${esc(t.date.slice(5))}</td>
-          <td><b>${esc(t.employeeName)}</b><div class="small" style="color:#7B4FC9;font-weight:600">${esc(t.kind === 'withDriver' ? `Driver: ${t.driverName || '—'}` : t.kind === 'taxi' ? (t.vehicle && t.vehicle !== 'Taxi' ? t.vehicle : 'Taxi') : (t.vehicle || 'Driver trip'))}</div></td>
+          <td><b>${esc(t.employeeName)}</b><div class="small" style="color:#7B4FC9;font-weight:600">${esc(t.kind === 'withDriver' ? `Driver: ${t.driverName || '—'}${t.byOther ? ` · driven by ${t.actualDriver || 'other driver'}` : ''}` : t.kind === 'taxi' ? (t.vehicle && t.vehicle !== 'Taxi' && t.vehicle !== 'RTA' ? t.vehicle : (t.mode === 'rta' ? 'RTA' : 'Taxi')) : (t.vehicle || 'Driver trip'))}</div></td>
           <td>${kindPill(t)}</td>
           <td>${esc(t.startSiteName || 'GPS')} → ${t.status === 'active' ? '<i class="muted">driving…</i>' : esc(t.endSiteName || 'GPS')}${t.purpose ? `<div class="small muted">${esc(t.purpose)}</div>` : ''}</td>
           <td>${t.siteId ? `<a href="#/sites/${t.siteId}">${esc(t.siteName)}</a>` : t.status === 'active' ? '<span class="muted">—</span>' : '<span class="muted">No site</span>'}</td>
           <td class="small">${fmtTime(atTz(t.startAt, t.tz))} – ${t.endAt ? fmtTime(atTz(t.endAt, t.tz)) : 'now'}<div class="muted">${fmtMins(tripMinutes(t))} · ${tzLabel(t.tz)}</div></td>
           <td class="num"><b>${tripKm(t).toFixed(1)}</b>${t.editedBy ? `<div class="small muted" title="Edited by ${esc(t.editedBy)}">edited</div>` : ''}</td>
-          ${admin ? `<td class="num">${t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' && !t.costEntered ? '<div class="small muted">est.</div>' : ''}${t.costEntered ? '<div class="small" style="color:#a8640f" title="Cost entered by the driver">entered</div>' : ''}</td>` : ''}
+          ${admin ? `<td class="num">${t.kind === 'taxi' && t.status === 'active' ? '<span class="small muted">fare at end</span>' : fmtMoney(tripCost(t))}${t.status === 'active' && (t.kind || 'driver') === 'driver' && !t.costEntered ? '<div class="small muted">est.</div>' : ''}${t.groupedWith ? '<div class="small muted" title="Same car journey as another trip — charged there">same journey</div>' : t.costEntered ? `<div class="small" style="color:#a8640f" title="Charge entered">by ${esc(t.chargedBy || 'driver')}</div>` : ''}${t.pettyId ? '<div class="small muted">petty cash</div>' : ''}</td>
+          <td style="white-space:nowrap">${apprCell(t)}</td>` : ''}
           <td style="white-space:nowrap"><button class="btn sm ghost icon" data-route="${t.id}" title="Route map">${icon('map', 15)}</button>${admin ? `<button class="btn sm ghost icon" data-edit="${t.id}" title="Edit">${icon('edit', 15)}</button><button class="btn sm ghost icon" data-del="${t.id}" title="Delete">${icon('trash', 15)}</button>` : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : `<div class="empty"><b>No trips in this period</b>Drivers start and stop trips from the app.</div>`}
       </div>
-      <div>
+      <div class="grid cols-2 mt">
         <div class="card"><div class="card-head"><h2>Expense by site</h2></div>
           ${[...bySite.values()].sort((a, b) => b.cost - a.cost || b.km - a.km).map((c) => `<div class="list-item">
             <div class="grow">${c.id ? `<a href="#/sites/${c.id}"><b>${esc(c.name)}</b></a>` : `<b class="muted">${esc(c.name)}</b>`}<div class="small muted">${c.n} trip${c.n === 1 ? '' : 's'} · ${c.km.toFixed(1)} km</div></div>
             ${admin ? `<b>${fmtMoney(Math.round(c.cost * 100) / 100)}</b>` : ''}</div>`).join('') || '<div class="empty">—</div>'}
           <div class="small muted" style="padding:8px 14px">A trip is charged to the site where it ends; if it doesn’t end at a site, to the site where it started.</div>
         </div>
-        <div class="card mt"><div class="card-head"><h2>By person</h2></div>
+        <div class="card"><div class="card-head"><h2>By person</h2></div>
           ${[...byDriver.values()].sort((a, b) => b.km - a.km).map((c) => `<div class="list-item">${avatar(c.name, 28, TRIP_COLOR)}
             <div class="grow"><b>${esc(c.name)}</b><div class="small muted">${c.n} trip${c.n === 1 ? '' : 's'} · ${fmtMins(c.mins)}${admin && store.user(c.id)?.isDriver ? ` · ${tripRateFor(c.id)} AED/km` : ''}</div></div>
             <div style="text-align:right"><b>${c.km.toFixed(1)} km</b>${admin ? `<div class="small">${fmtMoney(Math.round(c.cost * 100) / 100)}</div>` : ''}</div></div>`).join('') || '<div class="empty">—</div>'}
@@ -198,6 +209,18 @@ export function mount(el, _p, { setHeader }) {
     el.querySelector('#tr-to').onchange = (e) => { to = e.target.value || today; if (to < from) from = to; load(); };
     el.querySelector('#tr-driver').onchange = (e) => { driver = e.target.value; draw(); };
     el.querySelector('#tr-kind').onchange = (e) => { kind = e.target.value; draw(); };
+    el.querySelector('#tr-appr').onchange = (e) => { appr = e.target.value; draw(); };
+    const setA = async (t, a, msg) => { try { await setTripApproval(t, a); toast(msg); load(); } catch (x) { toast(friendlyError(x), true); } };
+    el.querySelectorAll('[data-appr]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.appr); if (t) setA(t, 'approved', 'Approved'); }; });
+    el.querySelectorAll('[data-rej]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.rej); if (t) setA(t, 'rejected', 'Rejected'); }; });
+    el.querySelectorAll('[data-unappr]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.unappr); if (t) setA(t, '', 'Back to unapproved'); }; });
+    el.querySelectorAll('[data-charge]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.charge); if (t) chargeDialog(t, list, load); }; });
+    const aa = el.querySelector('#tr-appall');
+    if (aa) aa.onclick = async () => {
+      const ts = list.filter((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t));
+      if (!await confirmBox('Approve trips', `Approve ${ts.length} trip${ts.length === 1 ? '' : 's'} shown (${fmtMoney(Math.round(ts.reduce((a, t) => a + tripCost(t), 0) * 100) / 100)})? Rides still waiting for the provider's charge are not included.`, { ok: 'Approve' })) return;
+      try { for (const t of ts) await setTripApproval(t, 'approved'); toast(`${ts.length} approved`); load(); } catch (x) { toast(friendlyError(x), true); }
+    };
     el.querySelector('#tr-site').onchange = (e) => { site = e.target.value; draw(); };
     const rs = el.querySelector('#tr-rate-save');
     if (rs) rs.onclick = async () => {
@@ -433,6 +456,74 @@ function statementDialog(u, trips, pays) {
         };
       });
       el.querySelectorAll('[data-f]').forEach((b) => { b.onclick = async () => { try { await downloadReport(rep, b.dataset.f); } catch (e) { toast(friendlyError(e), true); } }; });
+    },
+  });
+}
+
+function apprCell(t) {
+  if (t.status !== 'done') return '<span class="small muted">—</span>';
+  if (tripNeedsCharge(t)) return `<button class="btn sm" data-charge="${t.id}">+ Charge</button><div class="small" style="color:#a8640f">waiting for ${esc((t.driverName || 'provider').split(' ')[0])}</div>`;
+  if (tripApproved(t)) return `${pill('Approved', 'green')}${t.approvedBy ? `<button class="btn sm ghost icon" data-unappr="${t.id}" title="Approved by ${esc(t.approvedBy)} — undo">↺</button>` : ''}`;
+  if (tripRejected(t)) return `${pill('Rejected', 'red')}<button class="btn sm ghost icon" data-unappr="${t.id}" title="Undo">↺</button>`;
+  return `${pill('Unapproved', 'amber')} <button class="btn sm ghost icon" data-appr="${t.id}" title="Approve" style="color:#1f7a50">${icon('check', 15)}</button><button class="btn sm ghost icon" data-rej="${t.id}" title="Reject" style="color:#b23535">${icon('close', 15)}</button>`;
+}
+
+/** Daily travel spend, split by head: each driver / transport provider, Taxi, RTA. */
+export function spendByDay(list) {
+  const rows = new Map();
+  const heads = new Map();
+  for (const t of list) {
+    if (t.status !== 'done' || tripRejected(t)) continue;
+    const c = tripCost(t);
+    if (!c) continue;
+    const h = tripHead(t);
+    heads.set(h, (heads.get(h) || 0) + c);
+    const r = rows.get(t.date) || { date: t.date, total: 0, unapproved: 0, by: new Map() };
+    r.total += c; if (!tripApproved(t)) r.unapproved += c;
+    r.by.set(h, (r.by.get(h) || 0) + c);
+    rows.set(t.date, r);
+  }
+  return { heads: [...heads.entries()].sort((a, b) => b[1] - a[1]), rows: [...rows.values()].sort((a, b) => b.date.localeCompare(a.date)) };
+}
+
+function spendCard(list) {
+  const { heads, rows } = spendByDay(list);
+  if (!rows.length) return '';
+  const m = (v) => fmtMoney(Math.round(v * 100) / 100);
+  const total = rows.reduce((a, r) => a + r.total, 0);
+  const unap = rows.reduce((a, r) => a + r.unapproved, 0);
+  const colors = ['#7B4FC9', '#D98A1A', '#2E7DB2', '#2E9E6A', '#C2557A', '#5B6B7A', '#8E5CC4'];
+  const col = (h) => (h.startsWith('Taxi') ? '#E0A23A' : h.startsWith('RTA') ? '#2E7DB2' : colors[heads.findIndex((x) => x[0] === h) % colors.length]);
+  return `<div class="card mt tsp"><div class="card-head"><h2>Travel spend per day</h2><span class="spacer"></span><span class="small muted">${m(total)} in this period${unap ? ` · <span style="color:#a8640f">${m(unap)} not yet approved</span>` : ''}</span></div>
+    <div class="tsp-heads">${heads.map(([h, v]) => `<div class="tsp-h" style="--c:${col(h)}"><span>${esc(h)}</span><b>${m(v)}</b><i style="width:${Math.max(4, Math.round((v / total) * 100))}%"></i></div>`).join('')}</div>
+    <div class="table-wrap"><table class="t"><thead><tr><th>Date</th>${heads.map(([h]) => `<th class="num">${esc(h)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td class="nowrap"><b>${esc(r.date)}</b>${r.unapproved ? '<div class="small" style="color:#a8640f">unapproved part</div>' : ''}</td>${heads.map(([h]) => `<td class="num">${r.by.get(h) ? m(r.by.get(h)) : '<span class="muted">—</span>'}</td>`).join('')}
+      <td class="num"><b>${m(r.total)}</b>${r.unapproved ? `<div class="small" style="color:#a8640f">${m(r.unapproved)}</div>` : ''}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
+function chargeDialog(t, list, done) {
+  const same = list.filter((x) => x.id !== t.id && x.driverId === t.driverId && tripNeedsCharge(x) && tripsOverlap(x, t));
+  modal({
+    title: `Charge — ${t.driverName || 'provider'}`,
+    body: `<p style="margin-top:0"><b>${esc(t.startSiteName || 'GPS')} → ${esc(t.endSiteName || 'GPS')}</b><br><span class="small muted">${esc(t.date)} · ${fmtTime(atTz(t.startAt, t.tz))}–${t.endAt ? fmtTime(atTz(t.endAt, t.tz)) : '…'} · ${tripKm(t).toFixed(1)} km · staff: ${esc(t.employeeName)}</span></p>
+      <label class="f"><span>Charge (AED)</span><input id="ch-amt" type="number" min="0" step="0.5"></label>
+      <label class="f"><span>Driven by someone else? Name</span><input id="ch-who" value="${esc(t.actualDriver)}" placeholder="optional"></label>
+      <label class="f"><span>Note</span><input id="ch-note" placeholder="optional"></label>
+      ${same.length ? `<div class="small" style="margin:8px 0 4px"><b>Same car journey — charged once:</b></div>${same.map((x) => `<label class="row small" style="gap:8px"><input type="checkbox" data-g="${x.id}" checked> ${esc(x.employeeName)} · ${fmtTime(atTz(x.startAt, x.tz))} · ${esc(x.startSiteName || 'GPS')} → ${esc(x.endSiteName || 'GPS')}</label>`).join('')}` : ''}`,
+    foot: '<button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-ok>Save charge</button>',
+    onMount(root, close) {
+      root.querySelector('[data-cancel]').onclick = close;
+      root.querySelector('#ch-amt').focus();
+      root.querySelector('[data-ok]').onclick = async () => {
+        const v = Number(root.querySelector('#ch-amt').value);
+        if (!(v >= 0) || root.querySelector('#ch-amt').value === '') { toast('Enter the charge', true); return; }
+        try {
+          await chargeRide(t, v, { note: root.querySelector('#ch-note').value.trim(), actualDriver: root.querySelector('#ch-who').value.trim() || undefined,
+            groupIds: [...root.querySelectorAll('[data-g]:checked')].map((c) => c.dataset.g) });
+          close(); toast('Charge saved — approve it when ready'); done();
+        } catch (x) { toast(friendlyError(x), true); }
+      };
     },
   });
 }
