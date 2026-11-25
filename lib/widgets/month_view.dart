@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/attendance_sheet.dart';
 import '../services/db.dart';
 import 'common.dart';
 import 'tiles.dart';
@@ -107,6 +108,20 @@ class _MonthAttendanceViewState extends State<MonthAttendanceView> {
             color: AppColors.danger,
             sub: flagged > 0 ? '$flagged flagged check-ins' : 'No flags'),
       ]),
+      const SizedBox(height: 10),
+      // Report card: this month as a PDF (employee for himself, management for anyone).
+      OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+        onPressed: () async {
+          try {
+            await AttendanceSheet.shareReportCard(widget.user, summary);
+          } catch (e) {
+            if (context.mounted) showSnack(context, 'Could not make the report card: $e', error: true);
+          }
+        },
+        icon: const Icon(Icons.picture_as_pdf_outlined),
+        label: const Text('Report card (PDF) — dates, times, hours'),
+      ),
       if (widget.header != null) ...[
         const SizedBox(height: 12),
         widget.header!(summary, _offDays),
