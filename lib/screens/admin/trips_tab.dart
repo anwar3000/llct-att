@@ -965,6 +965,15 @@ class _AccountsState extends State<_Accounts> {
     super.dispose();
   }
 
+  Future<void> _review(DriverPayment p, bool accept) async {
+    try {
+      await Db.reviewDriverPayment(p, accept, widget.me);
+      if (mounted) showSnack(context, accept ? 'Accepted' : 'Rejected');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not save: $e', error: true);
+    }
+  }
+
   Future<void> _pay(AppUser d, double balance) async {
     final amt = TextEditingController(text: balance > 0 ? balance.toStringAsFixed(2) : '');
     final note = TextEditingController();
@@ -1060,17 +1069,50 @@ class _AccountsState extends State<_Accounts> {
                 const SizedBox(width: 6),
                 _box(r.bal >= 0 ? 'Balance' : 'Overpaid', fmtMoney(r.bal.abs()), r.bal > 0 ? AppColors.warning : AppColors.success),
               ]),
-              for (final p in r.pays.take(3))
+              for (final p in [...r.pays.where((x) => x.isException), ...r.pays.where((x) => !x.isException).take(3)])
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Row(children: [
-                    const Icon(Icons.check_circle, size: 15, color: AppColors.success),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text('${p.date} · ${p.method}${p.note.isEmpty ? '' : ' · ${p.note}'}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
-                    ),
-                    Text(fmtMoney(p.amount), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(p.isException ? Icons.error : p.isRejected ? Icons.cancel : Icons.check_circle,
+                          size: 15, color: p.isException || p.isRejected ? AppColors.danger : AppColors.success),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text('${p.date} · ${p.method}${p.note.isEmpty ? '' : ' · ${p.note}'}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
+                      ),
+                      Text(fmtMoney(p.claimed),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12.5,
+                              color: p.isException || p.isRejected ? AppColors.danger : null,
+                              decoration: p.isRejected ? TextDecoration.lineThrough : null)),
+                    ]),
+                    if (p.isException)
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+                        decoration: BoxDecoration(color: const Color(0xFFFBE6E6), borderRadius: BorderRadius.circular(8)),
+                        child: Row(children: [
+                          Expanded(
+                            child: Text(
+                                'EXCEPTION — ${p.prev == null ? 'added' : 'changed (was ${fmtMoney((p.prev!['amount'] as num?)?.toDouble() ?? 0)})'} by driver: ${p.reason}',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF8F2A2A), fontWeight: FontWeight.w600)),
+                          ),
+                          IconButton(
+                            tooltip: 'Reject',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.close, color: AppColors.danger),
+                            onPressed: () => _review(p, false),
+                          ),
+                          IconButton(
+                            tooltip: 'Accept',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.check, color: AppColors.success),
+                            onPressed: () => _review(p, true),
+                          ),
+                        ]),
+                      ),
                   ]),
                 ),
             ]),

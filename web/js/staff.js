@@ -4,7 +4,7 @@
 import {
   auth, db, onAuthStateChanged, login, logout, getMe, store, mapSession, mapSite, mapPetty, mapUpdate, mapWorker,
   mapWorkerEntry, mapOff, mapIdInfo, mapIdFile, saveIdInfo, uploadIdFile, deleteIdFile, Timestamp, serverTimestamp, mapTrip,
-  COMPANY_DOC_TYPES, watchCompanyDocs, watchCompanyFiles, readCompanyFile, companyDueState,
+  COMPANY_DOC_TYPES, watchCompanyDocs, watchCompanyFiles, readCompanyFile, companyDueState, mapPayment, driverPaymentException,
 } from './fb.js';
 import {
   collection, doc, query, where, onSnapshot, addDoc, setDoc, updateDoc, getDocs, getDoc, deleteDoc, runTransaction, writeBatch,
@@ -313,7 +313,7 @@ function start() {
     });
     on(query(C('trips'), where('employeeId', '==', uid), where('status', '==', 'done')), (s) => { S.tripsDone = s.docs.map(mapTrip); draw(); });
     S.subs.push(onSnapshot(query(C('driverPayments'), where('employeeId', '==', uid)), (s) => {
-      S.payments = s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.date || '').localeCompare(a.date || '')); draw();
+      S.payments = s.docs.map(mapPayment).sort((a, b) => (b.date || '').localeCompare(a.date || '')); draw();
     }, () => {}));
     getDoc(doc(db, 'settings', 'general')).then((g) => {
       S.rate = S.me.tripRatePerKm ?? (typeof g.data()?.tripRatePerKm === 'number' ? g.data().tripRatePerKm : 0); draw();
@@ -556,8 +556,12 @@ function drawTrips(main) {
       <div class="st-kpis"><div><b>${fmtMoney(Math.round(earned * 100) / 100)}</b><span>Earned · ${S.tripsDone.length} trips</span></div>
         <div><b style="color:#2E9E6A">${fmtMoney(Math.round(paid * 100) / 100)}</b><span>Paid</span></div>
         <div><b style="color:${bal > 0 ? '#D98A1A' : '#2E9E6A'}">${fmtMoney(Math.abs(bal))}</b><span>${bal >= 0 ? 'Balance due' : 'Overpaid'}</span></div></div>
-      ${S.payments.length ? `<div class="st-card list">${S.payments.slice(0, 10).map((p) => `<div class="row-i"><div class="grow"><b class="small">Payment received</b>
-        <div class="small muted">${esc(p.date || '')}${p.method ? ` · ${esc(p.method)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''}</div></div><b style="color:#2E9E6A">${fmtMoney(p.amount || 0)}</b></div>`).join('')}</div>` : ''}`;
+      <div class="row" style="justify-content:space-between;margin:10px 2px 6px"><b class="small">Payments received</b><button class="st-btn sm" id="pay-add">+ Add</button></div>
+      <div class="st-card list">${S.payments.length ? S.payments.slice(0, 15).map((p) => `<div class="row-i" data-pay="${p.id}" style="cursor:pointer${p.status === 'exception' ? ';background:#fff5f5' : ''}"><div class="grow"><b class="small">${p.status === 'exception' ? '⚠ Exception · waiting for admin' : p.status === 'rejected' ? 'Rejected by admin' : 'Payment received'}</b>
+        <div class="small muted">${esc(p.date || '')}${p.method ? ` · ${esc(p.method)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''}</div>
+        ${p.status === 'exception' || p.status === 'rejected' ? `<div class="small" style="color:#b23535">${p.prev ? `was ${fmtMoney(Number(p.prev.amount) || 0)} · ` : ''}${esc(p.reason)}</div>` : ''}</div>
+        <b style="color:${p.status ? '#b23535' : '#2E9E6A'};${p.status === 'rejected' ? 'text-decoration:line-through' : ''}">${fmtMoney(p.claimed || 0)} ✎</b></div>`).join('')
+        : '<div class="empty small">None yet. The office records payments — tap + Add only if one is missing.</div>'}</div>`;
     })()}
     <h3 class="st-h">My trips · ${esc(fmtMonth(new Date()))} <span class="small muted" style="font-weight:500">· tap to change cost</span></h3>
     <div class="st-card list">${done.length ? done.map((x) => `<div class="row-i" data-tc="${x.id}" style="cursor:pointer">
@@ -567,7 +571,37 @@ function drawTrips(main) {
       : '<div class="empty small">No trips this month</div>'}</div>`;
   main.querySelector('#st-trip-start')?.addEventListener('click', startTrip);
   main.querySelector('#st-trip-stop')?.addEventListener('click', stopTrip);
+  main.querySelector('#pay-add')?.addEventListener('click', () => paymentDialog(null));
+  main.querySelectorAll('[data-pay]').forEach((r) => { r.onclick = () => paymentDialog(S.payments.find((x) => x.id === r.dataset.pay)); });
   wireTripCost(main);
+}
+
+/** Driver adds a missing payment or changes one — saved as an exception with his reason until admin accepts it. */
+function paymentDialog(p) {
+  modal({
+    title: p ? 'Change payment' : 'Add payment received',
+    body: `<div class="st-note" style="background:#fbe6e6;color:#8f2a2a;margin-bottom:10px">This shows as an <b>EXCEPTION</b> until admin accepts it. Write the reason.</div>
+      <label class="f"><span>Amount (${CURRENCY})</span><input id="pd-amt" type="number" min="0" step="0.01" inputmode="decimal" value="${p ? p.claimed : ''}"></label>
+      <label class="f"><span>Date</span><input id="pd-date" type="date" value="${esc(p?.date || dateKey(new Date()))}"></label>
+      <label class="f"><span>Method</span><select id="pd-m">${['Cash', 'Bank transfer', 'Cheque', 'Other'].map((m) => `<option ${m === (p?.method || 'Cash') ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+      <label class="f"><span>Note (optional)</span><input id="pd-note" value="${esc(p?.note || '')}"></label>
+      <label class="f"><span>Reason *</span><textarea id="pd-why" rows="2" placeholder="Why are you adding / changing this?">${esc(p?.status === 'exception' ? p.reason : '')}</textarea></label>
+      <div class="error" id="pd-err"></div>`,
+    foot: '<button class="st-btn" data-no>Cancel</button><button class="st-btn primary" data-yes style="flex:1">SEND</button>',
+    onMount: (el, close) => {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = async () => {
+        const v = Number(el.querySelector('#pd-amt').value), why = el.querySelector('#pd-why').value.trim(), err = el.querySelector('#pd-err');
+        if (!(v > 0)) { err.textContent = 'Enter the amount first.'; return; }
+        if (why.length < 3) { err.textContent = 'Write the reason.'; return; }
+        try {
+          await driverPaymentException(S.me, p, { amount: v, date: el.querySelector('#pd-date').value || dateKey(new Date()), method: el.querySelector('#pd-m').value,
+            note: el.querySelector('#pd-note').value.trim(), reason: why });
+          close(); toast('Sent — shows as an exception until admin accepts it');
+        } catch (e) { err.textContent = friendlyError(e); }
+      };
+    },
+  });
 }
 
 function startRide() {

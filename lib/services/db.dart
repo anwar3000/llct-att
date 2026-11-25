@@ -1219,6 +1219,60 @@ class Db {
       .snapshots()
       .map((q) => q.docs.map(DriverPayment.fromDoc).toList()..sort((a, b) => b.date.compareTo(a.date)));
 
+  /// Driver adds a payment he received, or changes one: always an exception with his reason, until admin accepts it.
+  static Future<void> driverPaymentException({
+    required AppUser me,
+    DriverPayment? existing,
+    required double amount,
+    required String date,
+    required String method,
+    required String note,
+    required String reason,
+  }) {
+    final data = <String, dynamic>{
+      'employeeId': me.id,
+      'employeeName': me.name,
+      'amount': (amount * 100).round() / 100,
+      'date': date,
+      'method': method,
+      'note': note,
+      'reason': reason,
+      'status': 'exception',
+      'byDriver': true,
+      'driverAt': FieldValue.serverTimestamp(),
+    };
+    if (existing == null) {
+      return _fs.collection('driverPayments').add({...data, 'createdBy': me.name, 'createdById': me.id, 'createdAt': FieldValue.serverTimestamp()});
+    }
+    // Keep what it was before the first change (an ok payment's amount still counts until admin accepts).
+    if (!existing.isException) {
+      data['prev'] = {'amount': existing.claimed, 'date': existing.date, 'method': existing.method, 'note': existing.note};
+    }
+    return _fs.collection('driverPayments').doc(existing.id).update(data);
+  }
+
+  /// Admin decides on a driver's payment exception.
+  static Future<void> reviewDriverPayment(DriverPayment p, bool accept, AppUser by) {
+    final ref = _fs.collection('driverPayments').doc(p.id);
+    if (accept) {
+      return ref.update({'status': '', 'prev': FieldValue.delete(), 'reviewedBy': by.name, 'reviewedAt': FieldValue.serverTimestamp()});
+    }
+    if (p.prev != null) {
+      return ref.update({
+        'amount': p.prev!['amount'] ?? 0,
+        'date': p.prev!['date'] ?? p.date,
+        'method': p.prev!['method'] ?? p.method,
+        'note': p.prev!['note'] ?? p.note,
+        'status': '',
+        'prev': FieldValue.delete(),
+        'reason': 'Driver change rejected: ${p.reason}',
+        'reviewedBy': by.name,
+        'reviewedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    return ref.update({'status': 'rejected', 'reviewedBy': by.name, 'reviewedAt': FieldValue.serverTimestamp()});
+  }
+
   static Future<void> addDriverPayment({
     required AppUser driver,
     required double amount,

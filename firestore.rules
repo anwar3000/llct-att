@@ -127,7 +127,19 @@ service cloud.firestore {
     // Payments made to drivers (accounts → admin). Each driver sees their own, so the balance tallies.
     match /driverPayments/{id} {
       allow read: if isAdmin() || owns() || canAccounts();
-      allow write: if isAdmin();
+      // A driver may add a payment he received, or change one, only as an exception with a reason — admin accepts or rejects it.
+      allow create: if isAdmin() || (createsOwn() && request.resource.data.byDriver == true
+                      && request.resource.data.status == 'exception'
+                      && request.resource.data.reason is string && request.resource.data.reason.size() >= 3
+                      && !('prev' in request.resource.data));
+      allow update: if isAdmin() || (owns() && request.resource.data.employeeId == request.auth.uid
+                      && request.resource.data.byDriver == true && request.resource.data.status == 'exception'
+                      && request.resource.data.reason is string && request.resource.data.reason.size() >= 3
+                      && onlyChanges(['amount', 'date', 'method', 'note', 'reason', 'status', 'byDriver', 'driverAt', 'prev', 'employeeName'])
+                      && (resource.data.get('status', '') == 'exception'
+                          ? request.resource.data.get('prev', null) == resource.data.get('prev', null)
+                          : request.resource.data.prev.amount == resource.data.amount));
+      allow delete: if isAdmin();
     }
 
     // Company accounts: income & expense entries and their receipt copies (admin only).

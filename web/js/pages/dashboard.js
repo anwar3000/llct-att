@@ -123,6 +123,7 @@ export function mount(el, _params, { setHeader }) {
       [store.requests.length, 'Document changes', 'staff update requests', '#/requests', '#E08E2B', 'idcard'],
       [compDue.length, 'Company documents', compDue.some((d) => companyDueState(d.expiry) === 'expired') ? 'expired / to renew' : 'renew within 15 days', '#/company', '#D98A1A', 'company'],
       [flagged.length, 'Flagged check-ins today', 'outside site or fake GPS', '#d-alerts', '#8E5CC4', 'flag'],
+      [isAdmin() ? store.payments.filter((p) => p.status === 'exception').length : 0, 'Driver payment exceptions', 'Trips & rides → Driver accounts & payments', '#/trips', '#D64545', 'wallet'],
       [isAdmin() ? store.tripsToApprove.length : 0, 'Trips to approve', (() => { const n = store.tripsToApprove.filter(tripNeedsCharge).length; return n ? `${n} still need the provider's charge` : 'drivers, providers, taxi & RTA'; })(), '#/trips', '#7B4FC9', 'car'],
     ].filter((t) => t[0] > 0);
 

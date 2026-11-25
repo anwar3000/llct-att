@@ -1302,30 +1302,55 @@ const kTaxiCompanies = ['Dubai Taxi (RTA)', 'Careem', 'Uber', 'Arabia Taxi', 'Ca
 class DriverPayment {
   final String id;
   final String employeeId;
+  /// Amount that counts in the balance: an exception waits for admin (keeps the amount before the driver's change, or 0 if he added it).
   final double amount;
+  /// Amount as written on the payment (what the driver typed for an exception).
+  final double claimed;
   final String date; // yyyy-MM-dd
   final String method;
   final String note;
   final String createdBy;
+  /// '' (ok) · 'exception' (added / changed by the driver, waits for admin) · 'rejected'
+  final String status;
+  final String reason;
+  final bool byDriver;
+  /// Before the driver's change: {amount, date, method, note}.
+  final Map<String, dynamic>? prev;
   DriverPayment({
     required this.id,
     required this.employeeId,
     required this.amount,
     required this.date,
+    this.claimed = 0,
     this.method = '',
     this.note = '',
     this.createdBy = '',
+    this.status = '',
+    this.reason = '',
+    this.byDriver = false,
+    this.prev,
   });
+  bool get isException => status == 'exception';
+  bool get isRejected => status == 'rejected';
   factory DriverPayment.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
+    final raw = _dbl(m['amount']) ?? 0;
+    final status = _str(m['status']);
+    final prev = m['prev'] is Map ? Map<String, dynamic>.from(m['prev'] as Map) : null;
+    final prevAmt = prev == null ? 0.0 : ((prev['amount'] is num) ? (prev['amount'] as num).toDouble() : 0.0);
     return DriverPayment(
       id: d.id,
       employeeId: _str(m['employeeId']),
-      amount: _dbl(m['amount']) ?? 0,
+      amount: status == 'exception' ? prevAmt : status == 'rejected' ? 0 : raw,
+      claimed: raw,
       date: _str(m['date']),
       method: _str(m['method']),
       note: _str(m['note']),
       createdBy: _str(m['createdBy']),
+      status: status,
+      reason: _str(m['reason']),
+      byDriver: m['byDriver'] == true,
+      prev: prev,
     );
   }
 }

@@ -100,6 +100,98 @@ class _DriverShellState extends State<DriverShell> {
     await AuthService.signOut();
   }
 
+  /// Driver adds a missing payment or changes one: saved as an exception with his reason, for admin to accept or reject.
+  Future<void> _paymentDialog([DriverPayment? p]) async {
+    final amt = TextEditingController(text: p == null ? '' : p.claimed.toStringAsFixed(2));
+    final note = TextEditingController(text: p?.note ?? '');
+    final reason = TextEditingController(text: p?.isException == true ? p!.reason : '');
+    var date = p != null && p.date.length == 10 ? parseDateKey(p.date) : DateTime.now();
+    var method = p?.method.isNotEmpty == true ? p!.method : 'Cash';
+    String? err;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: Text(p == null ? 'Add payment received' : 'Change payment'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFFFBE6E6), borderRadius: BorderRadius.circular(10)),
+                child: const Text('This shows as an EXCEPTION until admin accepts it. Write the reason.',
+                    style: TextStyle(fontSize: 12.5, color: Color(0xFF8F2A2A), fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: amt,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Amount ($kCurrency)', prefixIcon: Icon(Icons.payments_outlined)),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final d = await showDatePicker(context: c, firstDate: DateTime(2024), lastDate: DateTime.now(), initialDate: date);
+                  if (d != null) set(() => date = d);
+                },
+                icon: const Icon(Icons.event, size: 18),
+                label: Text('Date: ${fmtDate(date)}'),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                value: method,
+                decoration: const InputDecoration(labelText: 'Method'),
+                items: const ['Cash', 'Bank transfer', 'Cheque', 'Other'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                onChanged: (v) => set(() => method = v ?? 'Cash'),
+              ),
+              const SizedBox(height: 10),
+              TextField(controller: note, decoration: const InputDecoration(labelText: 'Note (optional)')),
+              const SizedBox(height: 10),
+              TextField(
+                controller: reason,
+                maxLines: 2,
+                decoration: InputDecoration(labelText: 'Reason *', hintText: 'Why are you adding / changing this?', errorText: err),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            FilledButton(
+              style: kDialogButton,
+              onPressed: () {
+                final v = double.tryParse(amt.text.trim());
+                if (v == null || v <= 0) {
+                  set(() => err = 'Enter the amount first');
+                  return;
+                }
+                if (reason.text.trim().length < 3) {
+                  set(() => err = 'Write the reason');
+                  return;
+                }
+                Navigator.pop(c, true);
+              },
+              child: const Text('SEND'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Db.driverPaymentException(
+        me: widget.me,
+        existing: p,
+        amount: double.parse(amt.text.trim()),
+        date: dateKey(date),
+        method: method,
+        note: note.text.trim(),
+        reason: reason.text.trim(),
+      );
+      if (mounted) showSnack(context, 'Sent — shows as an exception until admin accepts it');
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not save: $e', error: true);
+    }
+  }
+
   void _profile() {
     final me = widget.me;
     showModalBottomSheet(
@@ -262,26 +354,56 @@ class _DriverShellState extends State<DriverShell> {
                   style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF8A5A10))),
             ),
           ],
-          if (_payments.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Text('Payments received', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-            for (final p in _payments.take(10))
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(children: [
-                  const Icon(Icons.check_circle, size: 16, color: AppColors.success),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                        '${p.date.length == 10 ? fmtDateShort(parseDateKey(p.date)) : p.date}${p.method.isEmpty ? '' : ' · ${p.method}'}${p.note.isEmpty ? '' : ' · ${p.note}'}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5)),
-                  ),
-                  Text(fmtMoney(p.amount), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+          const SizedBox(height: 12),
+          Row(children: [
+            const Expanded(child: Text('Payments received', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+            TextButton.icon(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: () => _paymentDialog(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add'),
+            ),
+          ]),
+          if (_payments.isEmpty)
+            const Text('None yet. The office records payments; tap Add only if you received one that is missing.',
+                style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          for (final p in _payments.take(15))
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _paymentDialog(p),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Icon(p.isException ? Icons.error : p.isRejected ? Icons.cancel : Icons.check_circle,
+                        size: 16, color: p.isException || p.isRejected ? AppColors.danger : AppColors.success),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                          '${p.date.length == 10 ? fmtDateShort(parseDateKey(p.date)) : p.date}${p.method.isEmpty ? '' : ' · ${p.method}'}${p.note.isEmpty ? '' : ' · ${p.note}'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5)),
+                    ),
+                    Text(fmtMoney(p.claimed),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12.5,
+                            color: p.isException || p.isRejected ? AppColors.danger : null,
+                            decoration: p.isRejected ? TextDecoration.lineThrough : null)),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.edit_outlined, size: 14, color: AppColors.muted),
+                  ]),
+                  if (p.isException || p.isRejected)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 22, top: 2),
+                      child: Text(
+                          '${p.isRejected ? 'Rejected by admin' : 'EXCEPTION · waiting for admin'}${p.prev != null ? ' · was ${fmtMoney((p.prev!['amount'] as num?)?.toDouble() ?? 0)}' : ''} · ${p.reason}',
+                          style: const TextStyle(fontSize: 11.5, color: AppColors.danger, fontWeight: FontWeight.w600)),
+                    ),
                 ]),
               ),
-          ],
+            ),
         ]),
       ),
     );

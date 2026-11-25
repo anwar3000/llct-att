@@ -1,6 +1,6 @@
 // Driver trips and staff rides — live trips in progress, daily list with km and cost, route map, admin corrections.
 import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel,
-  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES } from '../fb.js';
+  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES, reviewDriverPayment } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError, parseKey } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -93,15 +93,26 @@ export function mount(el, _p, { setHeader }) {
         <td style="white-space:nowrap"><button class="btn sm" data-pay="${r.u.id}">+ Payment</button> <button class="btn sm ghost" data-stmt="${r.u.id}">Statement</button></td>
       </tr>`).join('')}</tbody></table></div>` : '<div class="empty"><b>No drivers yet</b>Set Work profile: Driver (taxi) on an employee.</div>'}
     </div>
-    <div class="card mt"><div class="card-head"><h2>Payments</h2></div>
-      ${store.payments.length ? store.payments.slice(0, 50).map((p) => `<div class="list-item">
-        ${avatar(p.employeeName, 28, '#2E9E6A')}<div class="grow"><b>${esc(p.employeeName)}</b> <span class="small muted">· ${esc(p.date)}${p.method ? ` · ${esc(p.method)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''} · by ${esc(p.createdBy)}</span></div>
-        <b>${fmtMoney(p.amount)}</b><button class="btn sm ghost icon" data-delpay="${p.id}" title="Delete payment">${icon('trash', 15)}</button></div>`).join('')
+    <div class="card mt"><div class="card-head"><h2>Payments</h2>${store.payments.some((p) => p.status === 'exception') ? `<span class="pill red">${store.payments.filter((p) => p.status === 'exception').length} exception(s) from drivers</span>` : ''}</div>
+      ${store.payments.length ? [...store.payments.filter((p) => p.status === 'exception'), ...store.payments.filter((p) => p.status !== 'exception').slice(0, 50)].map((p) => `<div class="list-item" ${p.status === 'exception' ? 'style="background:#fff5f5"' : ''}>
+        ${avatar(p.employeeName, 28, p.status === 'exception' || p.status === 'rejected' ? '#D64545' : '#2E9E6A')}<div class="grow"><b>${esc(p.employeeName)}</b> <span class="small muted">· ${esc(p.date)}${p.method ? ` · ${esc(p.method)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''} · by ${esc(p.createdBy)}</span>
+          ${p.status === 'exception' ? `<div class="small" style="color:#b23535;font-weight:600">⚠ EXCEPTION — ${p.prev ? `changed by driver (was ${fmtMoney(Number(p.prev.amount) || 0)}${p.prev.date && p.prev.date !== p.date ? `, ${esc(p.prev.date)}` : ''})` : 'added by driver'}: ${esc(p.reason)}</div>` : ''}
+          ${p.status === 'rejected' ? `<div class="small" style="color:#b23535">Rejected · driver's reason: ${esc(p.reason)}</div>` : p.status !== 'exception' && p.reason ? `<div class="small muted">${esc(p.reason)}</div>` : ''}</div>
+        <b style="${p.status === 'rejected' ? 'text-decoration:line-through;color:#b23535' : p.status === 'exception' ? 'color:#b23535' : ''}">${fmtMoney(p.claimed)}</b>
+        ${p.status === 'exception' ? `<button class="btn sm ghost" data-prej="${p.id}">Reject</button><button class="btn sm success" data-pacc="${p.id}">${icon('check', 14)} Accept</button>` : ''}
+        <button class="btn sm ghost icon" data-delpay="${p.id}" title="Delete payment">${icon('trash', 15)}</button></div>`).join('')
         : '<div class="empty">No payments recorded yet</div>'}
     </div>`;
     wireTabs();
     el.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.pay); if (r) payDialog(r.u, r.balance); }; });
     el.querySelectorAll('[data-stmt]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.stmt); if (r) statementDialog(r.u, r.tr, r.pays); }; });
+    el.querySelectorAll('[data-pacc],[data-prej]').forEach((b) => {
+      b.onclick = async () => {
+        const acc = !!b.dataset.pacc, p = store.payments.find((x) => x.id === (b.dataset.pacc || b.dataset.prej));
+        if (!p) return;
+        try { await reviewDriverPayment(p, acc); toast(acc ? 'Accepted' : 'Rejected'); } catch (e) { toast(friendlyError(e), true); }
+      };
+    });
     el.querySelectorAll('[data-delpay]').forEach((b) => {
       b.onclick = async () => {
         const p = store.payments.find((x) => x.id === b.dataset.delpay);

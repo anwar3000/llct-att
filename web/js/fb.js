@@ -7,7 +7,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch, arrayUnion, arrayRemove,
+  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch, arrayUnion, arrayRemove, deleteField,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
 import { dateKey, monthKey, atTz, fromTz, parseKey } from './util.js';
@@ -358,8 +358,28 @@ export async function endTripNow(t) {
 // ------------------------------------------------------------------ driver payments (accounts → admin)
 export function mapPayment(d) {
   const m = d.data() || {};
-  return { id: d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', amount: num(m.amount), date: m.date || '',
-    method: m.method || '', note: m.note || '', createdBy: m.createdBy || '', createdAt: toDate(m.createdAt) };
+  const status = m.status || '', prev = m.prev && typeof m.prev === 'object' ? m.prev : null;
+  // `amount` is what counts in balances: a driver's exception waits for admin (keeps the amount before his change, or 0 if he added it).
+  return { id: d.id, employeeId: m.employeeId || '', employeeName: m.employeeName || '', claimed: num(m.amount),
+    amount: status === 'exception' ? num(prev?.amount) : status === 'rejected' ? 0 : num(m.amount), date: m.date || '',
+    method: m.method || '', note: m.note || '', createdBy: m.createdBy || '', createdAt: toDate(m.createdAt),
+    status, reason: m.reason || '', byDriver: m.byDriver === true, prev };
+}
+/** Admin decides on a payment the driver added / changed himself. */
+export function reviewDriverPayment(p, accept) {
+  const ref = doc(db, 'driverPayments', p.id), by = { reviewedBy: store.me?.name || '', reviewedAt: serverTimestamp() };
+  if (accept) return updateDoc(ref, { status: '', prev: deleteField(), ...by });
+  if (p.prev) return updateDoc(ref, { amount: num(p.prev.amount), date: p.prev.date || p.date, method: p.prev.method ?? p.method, note: p.prev.note ?? p.note,
+    status: '', prev: deleteField(), reason: `Driver change rejected: ${p.reason}`, ...by });
+  return updateDoc(ref, { status: 'rejected', ...by });
+}
+/** Driver (own login) adds a payment he received or changes one: an exception with his reason until admin accepts. */
+export function driverPaymentException(me, existing, { amount, date, method, note, reason }) {
+  const data = { employeeId: me.id, employeeName: me.name, amount: Math.round(amount * 100) / 100, date, method, note, reason,
+    status: 'exception', byDriver: true, driverAt: serverTimestamp() };
+  if (!existing) return addDoc(C('driverPayments'), { ...data, createdBy: me.name, createdById: me.id, createdAt: serverTimestamp() });
+  if (existing.status !== 'exception') data.prev = { amount: existing.claimed, date: existing.date, method: existing.method, note: existing.note };
+  return updateDoc(doc(db, 'driverPayments', existing.id), data);
 }
 export const addDriverPayment = ({ driver, amount, date, method, note }) => addDoc(C('driverPayments'), {
   employeeId: driver.id, employeeName: driver.name, amount: Math.round(amount * 100) / 100, date, method, note,
