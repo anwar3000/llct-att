@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -1263,12 +1264,36 @@ class Db {
     }
   }
 
-  /// Drivers, for "ride with a company driver".
-  static Stream<List<AppUser>> driversStream() => _fs
-      .collection('users')
-      .where('isDriver', isEqualTo: true)
-      .snapshots()
-      .map((q) => q.docs.map(AppUser.fromDoc).where((u) => u.active).toList()..sort((a, b) => a.name.compareTo(b.name)));
+  /// Drivers / transport providers, for "ride with a company driver": staff drivers plus external workers marked as drivers.
+  static Stream<List<AppUser>> driversStream() {
+    late final StreamController<List<AppUser>> ctl;
+    var staff = <AppUser>[], ext = <AppUser>[];
+    var gotStaff = false;
+    final subs = <StreamSubscription>[];
+    void emit() {
+      if (gotStaff) ctl.add([...staff, ...ext]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+    }
+
+    ctl = StreamController<List<AppUser>>(
+      onListen: () {
+        subs.add(_fs.collection('users').where('isDriver', isEqualTo: true).snapshots().listen((q) {
+          staff = q.docs.map(AppUser.fromDoc).where((u) => u.active).toList();
+          gotStaff = true;
+          emit();
+        }, onError: ctl.addError));
+        subs.add(_fs.collection('extWorkers').where('isDriver', isEqualTo: true).snapshots().listen((q) {
+          ext = q.docs.map(ExtWorker.fromDoc).where((w) => w.active).map((w) => w.asDriver).toList();
+          emit();
+        }, onError: (_) {}));
+      },
+      onCancel: () {
+        for (final s in subs) {
+          s.cancel();
+        }
+      },
+    );
+    return ctl.stream;
+  }
 
   static Stream<List<Trip>> tripsForMonth(String uid, String month) => trips
       .where('employeeId', isEqualTo: uid)

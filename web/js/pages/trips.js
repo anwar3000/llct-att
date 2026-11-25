@@ -35,9 +35,14 @@ export function mount(el, _p, { setHeader }) {
       .sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
   }
 
+  /** Everyone with a driver account: staff drivers (incl. inactive with history) + external workers who drive. */
+  function acctDrivers() {
+    return [...store.users.filter((u) => u.isDriver), ...store.drivers.filter((d) => d.external)];
+  }
+
   async function loadAccounts() {
     acctLoading = true; draw();
-    try { acctTrips = await finishedTripsFor(store.users.filter((u) => u.isDriver).map((u) => u.id)); } catch (e) { toast(friendlyError(e), true); acctTrips = []; }
+    try { acctTrips = await finishedTripsFor(acctDrivers().map((u) => u.id)); } catch (e) { toast(friendlyError(e), true); acctTrips = []; }
     acctLoading = false; draw();
   }
 
@@ -53,7 +58,7 @@ export function mount(el, _p, { setHeader }) {
 
   // ------------------------------------------------ driver accounts: earned (trip costs) − paid = balance
   function drawAccounts() {
-    const drivers = store.users.filter((u) => u.isDriver);
+    const drivers = acctDrivers();
     const all = acctTrips || [];
     const rows = drivers.map((u) => {
       const mine = all.filter((t) => (t.kind === 'withDriver' ? t.driverId : t.employeeId) === u.id);
@@ -95,7 +100,7 @@ export function mount(el, _p, { setHeader }) {
         : '<div class="empty">No payments recorded yet</div>'}
     </div>`;
     wireTabs();
-    el.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => payDialog(store.user(b.dataset.pay), rows.find((r) => r.u.id === b.dataset.pay)?.balance || 0); });
+    el.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.pay); if (r) payDialog(r.u, r.balance); }; });
     el.querySelectorAll('[data-stmt]').forEach((b) => { b.onclick = () => { const r = rows.find((x) => x.u.id === b.dataset.stmt); if (r) statementDialog(r.u, r.tr, r.pays); }; });
     el.querySelectorAll('[data-delpay]').forEach((b) => {
       b.onclick = async () => {
@@ -113,7 +118,7 @@ export function mount(el, _p, { setHeader }) {
     const km = list.reduce((a, t) => a + tripKm(t), 0);
     const cost = list.reduce((a, t) => a + tripCost(t), 0);
     const drivers = store.users.filter((u) => u.isDriver);
-    const people = store.users.filter((u) => u.role === 'employee');
+    const people = [...store.users.filter((u) => u.role === 'employee'), ...store.drivers.filter((d) => d.external)].sort((a, b) => a.name.localeCompare(b.name));
     const costOf = (k) => list.filter((t) => (t.kind || 'driver') === k).reduce((a, t) => a + tripCost(t), 0);
     const bySite = new Map();
     for (const t of list) {
@@ -125,14 +130,16 @@ export function mount(el, _p, { setHeader }) {
     }
     const byDriver = new Map();
     for (const t of list) {
-      const c = byDriver.get(t.employeeId) || { id: t.employeeId, name: t.employeeName, n: 0, km: 0, cost: 0, mins: 0 };
+      // A ride with a driver / transport provider belongs to that driver's account, not the passenger's.
+      const oid = t.kind === 'withDriver' && t.driverId ? t.driverId : t.employeeId;
+      const c = byDriver.get(oid) || { id: oid, name: t.kind === 'withDriver' && t.driverName ? t.driverName : t.employeeName, n: 0, km: 0, cost: 0, mins: 0 };
       c.n++; c.km += tripKm(t); c.cost += tripCost(t); c.mins += tripMinutes(t);
-      byDriver.set(t.employeeId, c);
+      byDriver.set(oid, c);
     }
 
     el.innerHTML = `${tabs()}
     <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
-      <div class="seg">${[['today', 'Today'], ['yday', 'Yesterday'], ['7', 'Last 7 days'], ['month', 'This month']].map(([k, l]) => `<button class="btn sm ghost" data-quick="${k}">${l}</button>`).join('')}</div>
+      <div class="seg">${[['today', 'Today'], ['yday', 'Yesterday'], ['7', 'Last 7 days'], ['month', 'This month'], ['all', 'All days']].map(([k, l]) => `<button class="btn sm ghost" data-quick="${k}">${l}</button>`).join('')}</div>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">From <input type="date" id="tr-from" value="${from}" style="width:150px"></label>
       <label class="row small" style="gap:6px;flex-wrap:nowrap">To <input type="date" id="tr-to" value="${to}" style="width:150px"></label>
       <select id="tr-appr" style="width:auto;min-width:150px">${[['', 'All approvals'], ['pending', `Unapproved (${store.tripsToApprove.length})`], ['charge', 'Needs provider charge'], ['approved', 'Approved'], ['rejected', 'Rejected']].map(([v, l]) => `<option value="${v}" ${v === appr ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -201,6 +208,7 @@ export function mount(el, _p, { setHeader }) {
         if (b.dataset.quick === 'today') { from = to = dateKey(n); }
         if (b.dataset.quick === 'yday') { from = to = dateKey(addDays(n, -1)); }
         if (b.dataset.quick === '7') { from = dateKey(addDays(n, -6)); to = dateKey(n); }
+        if (b.dataset.quick === 'all') { from = '2020-01-01'; to = dateKey(n); }
         if (b.dataset.quick === 'month') { from = dateKey(new Date(n.getFullYear(), n.getMonth(), 1)); to = dateKey(n); }
         load();
       };
@@ -365,7 +373,7 @@ function editDialog(t, onDone) {
             q('#et-vno').oninput = sync; sync();
           }
         } else if (ty.startsWith('wd:')) {
-          const d = store.user(ty.slice(3));
+          const d = store.user(ty.slice(3)) || store.drivers.find((x) => x.id === ty.slice(3));
           q('#et-fields').innerHTML = `<label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${km}"></label>
             <label class="f"><span>Provider's charge (AED)</span><input id="et-fare" type="number" min="0" step="0.01" placeholder="blank = not charged yet" value="${same && t.costEntered ? (t.cost ?? 0) : ''}"></label>
             <label class="f" style="grid-column:1/-1"><span>Vehicle</span><input id="et-veh" value="${esc(same ? t.vehicle : d?.vehicle || '')}"></label>`;

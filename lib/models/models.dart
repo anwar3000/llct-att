@@ -800,6 +800,9 @@ class ExtWorker {
   final String company;
   final String trade;
   final bool active;
+  /// Also works as a driver / transport provider (staff can ride with him; his charges go to his account).
+  final bool isDriver;
+  final String vehicle;
 
   ExtWorker({
     required this.id,
@@ -808,9 +811,23 @@ class ExtWorker {
     this.company = '',
     this.trade = '',
     this.active = true,
+    this.isDriver = false,
+    this.vehicle = '',
   });
 
   String get subtitle => [company, trade].where((s) => s.isNotEmpty).join(' · ');
+
+  /// The worker as a driver choice (same as a staff driver; no app login).
+  AppUser get asDriver => AppUser(
+        id: id,
+        name: name,
+        loginId: '',
+        email: '',
+        phone: phone,
+        designation: company.isEmpty ? 'External driver' : 'External · $company',
+        isDriver: true,
+        vehicle: vehicle,
+      );
 
   factory ExtWorker.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -821,6 +838,8 @@ class ExtWorker {
       company: _str(m['company']),
       trade: _str(m['trade']),
       active: m['active'] != false,
+      isDriver: m['isDriver'] == true,
+      vehicle: _str(m['vehicle']),
     );
   }
 }

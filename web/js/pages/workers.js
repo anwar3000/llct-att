@@ -188,6 +188,8 @@ export function registerWorker(w = null) {
       <label class="f"><span>Worker code (optional)</span><input name="code" value="${esc(w?.code)}"></label>
       <label class="f"><span>Nationality</span><input name="nationality" value="${esc(i.nationality || w?.nationality || '')}"></label>
       ${isAdmin() ? `<label class="f"><span>Daily rate (AED) — admin only</span><input name="rate" type="number" min="0" step="0.01" value="${w ? (store.rates[w.id] ?? '') : ''}" placeholder="e.g. 120"></label>` : ''}
+      <label class="f row full" style="gap:8px"><input type="checkbox" name="isDriver" ${w?.isDriver ? 'checked' : ''}> Also works as a <b>driver / transport provider</b> — staff can choose him for rides, and his trip charges go to his own account</label>
+      <label class="f full" data-veh style="${w?.isDriver ? '' : 'display:none'}"><span>Vehicle (for driver work)</span><input name="vehicle" value="${esc(w?.vehicle)}" placeholder="e.g. Toyota Hiace · DXB 12345"></label>
       ${editing ? `<label class="f row full" style="gap:8px"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Active — can be selected at check-in</label>` : ''}
       <div class="full reg-docs-head"><h3>ID documents <span class="muted small" style="font-weight:500">— optional, can be added later</span></h3></div>
       ${DOC_KINDS.filter((k) => k.num).map((k) => `<div class="full reg-doc">
@@ -207,6 +209,7 @@ export function registerWorker(w = null) {
     onMount: (m, close) => {
       const f = m.querySelector('#wf');
       const err = m.querySelector('#wf-err');
+      f.isDriver.onchange = () => { m.querySelector('[data-veh]').style.display = f.isDriver.checked ? '' : 'none'; };
       m.querySelector('[data-cancel]').onclick = close;
       m.querySelector('[data-del]')?.addEventListener('click', async () => {
         if (!await confirmBox('Delete worker?', `Delete ${w.name}? Past attendance stays in reports. Tip: untick “Active” instead to hide them.`, { ok: 'Delete', danger: true })) return;
@@ -217,6 +220,7 @@ export function registerWorker(w = null) {
         const data = {
           name: f.name.value.trim(), phone: f.phone.value.trim(), company: f.company.value.trim(), trade: f.trade.value.trim(),
           code: f.code.value.trim(), nationality: f.nationality.value.trim(),
+          isDriver: f.isDriver.checked, vehicle: f.vehicle.value.trim(),
         };
         const info = { nationality: data.nationality };
         DOC_KINDS.filter((k) => k.num).forEach((k) => { info[k.num] = f[k.num].value.trim(); info[k.exp] = f[k.exp].value; });

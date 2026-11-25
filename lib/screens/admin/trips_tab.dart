@@ -2,17 +2,20 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
 import '../../services/db.dart';
+import '../../services/trip_statement.dart';
 import '../../widgets/common.dart';
 import '../../widgets/ride_charge.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/trip_card.dart' show kDialogButton;
 import 'admin_live.dart';
+import 'id_documents_screen.dart' show runWithProgress;
 
 const _purple = Color(0xFF7B4FC9);
 
@@ -31,6 +34,10 @@ class _TripsTabState extends State<TripsTab> {
   String _period = 'month';
   String _kind = '';
   String _view = 'list';
+  String _person = '';
+  DateTimeRange? _custom;
+  List<AppUser> _drivers = [];
+  StreamSubscription? _dsub;
   StreamSubscription? _sub;
   List<Trip> _trips = [];
   bool _loading = true;
@@ -42,6 +49,9 @@ class _TripsTabState extends State<TripsTab> {
   void initState() {
     super.initState();
     _load();
+    _dsub = Db.driversStream().listen((l) {
+      if (mounted) setState(() => _drivers = l);
+    }, onError: (_) {});
   }
 
   ({String from, String to}) _range() {
@@ -57,6 +67,11 @@ class _TripsTabState extends State<TripsTab> {
       case 'last':
         final f = DateTime(n.year, n.month - 1, 1), t = DateTime(n.year, n.month, 0);
         return (from: dateKey(f), to: dateKey(t));
+      case 'all':
+        return (from: '2020-01-01', to: dateKey(n));
+      case 'pick':
+        if (_custom != null) return (from: dateKey(_custom!.start), to: dateKey(_custom!.end));
+        return (from: dateKey(DateTime(n.year, n.month, 1)), to: dateKey(n));
       default:
         return (from: dateKey(DateTime(n.year, n.month, 1)), to: dateKey(n));
     }
@@ -85,6 +100,7 @@ class _TripsTabState extends State<TripsTab> {
   @override
   void dispose() {
     _sub?.cancel();
+    _dsub?.cancel();
     super.dispose();
   }
 
@@ -100,14 +116,156 @@ class _TripsTabState extends State<TripsTab> {
 
   /// "Company driver: Basheer · DXB 1234" / "Taxi: DXB T 12345" / "Driver trip · DXB 777".
   String _who(Trip t) => t.isWithDriver
-      ? 'Company driver: ${t.driverName.isEmpty ? '—' : t.driverName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'
+      ? 'Ride for ${t.employeeName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'
       : t.isTaxi
           ? (t.vehicle.isEmpty || t.vehicle == 'Taxi' ? 'Taxi' : t.vehicle)
           : 'Driver trip${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}';
 
+  /// Whose account the trip's cost belongs to: the driver / transport provider for a ride, else the person.
+  String _ownerId(Trip t) => t.isWithDriver && t.driverId.isNotEmpty ? t.driverId : t.employeeId;
+  String _ownerName(Trip t) => t.isWithDriver && t.driverName.isNotEmpty ? t.driverName : t.employeeName;
+
+  /// Statement head: the driver / provider, Taxi or RTA.
+  String _head(Trip t) => t.isTaxi ? (t.isRta ? 'RTA (metro / bus)' : 'Taxi') : _ownerName(t);
+
+  String _periodLabel() {
+    final r = _range();
+    String f(String k) => DateFormat('d MMM yyyy').format(DateTime.parse(k));
+    return _period == 'all' ? 'All days (to ${f(r.to)})' : r.from == r.to ? f(r.from) : '${f(r.from)} – ${f(r.to)}';
+  }
+
+  Future<void> _pickDates() async {
+    final n = DateTime.now();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: n,
+      initialDateRange: _custom ?? DateTimeRange(start: DateTime(n.year, n.month, 1), end: n),
+    );
+    if (r == null) return;
+    _custom = r;
+    _period = 'pick';
+    _load();
+  }
+
+  Future<void> _shareStatement(List<Trip> list) async {
+    final lines = [
+      for (final t in list.reversed)
+        StatementLine(
+          when: t.startLocal,
+          person: t.isWithDriver ? '${t.employeeName} (ride)' : t.employeeName,
+          head: _head(t),
+          route: '${t.startSiteName.isEmpty ? 'GPS' : t.startSiteName} → ${t.endSiteName.isEmpty ? 'GPS' : t.endSiteName}',
+          km: t.km,
+          cost: (_costOf(t) * 100).round() / 100,
+          status: t.isApproved ? 'Approved' : t.isRejected ? 'Rejected' : 'Unapproved',
+        ),
+    ];
+    final who = _person.isEmpty ? '' : ' - ${_peopleIn(_trips)[_person] ?? ''}';
+    try {
+      await runWithProgress(context, (set) => TripStatement.share(lines, title: 'Trips statement$who', period: _periodLabel()));
+    } catch (e) {
+      if (mounted) showSnack(context, 'Could not make the statement: $e', error: true);
+    }
+  }
+
+  /// Everyone in these trips: staff and drivers / providers (id → name).
+  Map<String, String> _peopleIn(List<Trip> l) {
+    final m = <String, String>{};
+    for (final t in l) {
+      m[t.employeeId] = t.employeeName;
+      if (t.isWithDriver && t.driverId.isNotEmpty) m[t.driverId] = t.driverName;
+    }
+    return m;
+  }
+
+  Widget _statementCard(List<Trip> list) {
+    final heads = <String, ({int n, double km, double cost, double ok})>{};
+    for (final t in list) {
+      final h = _head(t), c = _costOf(t), p = heads[h];
+      heads[h] = (n: (p?.n ?? 0) + 1, km: (p?.km ?? 0) + t.km, cost: (p?.cost ?? 0) + c, ok: (p?.ok ?? 0) + (t.isApproved ? c : 0));
+    }
+    final rows = heads.entries.toList()..sort((a, b) => b.value.cost.compareTo(a.value.cost));
+    final total = list.fold<double>(0, (a, t) => a + _costOf(t));
+    final ok = list.where((t) => t.isApproved).fold<double>(0, (a, t) => a + _costOf(t));
+    final km = list.fold<double>(0, (a, t) => a + t.km);
+    String m(double v) => fmtMoney((v * 100).round() / 100);
+    const hs = TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.muted, letterSpacing: .5);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            const Icon(Icons.receipt_long_outlined, color: _purple, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Statement', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text(_periodLabel(), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              ]),
+            ),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 36)),
+              onPressed: () => _shareStatement(list),
+              icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+              label: const Text('PDF'),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: const [
+            Expanded(flex: 4, child: Text('HEAD', style: hs)),
+            Expanded(flex: 2, child: Text('TRIPS', style: hs, textAlign: TextAlign.right)),
+            Expanded(flex: 3, child: Text('KM', style: hs, textAlign: TextAlign.right)),
+            Expanded(flex: 4, child: Text('AMOUNT', style: hs, textAlign: TextAlign.right)),
+          ]),
+          const Divider(height: 12),
+          for (final e in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Expanded(flex: 4, child: Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))),
+                Expanded(flex: 2, child: Text('${e.value.n}', textAlign: TextAlign.right)),
+                Expanded(flex: 3, child: Text(e.value.km.toStringAsFixed(1), textAlign: TextAlign.right)),
+                Expanded(
+                  flex: 4,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text(m(e.value.cost), style: const TextStyle(fontWeight: FontWeight.w800)),
+                    if (e.value.cost - e.value.ok > 0.004)
+                      Text('${m(e.value.cost - e.value.ok)} unapproved', style: const TextStyle(fontSize: 11, color: AppColors.warning)),
+                  ]),
+                ),
+              ]),
+            ),
+          const Divider(height: 14),
+          Row(children: [
+            const Expanded(flex: 4, child: Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w900))),
+            Expanded(flex: 2, child: Text('${list.length}', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w800))),
+            Expanded(flex: 3, child: Text(km.toStringAsFixed(1), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w800))),
+            Expanded(
+              flex: 4,
+              child: Text(m(total), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.accentDark)),
+            ),
+          ]),
+          if (total - ok > 0.004)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Approved ${m(ok)} · waiting approval ${m(total - ok)}',
+                  textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final list = _trips.where((t) => _kind.isEmpty || t.kind == _kind).toList();
+    final people = _peopleIn(_trips);
+    if (_person.isNotEmpty && !people.containsKey(_person)) people[_person] = '—';
+    final list = _trips
+        .where((t) => _kind.isEmpty || t.kind == _kind)
+        .where((t) => _person.isEmpty || t.employeeId == _person || (t.isWithDriver && t.driverId == _person))
+        .toList();
     final km = list.fold<double>(0, (a, t) => a + t.km);
     final cost = list.fold<double>(0, (a, t) => a + _costOf(t));
     final taxi = list.where((t) => t.isTaxi).fold<double>(0, (a, t) => a + _costOf(t));
@@ -122,12 +280,40 @@ class _TripsTabState extends State<TripsTab> {
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: [
-          for (final p in const [('today', 'Today'), ('yday', 'Yesterday'), ('7', '7 days'), ('month', 'This month'), ('last', 'Last month')])
+          for (final p in const [('today', 'Today'), ('yday', 'Yesterday'), ('7', '7 days'), ('month', 'This month'), ('last', 'Last month'), ('all', 'All days')])
             chip(p.$2, _period == p.$1, () {
               _period = p.$1;
               _load();
             }),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              avatar: const Icon(Icons.date_range, size: 18),
+              label: Text(_period == 'pick' ? _periodLabel() : 'Pick dates'),
+              selected: _period == 'pick',
+              onSelected: (_) => _pickDates(),
+            ),
+          ),
         ]),
+      ),
+      const SizedBox(height: 6),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: DropdownButtonFormField<String>(
+            value: _person,
+            isExpanded: true,
+            decoration: const InputDecoration(
+                isDense: true, labelText: 'Person / driver / provider', prefixIcon: Icon(Icons.person_search_outlined)),
+            items: [
+              const DropdownMenuItem(value: '', child: Text('Everyone')),
+              for (final e in (people.entries.toList()..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()))))
+                DropdownMenuItem(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: (v) => setState(() => _person = v ?? ''),
+          ),
+        ),
       ),
       const SizedBox(height: 6),
       SingleChildScrollView(
@@ -170,16 +356,17 @@ class _TripsTabState extends State<TripsTab> {
     } else if (_loading) {
       body = [const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator()))];
     } else if (_view == 'acct') {
-      body = [_Accounts(me: widget.me, live: widget.live)];
+      body = [_Accounts(me: widget.me, live: widget.live, drivers: _drivers)];
     } else if (list.isEmpty) {
       body = [const Card(child: EmptyState(icon: Icons.route_outlined, title: 'No trips or rides in this period'))];
     } else if (_view == 'site') {
       body = [_groupCard(list, (t) => t.siteId.isNotEmpty ? t.siteId : (t.isActive ? t.startSiteId : ''),
           (t) => t.siteName.isNotEmpty ? t.siteName : (t.isActive && t.startSiteName.isNotEmpty ? t.startSiteName : 'Not at a site'), Icons.location_city)];
     } else if (_view == 'person') {
-      body = [_groupCard(list, (t) => t.employeeId, (t) => t.employeeName, Icons.person)];
+      // Rides with a driver / transport provider count under that driver (his account), not the passenger.
+      body = [_groupCard(list, _ownerId, _ownerName, Icons.person)];
     } else {
-      body = [for (final t in list) _tripTile(t)];
+      body = [if (_money) _statementCard(list), for (final t in list) _tripTile(t)];
     }
 
     return LayoutBuilder(builder: (context, c) {
@@ -205,11 +392,11 @@ class _TripsTabState extends State<TripsTab> {
           padding: const EdgeInsets.all(12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Avatar(t.employeeName, size: 34, ring: t.isActive ? AppColors.success : _purple),
+              Avatar(_ownerName(t), size: 34, ring: t.isActive ? AppColors.success : _purple),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(t.employeeName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text(_ownerName(t), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
                   Row(children: [
                     Icon(t.isTaxi ? Icons.local_taxi : (t.isWithDriver ? Icons.directions_car : Icons.local_shipping), size: 14, color: _purple),
                     const SizedBox(width: 4),
@@ -330,10 +517,10 @@ class _TripsTabState extends State<TripsTab> {
     final user = widget.live.userById(t.employeeId);
     final cur = t.isTaxi ? (t.isRta ? 'rta' : 'taxi') : t.isWithDriver ? 'wd:${t.driverId}' : 'driver';
     var type = cur;
-    final drivers = widget.live.users.where((u) => u.isDriver && u.active && u.id != t.employeeId).toList();
+    final drivers = _drivers.where((u) => u.id != t.employeeId).toList();
     if (t.isWithDriver && t.driverId.isNotEmpty && !drivers.any((d) => d.id == t.driverId)) {
-      final d = widget.live.userById(t.driverId);
-      if (d != null) drivers.add(d);
+      drivers.add(widget.live.userById(t.driverId) ??
+          AppUser(id: t.driverId, name: t.driverName.isEmpty ? 'Driver' : t.driverName, loginId: '', email: '', isDriver: true));
     }
     // Taxi company: pick from the list, plus an optional taxi number.
     final known = <String>[...kTaxiCompanies];
@@ -382,7 +569,7 @@ class _TripsTabState extends State<TripsTab> {
                     if (type != cur) {
                       if (type.startsWith('wd:')) {
                         costC.text = '';
-                        vehC.text = widget.live.userById(type.substring(3))?.vehicle ?? '';
+                        vehC.text = drivers.where((d) => d.id == type.substring(3)).firstOrNull?.vehicle ?? '';
                       } else if (type == 'driver') {
                         final km = double.tryParse(kmC.text.trim()) ?? 0;
                         costC.text = (km * (rateFor('driver') ?? 0)).toStringAsFixed(2);
@@ -500,7 +687,7 @@ class _TripsTabState extends State<TripsTab> {
         note: noteC.text.trim(),
         by: widget.me,
         type: type.startsWith('wd:') ? 'wd' : type,
-        driver: type.startsWith('wd:') ? widget.live.userById(type.substring(3)) : null,
+        driver: type.startsWith('wd:') ? drivers.where((d) => d.id == type.substring(3)).firstOrNull : null,
         vehicle: vehicle,
         ratePerKm: rateFor(type),
       );
@@ -742,7 +929,8 @@ class _RouteMapState extends State<_RouteMap> {
 class _Accounts extends StatefulWidget {
   final AppUser me;
   final AdminLive live;
-  const _Accounts({required this.me, required this.live});
+  final List<AppUser> drivers;
+  const _Accounts({required this.me, required this.live, required this.drivers});
   @override
   State<_Accounts> createState() => _AccountsState();
 }
@@ -825,7 +1013,11 @@ class _AccountsState extends State<_Accounts> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) return const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator()));
-    final drivers = widget.live.users.where((u) => u.isDriver).toList();
+    // Staff drivers (also inactive ones with history) + external workers who drive.
+    final drivers = [
+      ...widget.live.users.where((u) => u.isDriver),
+      ...widget.drivers.where((d) => !widget.live.users.any((u) => u.id == d.id)),
+    ];
     if (drivers.isEmpty) return const Card(child: EmptyState(icon: Icons.no_crash_outlined, title: 'No drivers yet'));
     final rows = drivers.map((u) {
       // Driver's own trips + staff rides with this driver (costed at the driver's rate).

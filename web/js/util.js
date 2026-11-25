@@ -195,3 +195,23 @@ export function friendlyError(e) {
   };
   return map[code] || e?.message || String(e);
 }
+
+/**
+ * Remembered login (Chrome / Edge password manager via the Credential Management API).
+ * After a sign-out, "Sign in as …" signs in again with one click; other browsers fall back to their own password autofill.
+ */
+export const savedLogin = {
+  ok: () => typeof window !== 'undefined' && 'PasswordCredential' in window && !!navigator.credentials,
+  async store(id, password) {
+    try { if (this.ok() && id && password) await navigator.credentials.store(new window.PasswordCredential({ id: id.trim(), password, name: id.trim() })); } catch { /* */ }
+  },
+  /** silent: only when the browser can sign in without asking (not after a sign-out). */
+  async get(silent = false) {
+    try {
+      if (!this.ok()) return null;
+      const c = await navigator.credentials.get({ password: true, mediation: silent ? 'silent' : 'optional' });
+      return c && c.password ? c : null;
+    } catch { return null; }
+  },
+  async signedOut() { try { await navigator.credentials?.preventSilentAccess?.(); } catch { /* */ } },
+};

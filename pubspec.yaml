@@ -1,7 +1,7 @@
 name: attendance_pro
 description: Field staff attendance with GPS check-in/out, site scheduling, site updates, petty cash and a live management dashboard.
 publish_to: 'none'
-version: 1.13.14+64
+version: 1.13.15+65
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -43,6 +43,9 @@ dependencies:
   # Reminders for service visits (evening before + 1 hour before), even when the app is closed
   flutter_local_notifications: ^18.0.1
   timezone: ^0.10.0
+
+  # Remembered logins (encrypted on the phone) for one-tap sign-in after signing out
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:

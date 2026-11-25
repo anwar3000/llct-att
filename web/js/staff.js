@@ -11,7 +11,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   esc, icon, avatar, pill, toast, modal, confirmBox, friendlyError, fmtTime, fmtDate, fmtDay, fmtMins, fmtMoney, fmtMonth,
-  dateKey, monthKey, parseKey, b64img, photoViewer, CURRENCY,
+  dateKey, monthKey, parseKey, b64img, photoViewer, CURRENCY, savedLogin,
 } from './util.js';
 import { scanWizard, slotListHtml, wireSlotList, b64ToBlob, pdfThumb } from './iddocs.js';
 
@@ -96,15 +96,28 @@ function renderLogin(error = '') {
       <input name="pw" type="password" placeholder="Password" autocomplete="current-password" required>
       <div class="error">${esc(error)}</div>
       <button class="st-btn primary" type="submit">Sign in</button>
+      ${savedLogin.ok() ? '<button class="st-btn" type="button" id="saved-in" style="margin-top:8px">🔑 Sign in with saved login</button>' : ''}
     </form>
     ${isIOS && !standalone ? `<div class="st-hint">${icon('download', 16)} Tip: tap <b>Share</b> <span class="ios-share">⬆︎</span> then <b>Add to Home Screen</b> to install this app.</div>` : ''}
   </div>`;
   const f = document.getElementById('lf');
-  f.onsubmit = async (e) => {
-    e.preventDefault();
-    const b = f.querySelector('button'); b.disabled = true; b.textContent = 'Signing in…';
-    try { await login(f.id.value, f.pw.value); } catch (err) { renderLogin(friendlyError(err)); }
+  let last = '';
+  try { last = localStorage.getItem('lastLogin') || ''; } catch { /* */ }
+  if (last) f.id.value = last;
+  const go = async (id, pw) => {
+    const b = f.querySelector('button[type=submit]'); b.disabled = true; b.textContent = 'Signing in…';
+    try {
+      await login(id, pw);
+      try { localStorage.setItem('lastLogin', id.trim()); } catch { /* */ }
+      savedLogin.store(id, pw);
+    } catch (err) { renderLogin(friendlyError(err)); }
   };
+  f.onsubmit = (e) => { e.preventDefault(); go(f.id.value, f.pw.value); };
+  document.getElementById('saved-in')?.addEventListener('click', async () => {
+    const c = await savedLogin.get(false);
+    if (c) go(c.id, c.password); else f.id.focus();
+  });
+  if (!error) savedLogin.get(true).then((c) => { if (c && document.getElementById('lf') === f) go(c.id, c.password); });
 }
 
 let loginError = '';
@@ -120,7 +133,7 @@ onAuthStateChanged(auth, async (user) => {
       app.innerHTML = `<div class="st-login"><img src="img/logo.png" class="st-logo"><h1>Management login</h1>
         <p>This is the staff app. Open the management dashboard instead.</p>
         <a class="st-btn primary" href="index.html">Open dashboard</a><button class="st-btn" id="so">Sign out</button></div>`;
-      document.getElementById('so').onclick = () => logout();
+      document.getElementById('so').onclick = async () => { await savedLogin.signedOut(); logout(); };
       return;
     }
     S.me = me; store.me = me;
@@ -568,8 +581,9 @@ function startRide() {
         const box = el.querySelector('#rd-list');
         box.innerHTML = '<div class="small muted">Loading drivers…</div>';
         try {
-          const snap = await getDocs(query(C('users'), where('isDriver', '==', true)));
-          const ds = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.active !== false).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          const [snap, ext] = await Promise.all([getDocs(query(C('users'), where('isDriver', '==', true))),
+            getDocs(query(C('extWorkers'), where('isDriver', '==', true))).catch(() => ({ docs: [] }))]);
+          const ds = [...snap.docs, ...ext.docs].map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.active !== false).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
           box.innerHTML = ds.length ? `<b class="small">Choose the driver</b><div class="st-pick" style="margin-top:6px">${ds.map((d) => `<a class="st-pick-i" data-d="${d.id}">${avatar(d.name || '?', 32)}<div class="grow"><b>${esc(d.name)}</b><div class="small muted">${esc([d.vehicle, d.phone].filter(Boolean).join(' · '))}</div></div></a>`).join('')}</div>`
             : '<div class="st-note">No drivers registered yet. Ask management.</div>';
           box.querySelectorAll('[data-d]').forEach((a) => {
@@ -1494,6 +1508,7 @@ function drawMe(main) {
   wireSlotList(main, docCtx());
   main.querySelector('#me-out').onclick = async () => {
     if (S.open && !await confirmBox('Sign out?', `You are still checked in at ${S.open.siteName}. Sign out anyway?`, { ok: 'Sign out' })) return;
+    await savedLogin.signedOut();
     logout();
   };
 }

@@ -1,5 +1,5 @@
 import { auth, onAuthStateChanged, login, logout, getMe, store, isAdmin, isLimited, canSeeAccounts, canPushBoq, ROLE_LABEL } from './fb.js';
-import { esc, icon, avatar, friendlyError, dateKey } from './util.js';
+import { esc, icon, avatar, friendlyError, dateKey, savedLogin } from './util.js';
 import { startServiceAlerts, stopServiceAlerts, svcNewCount, onSvcChange } from './svcalert.js';
 import * as dashboard from './pages/dashboard.js';
 import * as livemap from './pages/livemap.js';
@@ -101,19 +101,32 @@ function renderLogin(error = '') {
       <label class="f"><span>Password</span><input name="pw" type="password" autocomplete="current-password" required></label>
       <div class="error">${esc(error)}</div>
       <button class="btn block" type="submit">Sign in</button>
+      ${savedLogin.ok() ? '<button class="btn ghost block" type="button" id="saved-in" style="margin-top:10px">🔑 Sign in with saved login</button>' : ''}
     </form>
   </div>`;
   const form = document.getElementById('login-form');
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const btn = form.querySelector('button');
+  let last = '';
+  try { last = localStorage.getItem('lastLogin') || ''; } catch { /* */ }
+  if (last) { form.id.value = last; form.pw.focus(); }
+  const go = async (id, pw) => {
+    const btn = form.querySelector('button[type=submit]');
     btn.disabled = true; btn.textContent = 'Signing in…';
     try {
-      await login(form.id.value, form.pw.value);
+      await login(id, pw);
+      try { localStorage.setItem('lastLogin', id.trim()); } catch { /* */ }
+      savedLogin.store(id, pw);
     } catch (err) {
       renderLogin(friendlyError(err));
     }
   };
+  form.onsubmit = (e) => { e.preventDefault(); go(form.id.value, form.pw.value); };
+  // One click with the login the browser saved (asks which one if there are several).
+  document.getElementById('saved-in')?.addEventListener('click', async () => {
+    const c = await savedLogin.get(false);
+    if (c) go(c.id, c.password); else form.id.focus();
+  });
+  // Opened fresh (not after signing out): sign straight in if the browser allows it.
+  if (!error) savedLogin.get(true).then((c) => { if (c && document.getElementById('login-form') === form) go(c.id, c.password); });
 }
 
 // ------------------------------------------------------------------ shell
@@ -139,7 +152,7 @@ function renderShell() {
       <div class="content" id="content"></div>
     </div>
   </div>`;
-  document.getElementById('logout').onclick = () => logout();
+  document.getElementById('logout').onclick = async () => { await savedLogin.signedOut(); logout(); };
   document.getElementById('menu').onclick = () => document.getElementById('sidebar').classList.toggle('open');
   wireSearch();
   renderNav();

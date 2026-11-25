@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme.dart';
 import '../../services/auth_service.dart';
@@ -16,7 +17,39 @@ class _LoginScreenState extends State<LoginScreen> {
   final _form = GlobalKey<FormState>();
   bool _busy = false;
   bool _hide = true;
+  bool _remember = true;
   String? _error;
+  List<({String login, String password})> _saved = [];
+
+  @override
+  void initState() {
+    super.initState();
+    SavedLogins.all().then((l) {
+      if (mounted) setState(() => _saved = l);
+    });
+  }
+
+  /// One tap: sign in with a login remembered on this phone.
+  Future<void> _quick(({String login, String password}) s) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await AuthService.signIn(s.login, s.password);
+    } catch (e) {
+      // Password changed since it was saved: let them type it again.
+      if (mounted) {
+        setState(() {
+          _login.text = s.login;
+          _pass.clear();
+          _error = '${AuthService.friendlyError(e)} — enter the password again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -32,7 +65,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      await AuthService.signIn(_login.text, _pass.text);
+      await AuthService.signIn(_login.text, _pass.text, remember: _remember);
+      TextInput.finishAutofillContext();
     } catch (e) {
       if (mounted) setState(() => _error = AuthService.friendlyError(e));
     } finally {
@@ -70,14 +104,48 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text('Check in. Get work done. Go home.',
                       style: TextStyle(color: AppColors.primaryDark.withValues(alpha: 0.75))),
                   const SizedBox(height: 28),
+                  if (_saved.isNotEmpty) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Column(children: [
+                          for (final s in _saved)
+                            ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: AppColors.accent.withValues(alpha: 0.2),
+                                child: Text(s.login.isEmpty ? '?' : s.login[0].toUpperCase(),
+                                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.primaryDark)),
+                              ),
+                              title: Text('Continue as ${s.login}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                              subtitle: const Text('Saved on this phone · one tap'),
+                              onTap: _busy ? null : () => _quick(s),
+                              trailing: IconButton(
+                                tooltip: 'Forget this login',
+                                icon: const Icon(Icons.close, size: 20),
+                                onPressed: () async {
+                                  await SavedLogins.forget(s.login);
+                                  final l = await SavedLogins.all();
+                                  if (mounted) setState(() => _saved = l);
+                                },
+                              ),
+                            ),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text('or sign in with another login', style: TextStyle(color: AppColors.primaryDark.withValues(alpha: 0.75))),
+                    const SizedBox(height: 10),
+                  ],
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(20),
                       child: Form(
                         key: _form,
-                        child: Column(children: [
+                        child: AutofillGroup(
+                          child: Column(children: [
                           TextFormField(
                             controller: _login,
+                            autofillHints: const [AutofillHints.username],
                             textInputAction: TextInputAction.next,
                             autocorrect: false,
                             decoration: const InputDecoration(
@@ -90,6 +158,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 14),
                           TextFormField(
                             controller: _pass,
+                            autofillHints: const [AutofillHints.password],
                             obscureText: _hide,
                             onFieldSubmitted: (_) => _submit(),
                             decoration: InputDecoration(
@@ -102,6 +171,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             validator: (v) =>
                                 (v == null || v.isEmpty) ? 'Enter your password' : null,
+                          ),
+                          CheckboxListTile(
+                            value: _remember,
+                            onChanged: (v) => setState(() => _remember = v ?? true),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: const Text('Remember me on this phone'),
                           ),
                           if (_error != null) ...[
                             const SizedBox(height: 12),
@@ -119,6 +196,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 : const Text('Sign in'),
                           ),
                         ]),
+                        ),
                       ),
                     ),
                   ),

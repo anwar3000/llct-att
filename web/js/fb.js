@@ -160,6 +160,7 @@ export function mapWorker(d) {
     id: d.id, name: m.name || 'Worker', phone: m.phone || '', company: m.company || '', trade: m.trade || '',
     nationality: m.nationality || '', code: m.code || '', active: m.active !== false, createdAt: toDate(m.createdAt),
     addedBy: m.addedByEmployee === true ? (m.createdBy || 'staff') : '',
+    isDriver: m.isDriver === true, vehicle: m.vehicle || '',
   };
 }
 export function mapWorkerLock(d) {
@@ -319,7 +320,7 @@ export async function editTrip(t, { km, ratePerKm, fare, siteId, purpose, vehicl
   if (type === 'taxi' || type === 'rta') {
     Object.assign(data, { kind: 'taxi', mode: type, driverId: '', driverName: '', byOther: false, actualDriver: '', ratePerKm: null, cost: r2(fare ?? t.cost ?? 0) });
   } else if (type.startsWith('wd:')) {
-    const d = store.user(type.slice(3));
+    const d = store.user(type.slice(3)) || store.drivers.find((x) => x.id === type.slice(3));
     Object.assign(data, { kind: 'withDriver', mode: '', driverId: d?.id || t.driverId, driverName: d?.name || t.driverName, ratePerKm: null });
     if (fare != null) Object.assign(data, { cost: r2(fare), costEntered: fare > 0 || t.costEntered === true, chargedBy: store.me?.name || '' });
     else if (cur !== type) Object.assign(data, { cost: 0, costEntered: false });
@@ -798,7 +799,12 @@ export const store = {
     return [...m.values()].sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
   },
   get tripsActive() { return this._tActive; },
-  get drivers() { return this.users.filter((u) => u.isDriver && u.active); },
+  /** Drivers / transport providers: staff drivers plus external workers who also drive (no login; admin enters their charges). */
+  get drivers() {
+    return [...this.users.filter((u) => u.isDriver && u.active),
+      ...this.workers.filter((w) => w.isDriver && w.active).map((w) => ({ id: w.id, name: w.name, phone: w.phone, vehicle: w.vehicle, isDriver: true, external: true, company: w.company }))]
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
   /** External workers on site now — from open attendance entries (works even if a lock is missing). */
   get extOnSite() {
     const m = new Map();
