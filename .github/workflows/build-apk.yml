@@ -139,10 +139,19 @@ jobs:
         run: |
           cp build/app/outputs/flutter-apk/app-release.apk LLCT-Attendance.apk
           ls -la LLCT-Attendance.apk
-          gh release delete apk-latest -y --cleanup-tag 2>/dev/null || true
-          gh release create apk-latest LLCT-Attendance.apk --target "$(git rev-parse HEAD)" \
-            --title "LLCT Attendance — latest" \
-            --notes "Latest build from main: $(git log -1 --pretty=%s | head -c 300)"
+          NOTES="Latest build from main: $(git log -1 --pretty=%s | head -c 300)"
+          # Replace the file in the existing release (deleting and re-creating it can race and fail).
+          if gh release view apk-latest >/dev/null 2>&1; then
+            gh release upload apk-latest LLCT-Attendance.apk --clobber
+            gh release edit apk-latest --notes "$NOTES" --title "LLCT Attendance — latest"
+          else
+            for i in 1 2 3; do
+              gh release create apk-latest LLCT-Attendance.apk --target "$(git rev-parse HEAD)" \
+                --title "LLCT Attendance — latest" --notes "$NOTES" && break
+              sleep 10
+              gh release upload apk-latest LLCT-Attendance.apk --clobber && break
+            done
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
