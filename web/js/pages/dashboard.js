@@ -13,7 +13,7 @@ const RING = { onDuty: '#2E9E6A', done: '#D98A1A', off: '#E08E2B', notIn: '#c5ce
 
 export function mount(el, _params, { setHeader }) {
   const now = new Date();
-  setHeader('Dashboard', now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+  setHeader('Dashboard', 'Everything happening today, at a glance',
     `<a class="btn ghost" href="#/reports">${icon('download', 16)} Reports</a>`);
 
   let chart = null;
@@ -126,7 +126,21 @@ export function mount(el, _params, { setHeader }) {
       [isAdmin() ? store.tripsToApprove.length : 0, 'Trips to approve', (() => { const n = store.tripsToApprove.filter(tripNeedsCharge).length; return n ? `${n} still need the provider's charge` : 'drivers, providers, taxi & RTA'; })(), '#/trips', '#7B4FC9', 'car'],
     ].filter((t) => t[0] > 0);
 
+    const hr = new Date().getHours();
+    const waiting = todo.reduce((a, t) => a + t[0], 0);
     body.innerHTML = `
+    <div class="hero">
+      <div class="hero-txt">
+        <span class="hero-date">${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+        <h2>${hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening'}, ${esc((store.me?.name || '').split(' ')[0])}</h2>
+        <p>${waiting ? `<b>${waiting}</b> item${waiting === 1 ? '' : 's'} waiting for you` : 'All clear — nothing waiting for you'} · <b>${store.open.length + extNow}</b> on site now · <b>${activeSites.size}</b> active site${activeSites.size === 1 ? '' : 's'}</p>
+      </div>
+      <div class="hero-stats">
+        <div><b>${waiting}</b><span>Waiting for you</span></div>
+        <div><b>${store.schedulesToday.length}</b><span>Visits scheduled</span></div>
+        <div><b>${activeProjects.length}</b><span>Active projects</span></div>
+      </div>
+    </div>
     <div class="dash-sec"><h3>To do</h3><span class="small muted">${todo.length ? `${todo.reduce((a, t) => a + t[0], 0)} waiting` : ''}</span></div>
     ${todo.length ? `<div class="todo-grid">${todo.map(([n, label, sub, href, color, ic]) => `<a class="todo" ${href.startsWith('#d-') ? `href="javascript:void 0" data-scroll="${href.slice(1)}"` : `href="${href}"`} style="--tc:${color}">
         <span class="todo-ic">${icon(ic, 18, color)}</span><span class="todo-n">${n}</span><span class="todo-t"><b>${label}</b><span>${esc(sub)}</span></span>${icon('chevron', 14)}</a>`).join('')}</div>`
@@ -323,7 +337,7 @@ export function mount(el, _params, { setHeader }) {
 }
 
 function kpi(label, value, sub, ico, color, nav) {
-  return `<div class="card kpi" ${nav ? `data-nav="${nav}"` : ''}>
+  return `<div class="card kpi" style="--kc:${color}" ${nav ? `data-nav="${nav}"` : ''}>
     <div class="lbl"><span class="ico" style="background:${color}1f;color:${color}">${icon(ico, 16)}</span>${esc(label)}</div>
     <div class="val">${esc(value)}</div><div class="sub">${esc(sub)}</div></div>`;
 }

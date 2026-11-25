@@ -132,7 +132,7 @@ function renderShell() {
     <div class="main">
       <div class="topbar">
         <button class="btn ghost icon menu-btn" id="menu">${icon('menu')}</button>
-        <div class="title"><h1 id="page-title"></h1><div class="muted" id="page-sub"></div></div>
+        <span class="pg-ic" id="page-ic"></span><div class="title"><h1 id="page-title"></h1><div class="muted" id="page-sub"></div></div>
         <div id="page-actions" class="row"></div>
       </div>
       <div id="data-warn"></div>
@@ -268,6 +268,8 @@ function route() {
   renderNav();
   content.innerHTML = '';
   setHeader(entry.label);
+  const pic = document.getElementById('page-ic');
+  if (pic) pic.innerHTML = navIcon(entry.icon);
   try {
     cleanup = entry.page.mount(content, params, { setHeader }) || null;
   } catch (e) {
