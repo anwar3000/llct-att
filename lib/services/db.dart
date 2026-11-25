@@ -886,6 +886,15 @@ class Db {
   static Stream<List<ExtWorker>> allWorkersStream() => extWorkers.snapshots().map((q) =>
       q.docs.map(ExtWorker.fromDoc).toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
 
+  /// One external worker's attendance (newest first) — admin app worker page.
+  static Stream<List<WorkerEntry>> workerHistory(String workerId) => workerAttendance
+      .where('workerId', isEqualTo: workerId)
+      .snapshots()
+      .map((q) => q.docs.map(WorkerEntry.fromDoc).toList()..sort((a, b) => b.checkIn.compareTo(a.checkIn)));
+
+  /// Admin: active / driver flag / vehicle of an external worker.
+  static Future<void> updateWorker(String id, Map<String, dynamic> data) => extWorkers.doc(id).set(data, SetOptions(merge: true));
+
   static Stream<Map<String, dynamic>> myIdInfo(String uid) =>
       idInfo.doc(uid).snapshots().map((d) => d.data() ?? {});
 

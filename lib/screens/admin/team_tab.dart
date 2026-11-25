@@ -10,6 +10,7 @@ import 'employee_detail_screen.dart';
 import 'employee_form.dart';
 import 'id_documents_screen.dart';
 import 'staff_status.dart';
+import 'workers_list.dart';
 
 class TeamTab extends StatefulWidget {
   final AppUser me;
@@ -24,6 +25,7 @@ class _TeamTabState extends State<TeamTab> {
   String _q = '';
   StaffState? _filter;
   bool _extOnly = false;
+  bool _extAll = false;
 
   List<Widget> _extCards({bool onlyOnSite = false}) {
     final ext = widget.live.externalToday.where((x) => !onlyOnSite || x.onSite).toList();
@@ -147,13 +149,31 @@ class _TeamTabState extends State<TeamTab> {
                       label: Text('External today (${widget.live.externalToday.length})'),
                       selected: _extOnly,
                       selectedColor: kExtColor.withValues(alpha: 0.2),
-                      onSelected: (v) => setState(() => _extOnly = v),
+                      onSelected: (v) => setState(() {
+                        _extOnly = v;
+                        if (v) _extAll = false;
+                      }),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: FilterChip(
+                      avatar: const Icon(Icons.engineering, size: 18, color: kExtColor),
+                      label: const Text('All external workers'),
+                      selected: _extAll,
+                      selectedColor: kExtColor.withValues(alpha: 0.2),
+                      onSelected: (v) => setState(() {
+                        _extAll = v;
+                        if (v) _extOnly = false;
+                      }),
                     ),
                   ),
                 ]),
               ),
               const SizedBox(height: 10),
-              if (_extOnly)
+              if (_extAll)
+                ExternalWorkersList(me: widget.me, live: widget.live, query: _q)
+              else if (_extOnly)
                 ..._extCards()
               else if (list.isEmpty)
                 const Card(
@@ -195,9 +215,9 @@ class _TeamTabState extends State<TeamTab> {
                         ),
                       ),
                     )),
-              if (!_extOnly && (_filter == null || _filter == StaffState.onDuty))
+              if (!_extOnly && !_extAll && (_filter == null || _filter == StaffState.onDuty))
                 ..._extCards(onlyOnSite: _filter == StaffState.onDuty),
-              if (drivers.isNotEmpty) ...[
+              if (!_extAll && drivers.isNotEmpty) ...[
                 const SectionTitle('Drivers (taxi)'),
                 ...drivers.map((u) {
                   final trip = live.activeTrips.where((t) => t.employeeId == u.id).firstOrNull;
@@ -220,7 +240,7 @@ class _TeamTabState extends State<TeamTab> {
                   );
                 }),
               ],
-              if (admins.isNotEmpty) ...[
+              if (!_extAll && admins.isNotEmpty) ...[
                 const SectionTitle('Admins & managers'),
                 ...admins.map((u) => Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -237,7 +257,7 @@ class _TeamTabState extends State<TeamTab> {
                       ),
                     )),
               ],
-              if (inactive.isNotEmpty) ...[
+              if (!_extAll && inactive.isNotEmpty) ...[
                 const SectionTitle('Deactivated'),
                 ...inactive.map((u) => Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -276,10 +296,11 @@ class _TeamTabState extends State<TeamTab> {
         padding: const EdgeInsets.only(right: 8),
         child: ChoiceChip(
           label: Text(label),
-          selected: !_extOnly && _filter == v,
+          selected: !_extOnly && !_extAll && _filter == v,
           onSelected: (_) => setState(() {
             _filter = v;
             _extOnly = false;
+            _extAll = false;
           }),
         ),
       );

@@ -99,7 +99,7 @@ String initials(String name) {
 }
 
 /// Shown in the profile sheet so staff can confirm they have the latest app.
-const kAppVersion = '1.13.22';
+const kAppVersion = '1.13.23';
 
 void showSnack(BuildContext context, String msg, {bool error = false}) {
   ScaffoldMessenger.of(context)
