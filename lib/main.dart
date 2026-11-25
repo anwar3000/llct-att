@@ -118,7 +118,7 @@ class _ProfileGateState extends State<_ProfileGate> {
         CurrentUser.me = user;
         if (user.isManagement) return AdminShell(me: user);
         // Driver (taxi) work profile gets its own trips app — no attendance check-in.
-        if (user.isDriver) return DriverShell(me: user);
+        if (user.driverOnly) return DriverShell(me: user);
         return EmployeeShell(me: user);
       },
     );

@@ -108,6 +108,10 @@ class AppUser {
   String get acctMode => isAdmin ? 'admin' : (canEditAccounts ? 'editor' : 'viewer');
   /// Drivers get the Trips feature; their own rate per km overrides the company rate.
   final bool isDriver;
+  /// Driver who also checks in / out like staff (attendance app + driver trips).
+  final bool driverCheckIn;
+  /// Driver work profile without attendance (driver app only).
+  bool get driverOnly => isDriver && !driverCheckIn;
   final double? tripRatePerKm;
   final String vehicle;
   final LiveLocation? lastLocation;
@@ -133,6 +137,7 @@ class AppUser {
     this.canEditAccounts = false,
     this.canAssignService = false,
     this.isDriver = false,
+    this.driverCheckIn = false,
     this.tripRatePerKm,
     this.vehicle = '',
     this.lastLocation,
@@ -174,6 +179,7 @@ class AppUser {
       canEditAccounts: m['canEditAccounts'] == true,
       canAssignService: m['canAssignService'] == true,
       isDriver: m['isDriver'] == true,
+      driverCheckIn: m['driverCheckIn'] == true,
       tripRatePerKm: _dbl(m['tripRatePerKm']),
       vehicle: _str(m['vehicle']),
       lastLocation: LiveLocation.fromMap(m['lastLocation']),

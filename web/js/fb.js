@@ -52,7 +52,7 @@ export function mapUser(d) {
     createdAt: toDate(m.createdAt),
     forceLogoutAt: toDate(m.forceLogoutAt),
     violationsClearedAt: toDate(m.violationsClearedAt),
-    isDriver: m.isDriver === true,
+    isDriver: m.isDriver === true, driverCheckIn: m.driverCheckIn === true,
     canViewIds: m.canViewIds === true,
     canPushBoq: m.canPushBoq === true,
     canViewAccounts: m.canViewAccounts === true,
@@ -831,7 +831,7 @@ export function staffStatuses({ drivers = false } = {}) {
   const now = new Date();
   const today = dateKey(now);
   const order = { onDuty: 0, done: 1, off: 2, notIn: 3 };
-  return store.activeEmployees.filter((u) => drivers || !u.isDriver).map((u) => {
+  return store.activeEmployees.filter((u) => drivers || !u.isDriver || u.driverCheckIn).map((u) => {
     const sessions = store.today.filter((s) => s.employeeId === u.id);
     const open = store.open.find((s) => s.employeeId === u.id) || null;
     const off = u.weeklyOffDays.includes(isoWeekday(now)) ||

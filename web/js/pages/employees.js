@@ -34,7 +34,7 @@ function list(el, { setHeader }) {
       (!ql || [s.user.name, s.user.loginId, s.user.phone, s.user.designation].join(' ').toLowerCase().includes(ql)));
     const staffMgr = store.users.filter((u) => u.role !== 'employee');
     const inactive = store.users.filter((u) => u.role === 'employee' && !u.active);
-    const cnt = (k) => st.filter((s) => s.state === k && !s.user.isDriver).length;
+    const cnt = (k) => st.filter((s) => s.state === k && !(s.user.isDriver && !s.user.driverCheckIn)).length;
     // External workers who worked today (one row each), shown with the staff in orange.
     const extMap = new Map();
     for (const e of store.workersToday) {
@@ -58,7 +58,7 @@ function list(el, { setHeader }) {
         <td><div class="person">${avatar(s.user.name, 32)}<div><div class="nm">${esc(s.user.name)}${s.user.isDriver ? ` <span class="pill purple" title="Driver (taxi) work profile">${icon('car', 11)} Driver</span>` : ''}</div><div class="small muted">${esc(s.user.designation)}</div></div></div></td>
         <td class="mono">${esc(s.user.loginId)}</td><td>${esc(s.user.phone)}</td>
         <td>${s.user.weeklyOffDays.length ? s.user.weeklyOffDays.map((w) => WEEKDAYS[w]).join(', ') : '<span class="muted">Flexible</span>'}</td>
-        <td>${s.user.isDriver ? (store.tripsActive.some((t) => t.employeeId === s.user.id) ? pill('Driving', 'green', true) : pill('Driver', 'purple')) : pill(STATE[s.state][0], STATE[s.state][1], s.state === 'onDuty')}${s.open ? `<div class="small muted">${esc(s.open.siteName)}</div>` : ''}</td>
+        <td>${s.user.isDriver && !s.user.driverCheckIn ? (store.tripsActive.some((t) => t.employeeId === s.user.id) ? pill('Driving', 'green', true) : pill('Driver', 'purple')) : pill(STATE[s.state][0], STATE[s.state][1], s.state === 'onDuty')}${s.open ? `<div class="small muted">${esc(s.open.siteName)}</div>` : ''}</td>
         <td class="num"><b>${s.minutes ? fmtMins(s.minutes) : '—'}</b></td>
         <td>${docsSummaryHtml(s.user.id)}</td>
         <td class="small muted">${s.user.lastLocation ? timeAgo(s.user.lastLocation.at) : '—'}</td></tr>`).join('')
@@ -110,7 +110,8 @@ export function editPerson(u) {
         <option value="docs" ${u?.role === 'docs' ? 'selected' : ''}>Document clerk — Documents Portal only (view / download IDs, send changes for approval)</option></select></label>
       <label class="f full" id="ef-wp"><span>Work profile</span><select name="profile">
         <option value="staff" ${!u?.isDriver ? 'selected' : ''}>Staff — attendance app (check in, workers, updates, petty, taxi rides)</option>
-        <option value="driver" ${u?.isDriver ? 'selected' : ''}>Driver (taxi) — driver app: trips, distance and rate only</option></select></label>
+        <option value="both" ${u?.isDriver && u?.driverCheckIn ? 'selected' : ''}>Staff + driver — check in / out and driver trips (staff can ride with him)</option>
+        <option value="driver" ${u?.isDriver && !u?.driverCheckIn ? 'selected' : ''}>Driver only (taxi) — driver app: trips, distance and rate; no check-in</option></select></label>
       <div class="full" id="ef-off"><label class="f" style="margin-bottom:6px"><span>Weekly off day(s) — none selected = flexible</span></label>
         <div class="chips">${[1, 2, 3, 4, 5, 6, 7].map((w) => `<span class="chip ${off.has(w) ? 'on' : ''}" data-w="${w}">${WEEKDAYS_LONG[w]}</span>`).join('')}</div></div>
       <label class="f" style="margin-top:12px"><span>Off days per month</span><input name="quota" type="number" min="0" max="15" value="${u?.monthlyOffQuota ?? 4}"></label>
@@ -118,7 +119,7 @@ export function editPerson(u) {
       <div class="full" id="ef-drv" style="display:${u?.isDriver ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:12px;background:#f5f0fc;border-radius:10px;padding:10px 12px">
         <label class="f"><span>Vehicle / plate no.</span><input name="vehicle" value="${esc(u?.vehicle)}"></label>
         <label class="f"><span>Rate per km (AED) — empty = company rate (${store.settings.tripRatePerKm || 0})</span><input name="tripRate" type="number" min="0" step="0.01" value="${u?.tripRatePerKm ?? ''}"></label>
-        <div class="small muted" style="grid-column:1/-1">Driver login opens the driver app: Start / Stop trip, GPS distance, rate and trip history. No attendance check-in.</div>
+        <div class="small muted" style="grid-column:1/-1" id="ef-drv-note"></div>
       </div>
       <label class="f row full" id="ef-ids" style="gap:8px;align-items:flex-start;background:#fff4e2;border-radius:10px;padding:10px 12px">
         <input type="checkbox" name="canIds" ${u?.canViewIds ? 'checked' : ''} style="margin-top:3px">
@@ -141,10 +142,13 @@ export function editPerson(u) {
     onMount: (m, close) => {
       const f = m.querySelector('#ef');
       const syncProfile = () => {
-        const emp = f.role.value === 'employee', drv = emp && f.profile.value === 'driver';
+        const emp = f.role.value === 'employee', drv = emp && f.profile.value !== 'staff', only = emp && f.profile.value === 'driver';
         m.querySelector('#ef-wp').style.display = emp ? '' : 'none';
         m.querySelector('#ef-drv').style.display = drv ? 'grid' : 'none';
-        m.querySelector('#ef-off').style.display = drv ? 'none' : '';
+        m.querySelector('#ef-drv-note').textContent = only
+          ? 'Driver login opens the driver app: Start / Stop trip, GPS distance, rate and trip history. No attendance check-in.'
+          : 'Uses the normal staff app (check in / out, workers, updates, petty) plus a Driver button for his own trips and charges. Staff can choose him for rides.';
+        m.querySelector('#ef-off').style.display = only ? 'none' : '';
         m.querySelector('#ef-ids').style.display = f.role.value === 'admin' ? 'none' : '';
         m.querySelector('#ef-boq').style.display = f.role.value === 'admin' ? 'none' : '';
         m.querySelector('#ef-acc').style.display = f.role.value === 'admin' ? 'none' : '';
@@ -165,7 +169,8 @@ export function editPerson(u) {
         const data = {
           name: f.name.value.trim(), phone: f.phone.value.trim(), contactEmail: f.cemail.value.trim(), designation: f.designation.value.trim(), role: f.role.value,
           weeklyOffDays: [...off].sort(), monthlyOffQuota: Number(f.quota.value) || 0,
-          isDriver: f.role.value === 'employee' && f.profile.value === 'driver', vehicle: f.vehicle.value.trim(),
+          isDriver: f.role.value === 'employee' && f.profile.value !== 'staff', driverCheckIn: f.role.value === 'employee' && f.profile.value === 'both',
+          vehicle: f.vehicle.value.trim(),
           tripRatePerKm: f.tripRate.value === '' ? null : Number(f.tripRate.value),
           canViewIds: f.role.value !== 'admin' && f.canIds.checked,
           canPushBoq: f.role.value !== 'admin' && f.canBoq.checked,

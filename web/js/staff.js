@@ -375,7 +375,9 @@ const STAFF_TABS = [['today', 'Today', 'clock'], ['history', 'History', 'calenda
 // Driver (taxi) work profile: a separate app — trips and profile only, no attendance.
 const DRIVER_TABS = [['trips', 'Trips', 'car'], ['me', 'Me', 'idcard']];
 function shell() {
-  const TABS = S.me.isDriver ? DRIVER_TABS : STAFF_TABS;
+  // Staff + driver profile: the normal staff app plus the driver Trips tab.
+  const TABS = S.me.isDriver && !S.me.driverCheckIn ? DRIVER_TABS
+    : S.me.isDriver ? [...STAFF_TABS.slice(0, 4), ['trips', 'Trips', 'car'], STAFF_TABS[4]] : STAFF_TABS;
   if (!TABS.some(([k]) => k === S.tab)) S.tab = TABS[0][0];
   app.innerHTML = `
   <div class="st">

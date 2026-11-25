@@ -27,7 +27,9 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
   late Set<int> _weeklyOff = {...(widget.existing?.weeklyOffDays ?? const [7])};
   late int _quota = widget.existing?.monthlyOffQuota ?? kDefaultMonthlyOffQuota;
   late bool _active = widget.existing?.active ?? true;
-  late bool _driver = widget.existing?.isDriver ?? false;
+  // Work profile: 'staff' | 'driver' (driver app only) | 'both' (check in / out + driver trips).
+  late String _profile = widget.existing?.isDriver != true ? 'staff' : (widget.existing!.driverCheckIn ? 'both' : 'driver');
+  bool get _driver => _profile != 'staff';
   late bool _ids = widget.existing?.canViewIds ?? false;
   late bool _boq = widget.existing?.canPushBoq ?? false;
   late String _acc = (widget.existing?.canEditAccounts ?? false) ? 'edit' : ((widget.existing?.canViewAccounts ?? false) ? 'view' : 'none');
@@ -62,6 +64,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           'monthlyOffQuota': _quota,
           'active': _active,
           'isDriver': _role == 'employee' && _driver,
+          'driverCheckIn': _role == 'employee' && _profile == 'both',
           'canViewIds': _role != 'admin' && _ids,
           'canPushBoq': _role != 'admin' && _boq,
           'canViewAccounts': _role != 'admin' && _acc != 'none',
@@ -87,6 +90,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
         if (_role == 'employee' && _driver) {
           await Db.updateUser(uid, {
             'isDriver': true,
+            'driverCheckIn': _profile == 'both',
             'vehicle': _vehicle.text.trim(),
             'tripRatePerKm': double.tryParse(_rate.text.trim()),
           });
@@ -211,20 +215,23 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
             ),
             if (_role == 'employee') ...[
               _section('Work profile'),
-              SegmentedButton<bool>(
+              SegmentedButton<String>(
                 segments: const [
-                  ButtonSegment(value: false, label: Text('Staff'), icon: Icon(Icons.engineering)),
-                  ButtonSegment(value: true, label: Text('Driver (taxi)'), icon: Icon(Icons.local_taxi)),
+                  ButtonSegment(value: 'staff', label: Text('Staff'), icon: Icon(Icons.engineering)),
+                  ButtonSegment(value: 'both', label: Text('Staff + driver'), icon: Icon(Icons.badge_outlined)),
+                  ButtonSegment(value: 'driver', label: Text('Driver only'), icon: Icon(Icons.local_taxi)),
                 ],
-                selected: {_driver},
-                onSelectionChanged: (v) => setState(() => _driver = v.first),
+                selected: {_profile},
+                onSelectionChanged: (v) => setState(() => _profile = v.first),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  _driver
+                  _profile == 'driver'
                       ? 'Driver app only: Start / Stop trip with GPS distance, paid per km. No attendance check-in.'
-                      : 'Attendance app: check in, workers, site updates, petty cash, and taxi / company-driver rides.',
+                      : _profile == 'both'
+                          ? 'Checks in / out like staff AND works as a driver / transport provider: records driver trips, staff can ride with him, his charges go to his own account.'
+                          : 'Attendance app: check in, workers, site updates, petty cash, and taxi / company-driver rides.',
                   style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
                 ),
               ),
@@ -246,7 +253,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
                 ),
               ],
             ],
-            if (_role == 'employee' && !_driver) ...[
+            if (_role == 'employee' && _profile != 'driver') ...[
               _section('Off days'),
               const Text(
                 'Pick the weekly off day(s) — e.g. Sunday or Friday. '

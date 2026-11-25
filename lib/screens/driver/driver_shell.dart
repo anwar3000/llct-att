@@ -21,7 +21,9 @@ import '../employee/my_documents_screen.dart';
 /// just Start / Stop trip, the driver's rate, and their trips and earnings.
 class DriverShell extends StatefulWidget {
   final AppUser me;
-  const DriverShell({super.key, required this.me});
+  /// Opened from the staff app (staff + driver profile): back arrow instead of the profile / sign-out menu.
+  final bool embedded;
+  const DriverShell({super.key, required this.me, this.embedded = false});
 
   @override
   State<DriverShell> createState() => _DriverShellState();
@@ -43,9 +45,11 @@ class _DriverShellState extends State<DriverShell> {
   void initState() {
     super.initState();
     // Missing mobile / email / passport / Emirates ID? Ask once when the app opens.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ProfilePrompt.maybeAsk(context, widget.me);
-    });
+    if (!widget.embedded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ProfilePrompt.maybeAsk(context, widget.me);
+      });
+    }
     _subs.add(Db.sitesStream(activeOnly: true).listen((l) {
       if (mounted) setState(() => _sites = l);
     }, onError: (_) {}));
@@ -381,7 +385,7 @@ class _DriverShellState extends State<DriverShell> {
           ),
         ]),
         actions: [
-          IconButton(onPressed: _profile, icon: Avatar(me.name, size: 32)),
+          if (!widget.embedded) IconButton(onPressed: _profile, icon: Avatar(me.name, size: 32)),
           const SizedBox(width: 6),
         ],
       ),

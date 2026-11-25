@@ -16,6 +16,7 @@ import '../../widgets/service_alerts.dart';
 import '../admin/accounts_tab.dart';
 import '../admin/company_documents_screen.dart';
 import '../admin/id_documents_screen.dart';
+import '../driver/driver_shell.dart';
 import '../reports/reports_screen.dart';
 import 'history_tab.dart';
 import 'home_tab.dart';
@@ -228,8 +229,15 @@ class _EmployeeShellState extends State<EmployeeShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
+        onDestinationSelected: (i) {
+          // Staff + driver profile: the last button opens the driver trips screen.
+          if (me.isDriver && i == 4) {
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => DriverShell(me: me, embedded: true)));
+            return;
+          }
+          setState(() => _index = i);
+        },
+        destinations: [
           NavigationDestination(
               icon: Icon(Icons.fingerprint), selectedIcon: Icon(Icons.fingerprint), label: 'Today'),
           NavigationDestination(
@@ -244,6 +252,8 @@ class _EmployeeShellState extends State<EmployeeShell> {
               icon: Icon(Icons.account_balance_wallet_outlined),
               selectedIcon: Icon(Icons.account_balance_wallet),
               label: 'Petty'),
+          if (me.isDriver)
+            const NavigationDestination(icon: Icon(Icons.local_shipping_outlined), label: 'Driver'),
         ],
       ),
     ));
