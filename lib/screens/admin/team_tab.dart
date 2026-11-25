@@ -11,6 +11,7 @@ import 'employee_form.dart';
 import 'id_documents_screen.dart';
 import 'staff_status.dart';
 import 'workers_list.dart';
+import 'attendance_sheet_screen.dart';
 
 class TeamTab extends StatefulWidget {
   final AppUser me;
@@ -126,12 +127,15 @@ class _TeamTabState extends State<TeamTab> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                _topBtn('ID docs', Icons.badge_outlined,
+                    () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => IdDocumentsScreen(me: widget.me)))),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 14)),
                   onPressed: () => Navigator.of(context)
-                      .push(MaterialPageRoute(builder: (_) => IdDocumentsScreen(me: widget.me))),
-                  icon: const Icon(Icons.badge_outlined, size: 19),
-                  label: const Text('ID docs'),
+                      .push(MaterialPageRoute(builder: (_) => AttendanceSheetScreen(me: widget.me, live: widget.live))),
+                  icon: const Icon(Icons.summarize_outlined, size: 19),
+                  label: const Text('Report'),
                 ),
               ]),
               const SizedBox(height: 10),
@@ -215,8 +219,12 @@ class _TeamTabState extends State<TeamTab> {
                         ),
                       ),
                     )),
-              if (!_extOnly && !_extAll && (_filter == null || _filter == StaffState.onDuty))
-                ..._extCards(onlyOnSite: _filter == StaffState.onDuty),
+              // All: every registered external worker under the staff; On duty: those on site now.
+              if (!_extOnly && !_extAll && _filter == null) ...[
+                const SizedBox(height: 6),
+                ExternalWorkersList(me: widget.me, live: widget.live, query: _q),
+              ],
+              if (!_extOnly && !_extAll && _filter == StaffState.onDuty) ..._extCards(onlyOnSite: true),
               if (!_extAll && drivers.isNotEmpty) ...[
                 const SectionTitle('Drivers (taxi)'),
                 ...drivers.map((u) {
@@ -291,6 +299,16 @@ class _TeamTabState extends State<TeamTab> {
       }),
     );
   }
+
+  /// Labelled button on wide screens, icon-only on phones (keeps the search box usable).
+  Widget _topBtn(String label, IconData icon, VoidCallback onTap) => _wide
+      ? OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+          onPressed: onTap,
+          icon: Icon(icon, size: 19),
+          label: Text(label),
+        )
+      : IconButton.outlined(tooltip: label, onPressed: onTap, icon: Icon(icon), style: IconButton.styleFrom(minimumSize: const Size(48, 48)));
 
   Widget _f(String label, StaffState? v) => Padding(
         padding: const EdgeInsets.only(right: 8),
