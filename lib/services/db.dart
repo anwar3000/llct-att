@@ -1545,16 +1545,17 @@ class Db {
     }
     for (final d in res[1].docs) {
       final p = DriverPayment.fromDoc(d);
+      if (p.amount <= 0) continue; // driver's exception not yet accepted, or rejected
       out.add(AcctEntry(
         id: 'drv_${d.id}',
         source: 'driver',
         type: 'expense',
         date: p.date,
         amount: p.amount,
-        category: 'Driver payment',
+        category: 'Transport',
         method: p.method.isEmpty ? 'Bank transfer' : p.method,
         party: (d.data()['employeeName'] as String?) ?? '',
-        note: p.note,
+        note: ['Driver payment', p.note].where((x) => x.isNotEmpty).join(' · '),
       ));
     }
     return out;

@@ -636,8 +636,11 @@ export async function autoAcctLines(from, to) {
   }
   for (const d of pays.docs) {
     const p = mapPayment(d);
-    out.push({ id: `drv_${p.id}`, source: 'driver', type: 'expense', date: p.date, amount: p.amount, category: 'Driver payment',
-      method: p.method || 'Bank transfer', reference: '', party: p.employeeName, note: [p.note, p.createdBy ? `by ${p.createdBy}` : ''].filter(Boolean).join(' · '), siteId: '', siteName: '', hasFile: false });
+    if (!(p.amount > 0)) continue; // a driver's exception not yet accepted, or rejected
+    // Paid to a driver / transport provider: expense under Transport, against that person.
+    out.push({ id: `drv_${p.id}`, source: 'driver', type: 'expense', date: p.date, amount: p.amount, category: 'Transport',
+      method: p.method || 'Bank transfer', reference: '', party: p.employeeName,
+      note: ['Driver payment', p.note, p.createdBy ? `by ${p.createdBy}` : ''].filter(Boolean).join(' · '), siteId: '', siteName: '', hasFile: false });
   }
   return out;
 }
