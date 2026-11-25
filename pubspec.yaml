@@ -1,7 +1,7 @@
 name: attendance_pro
 description: Field staff attendance with GPS check-in/out, site scheduling, site updates, petty cash and a live management dashboard.
 publish_to: 'none'
-version: 1.13.18+68
+version: 1.13.19+69
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -46,6 +46,9 @@ dependencies:
 
   # Remembered logins (encrypted on the phone) for one-tap sign-in after signing out
   flutter_secure_storage: ^9.2.2
+
+  # GPS check: notifications and battery (unrestricted) for accurate trip km
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

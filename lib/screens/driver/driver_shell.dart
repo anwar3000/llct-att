@@ -12,6 +12,7 @@ import '../../widgets/common.dart';
 import '../../widgets/ride_charge.dart';
 import '../../widgets/profile_prompt.dart';
 import '../../widgets/trip_card.dart';
+import '../../widgets/gps_check.dart';
 import '../admin/accounts_tab.dart';
 import '../admin/company_documents_screen.dart';
 import '../admin/id_documents_screen.dart';
@@ -254,6 +255,15 @@ class _DriverShellState extends State<DriverShell> {
               icon: const Icon(Icons.business_center_outlined),
               label: const Text('Company documents'),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(c);
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GpsCheckScreen()));
+              },
+              icon: const Icon(Icons.gps_fixed),
+              label: const Text('GPS check (accurate km)'),
+            ),
             if (me.canViewIds) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
@@ -411,6 +421,7 @@ class _DriverShellState extends State<DriverShell> {
     final left = <Widget>[
       header,
       const SizedBox(height: 12),
+      const GpsCheckBanner(),
       TripCard(me: me, sites: _sites),
       const SizedBox(height: 4),
       tally,

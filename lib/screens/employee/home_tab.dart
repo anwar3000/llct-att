@@ -11,6 +11,7 @@ import '../../services/location_service.dart';
 import '../../services/reports_link.dart';
 import '../../services/tracking_service.dart';
 import '../../services/violation_service.dart';
+import '../../widgets/gps_check.dart';
 import '../../widgets/common.dart';
 import '../../widgets/tiles.dart';
 import '../../widgets/ride_card.dart';
@@ -748,6 +749,7 @@ class _HomeTabState extends State<HomeTab> {
         // Unfolded Fold / tablet: check-in side on the left, today's plan and history on the right.
         final wide = c.maxWidth >= 700;
         final left = <Widget>[
+            const GpsCheckBanner(),
             _statusCard(open),
             if (_violationsToday > 0) ...[
               const SizedBox(height: 10),

@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- GPS check: ask to run without battery restrictions so trip GPS isn't stopped -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Camera barcode scanning (mobile_scanner). image_picker asks for this permission
          itself before opening the camera when it is declared, so photos keep working. -->

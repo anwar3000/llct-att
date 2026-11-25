@@ -9,6 +9,7 @@ import '../../services/auth_service.dart';
 import '../../services/db.dart';
 import '../../services/tracking_service.dart';
 import '../../services/trip_service.dart';
+import '../../widgets/gps_check.dart';
 import '../../widgets/common.dart';
 import '../../widgets/missed_signout.dart';
 import '../../widgets/profile_prompt.dart';
@@ -154,6 +155,15 @@ class _EmployeeShellState extends State<EmployeeShell> {
               },
               icon: const Icon(Icons.business_center_outlined),
               label: const Text('Company documents'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(c);
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GpsCheckScreen()));
+              },
+              icon: const Icon(Icons.gps_fixed),
+              label: const Text('GPS check (accurate km)'),
             ),
             if (me.canViewIds) ...[
               const SizedBox(height: 8),
