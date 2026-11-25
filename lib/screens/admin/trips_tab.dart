@@ -336,13 +336,15 @@ class _TripsTabState extends State<TripsTab> {
             color: AppColors.info, sub: 'driving now'),
       ]),
       const SizedBox(height: 10),
+      // Text only, one line: icons made the labels wrap on phones.
       SegmentedButton<String>(
-        style: const ButtonStyle(visualDensity: VisualDensity.compact),
+        showSelectedIcon: false,
+        style: const ButtonStyle(visualDensity: VisualDensity.compact, padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4))),
         segments: [
-          const ButtonSegment(value: 'list', label: Text('Trips'), icon: Icon(Icons.list_alt)),
-          const ButtonSegment(value: 'site', label: Text('By site'), icon: Icon(Icons.location_city_outlined)),
-          const ButtonSegment(value: 'person', label: Text('By person'), icon: Icon(Icons.person_outline)),
-          if (_money) const ButtonSegment(value: 'acct', label: Text('Accounts'), icon: Icon(Icons.account_balance_wallet_outlined)),
+          for (final v in [('list', 'Trips'), ('site', 'Sites'), ('person', 'People'), if (_money) ('acct', 'Accounts')])
+            ButtonSegment(
+                value: v.$1,
+                label: FittedBox(fit: BoxFit.scaleDown, child: Text(v.$2, maxLines: 1, softWrap: false))),
         ],
         selected: {_view},
         onSelectionChanged: (v) => setState(() => _view = v.first),
@@ -974,46 +976,87 @@ class _AccountsState extends State<_Accounts> {
     }
   }
 
-  Future<void> _pay(AppUser d, double balance) async {
-    final amt = TextEditingController(text: balance > 0 ? balance.toStringAsFixed(2) : '');
-    final note = TextEditingController();
-    String method = 'Bank transfer';
-    final ok = await showDialog<bool>(
+  /// New payment to a driver, or (with [p]) change / delete an existing one. Date defaults to today and can be changed.
+  Future<void> _pay(AppUser d, double balance, [DriverPayment? p]) async {
+    final amt = TextEditingController(text: p != null ? p.claimed.toStringAsFixed(2) : (balance > 0 ? balance.toStringAsFixed(2) : ''));
+    final note = TextEditingController(text: p?.note ?? '');
+    String method = p != null && p.method.isNotEmpty ? p.method : 'Bank transfer';
+    var date = p != null && p.date.length == 10 ? parseDateKey(p.date) : DateTime.now();
+    String? err;
+    final res = await showDialog<String>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
-          title: Text('Payment to ${d.name}'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('Balance due: ${fmtMoney(balance)}', style: const TextStyle(color: AppColors.muted)),
-            const SizedBox(height: 10),
-            TextField(controller: amt, keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Amount ($kCurrency)')),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: method,
-              decoration: const InputDecoration(labelText: 'Method'),
-              items: const ['Cash', 'Bank transfer', 'Cheque', 'Other'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-              onChanged: (v) => set(() => method = v ?? 'Bank transfer'),
-            ),
-            const SizedBox(height: 10),
-            TextField(controller: note, decoration: const InputDecoration(labelText: 'Note / reference')),
-          ]),
+          title: Text(p == null ? 'Payment to ${d.name}' : 'Change payment · ${d.name}'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Balance due: ${fmtMoney(balance)}', style: const TextStyle(color: AppColors.muted)),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: amt,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Amount ($kCurrency)', prefixIcon: const Icon(Icons.payments_outlined), errorText: err)),
+              const SizedBox(height: 10),
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () async {
+                  final x = await showDatePicker(context: c, firstDate: DateTime(2023), lastDate: DateTime.now().add(const Duration(days: 60)), initialDate: date);
+                  if (x != null) set(() => date = x);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'Payment date', prefixIcon: Icon(Icons.event)),
+                  child: Text(DateFormat('EEE, d MMM yyyy').format(date), style: const TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                value: method,
+                decoration: const InputDecoration(labelText: 'Method'),
+                items: const ['Cash', 'Bank transfer', 'Cheque', 'Other'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                onChanged: (v) => set(() => method = v ?? 'Bank transfer'),
+              ),
+              const SizedBox(height: 10),
+              TextField(controller: note, decoration: const InputDecoration(labelText: 'Note / reference')),
+            ]),
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(style: kDialogButton, onPressed: () => Navigator.pop(c, true), child: const Text('SAVE')),
+            if (p != null)
+              TextButton(
+                  onPressed: () => Navigator.pop(c, 'delete'),
+                  child: const Text('Delete', style: TextStyle(color: AppColors.danger))),
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            FilledButton(
+              style: kDialogButton,
+              onPressed: () {
+                final v = double.tryParse(amt.text.trim());
+                if (v == null || v <= 0) {
+                  set(() => err = 'Enter the amount');
+                  return;
+                }
+                Navigator.pop(c, 'save');
+              },
+              child: const Text('SAVE'),
+            ),
           ],
         ),
       ),
     );
-    if (ok != true) return;
-    final v = double.tryParse(amt.text.trim());
-    if (v == null || v <= 0) {
-      if (mounted) showSnack(context, 'Enter the amount', error: true);
-      return;
-    }
+    if (res == null) return;
     try {
-      await Db.addDriverPayment(driver: d, amount: v, date: dateKey(DateTime.now()), method: method, note: note.text.trim(), by: widget.me);
-      if (mounted) showSnack(context, 'Payment saved — it shows in ${d.name}\'s app');
+      if (res == 'delete') {
+        if (!mounted || !await confirm(context, 'Delete payment', 'Delete the payment of ${fmtMoney(p!.claimed)} on ${p.date}?', ok: 'Delete', danger: true)) return;
+        await Db.deleteDriverPayment(p.id);
+        if (mounted) showSnack(context, 'Payment deleted');
+        return;
+      }
+      final v = double.parse(amt.text.trim());
+      if (p == null) {
+        await Db.addDriverPayment(driver: d, amount: v, date: dateKey(date), method: method, note: note.text.trim(), by: widget.me);
+        if (mounted) showSnack(context, 'Payment saved — it shows in ${d.name}\'s app and in Accounts (Transport)');
+      } else {
+        await Db.updateDriverPayment(p.id, amount: v, date: dateKey(date), method: method, note: note.text.trim(), by: widget.me);
+        if (mounted) showSnack(context, 'Payment updated');
+      }
     } catch (e) {
       if (mounted) showSnack(context, 'Could not save: $e', error: true);
     }
@@ -1069,8 +1112,10 @@ class _AccountsState extends State<_Accounts> {
                 const SizedBox(width: 6),
                 _box(r.bal >= 0 ? 'Balance' : 'Overpaid', fmtMoney(r.bal.abs()), r.bal > 0 ? AppColors.warning : AppColors.success),
               ]),
-              for (final p in [...r.pays.where((x) => x.isException), ...r.pays.where((x) => !x.isException).take(3)])
-                Padding(
+              for (final p in [...r.pays.where((x) => x.isException), ...r.pays.where((x) => !x.isException).take(5)])
+                InkWell(
+                  onTap: p.isException ? null : () => _pay(r.u, r.bal, p),
+                  child: Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
@@ -1078,7 +1123,7 @@ class _AccountsState extends State<_Accounts> {
                           size: 15, color: p.isException || p.isRejected ? AppColors.danger : AppColors.success),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: Text('${p.date} · ${p.method}${p.note.isEmpty ? '' : ' · ${p.note}'}',
+                        child: Text('${p.date.length == 10 ? DateFormat('d MMM yyyy').format(parseDateKey(p.date)) : p.date} · ${p.method}${p.note.isEmpty ? '' : ' · ${p.note}'}',
                             maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
                       ),
                       Text(fmtMoney(p.claimed),
@@ -1114,6 +1159,7 @@ class _AccountsState extends State<_Accounts> {
                         ]),
                       ),
                   ]),
+                ),
                 ),
             ]),
           ),

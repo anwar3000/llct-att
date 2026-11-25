@@ -1293,6 +1293,17 @@ class Db {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
+  /// Admin corrects a payment (amount, date, method, note).
+  static Future<void> updateDriverPayment(String id, {required double amount, required String date, required String method, required String note, required AppUser by}) =>
+      _fs.collection('driverPayments').doc(id).update({
+        'amount': (amount * 100).round() / 100,
+        'date': date,
+        'method': method,
+        'note': note,
+        'editedBy': by.name,
+        'editedAt': FieldValue.serverTimestamp(),
+      });
+
   static Future<void> deleteDriverPayment(String id) => _fs.collection('driverPayments').doc(id).delete();
 
   /// Management: every trip running now / every trip on a date.
