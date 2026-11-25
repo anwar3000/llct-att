@@ -66,7 +66,7 @@ export function editDialog(u, done) {
       const drawPh = () => {
         m.querySelector('#ue-ph').innerHTML = photos.map((p, i) => `<span style="position:relative;display:inline-block"><img src="${b64img(p)}">
           <button class="btn sm danger icon" data-rm="${i}" title="Remove photo" style="position:absolute;top:2px;right:2px;padding:2px">${icon('close', 12)}</button></span>`).join('');
-        m.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => { photos.splice(Number(b.dataset.rm), 1); drawPh(); }; });
+        m.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = async () => { if (!await confirmBox('Remove photo?', 'Remove this photo from the update?', { ok: 'Remove', danger: true })) return; photos.splice(Number(b.dataset.rm), 1); drawPh(); }; });
       };
       drawPh();
       m.querySelector('[data-x2]').onclick = close;

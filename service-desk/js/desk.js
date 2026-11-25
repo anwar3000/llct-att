@@ -1036,7 +1036,7 @@ async function profileModal(clientId) {
       try { const data = await compressImage(f, 1280, 0.72); await setDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid), { data, by: S.me.id, at: serverTimestamp() }); await syncSitePhoto(clientId, sid, data); box.innerHTML = `<img src="${data}" alt="Building">`; toast('Photo saved'); }
       catch (e2) { toast(friendly(e2), true); }
     };
-    $('#pf-rm', o).onclick = async () => { await deleteDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).catch(() => {}); await syncSitePhoto(clientId, sid, null); box.innerHTML = '<span class="small muted">No photo</span>'; };
+    $('#pf-rm', o).onclick = async () => { if (!confirm('Remove this site photo?')) return; await deleteDoc(doc(db, 'svcClients', clientId, 'sitePhotos', sid)).catch(() => {}); await syncSitePhoto(clientId, sid, null); box.innerHTML = '<span class="small muted">No photo</span>'; };
   };
   draw();
   $('#pf-save', o).onclick = async () => {

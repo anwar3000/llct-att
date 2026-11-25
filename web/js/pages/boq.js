@@ -338,7 +338,7 @@ export function editBoq(b, preset = {}) {
               <td><button type="button" class="btn ghost icon sm" data-rm="${k}" title="Remove">${icon('close', 14)}</button></td></tr>`;
         }).join('') + '<datalist id="boq-units"><option>pcs<option>nos<option>set<option>lot<option>m<option>roll<option>box<option>job</datalist>';
         root.querySelector('#bf-n').textContent = `(${st.items.filter((i) => i.name).length} items)`;
-        tbody.querySelectorAll('[data-rm]').forEach((x) => { x.onclick = () => { read(); st.items.splice(Number(x.dataset.rm), 1); drawRows(); }; });
+        tbody.querySelectorAll('[data-rm]').forEach((x) => { x.onclick = async () => { read(); const it = st.items[Number(x.dataset.rm)]; if (!await confirmBox('Remove line?', `Remove ${it?.name || it?.section || 'this line'} from the BOQ?`, { ok: 'Remove', danger: true })) return; st.items.splice(Number(x.dataset.rm), 1); drawRows(); }; });
         tbody.querySelectorAll('[data-f="name"]').forEach((x) => { x.oninput = () => { root.querySelector('#bf-n').textContent = ''; }; });
       };
       const blankOnly = () => st.items.every((i) => !i.name && !i.desc && !i.section);

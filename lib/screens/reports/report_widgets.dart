@@ -132,7 +132,16 @@ class _ItemEditorState extends State<ItemEditor> {
                     onChanged: (v) => it['name'] = v,
                   ),
           ),
-          if (!widget.compact) IconButton(onPressed: widget.onRemove, icon: const Icon(Icons.delete_outline, color: AppColors.danger)),
+          if (!widget.compact)
+            IconButton(
+              onPressed: () async {
+                final name = '${it['name'] ?? ''}'.trim();
+                if (await confirm(context, 'Remove item?', name.isEmpty ? 'Remove this line from the report?' : 'Remove “$name” from the report?',
+                    ok: 'Remove', danger: true)) {
+                  widget.onRemove();
+                }
+              },
+              icon: const Icon(Icons.delete_outline, color: AppColors.danger)),
         ]),
         if (!widget.compact) ...[
           const SizedBox(height: 6),
