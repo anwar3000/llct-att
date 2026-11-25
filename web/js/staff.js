@@ -519,8 +519,8 @@ function rideCardHtml() {
   if (!t) {
     return `<div class="st-card pad st-ride"><div class="row" style="flex-wrap:nowrap;gap:10px">
       <div class="st-wico" style="background:#f1eafb;color:#7B4FC9">${icon('car', 22)}</div>
-      <div class="grow"><b>Taxi / company driver</b><div class="small muted">Start when you get in, end when you arrive</div></div>
-      <button class="st-btn sm" id="st-ride-start" style="background:#7B4FC9;border-color:#7B4FC9;color:#fff;font-weight:800">START RIDE</button></div></div>`;
+      <div class="grow"><b>${S.me.isDriver ? 'Trip — driving or riding' : 'Taxi / company driver'}</b><div class="small muted">${S.me.isDriver ? 'Driving yourself, or taxi / another driver' : 'Start when you get in, end when you arrive'}</div></div>
+      <button class="st-btn sm" id="st-ride-start" style="background:#7B4FC9;border-color:#7B4FC9;color:#fff;font-weight:800">${S.me.isDriver ? 'START TRIP' : 'START RIDE'}</button></div></div>`;
   }
   const taxi = t.kind === 'taxi';
   const title = taxi ? 'Taxi ride in progress' : t.kind === 'withDriver' ? `Ride with ${esc(t.driverName || 'company driver')}` : 'Trip in progress';
@@ -571,6 +571,23 @@ function drawTrips(main) {
 }
 
 function startRide() {
+  // Staff + driver profile: ask first — driving himself starts his own driver trip.
+  if (S.me.isDriver) {
+    modal({
+      title: 'Are you the driver?',
+      body: '<div class="small">Yes — you are driving: your own driver trip (km and your charge go to your driver account).<br><br>No — you are a passenger: taxi or another company driver.</div>',
+      foot: '<button class="st-btn" data-no style="flex:1">No, ride</button><button class="st-btn primary" data-yes style="flex:1">Yes, I\'m driving</button>',
+      onMount: (el, close) => {
+        el.querySelector('[data-yes]').onclick = () => { close(); startTrip(); };
+        el.querySelector('[data-no]').onclick = () => { close(); pickRide(); };
+      },
+    });
+    return;
+  }
+  pickRide();
+}
+
+function pickRide() {
   modal({
     title: 'How are you travelling?',
     body: `<div class="st-pick">
@@ -585,7 +602,7 @@ function startRide() {
         try {
           const [snap, ext] = await Promise.all([getDocs(query(C('users'), where('isDriver', '==', true))),
             getDocs(query(C('extWorkers'), where('isDriver', '==', true))).catch(() => ({ docs: [] }))]);
-          const ds = [...snap.docs, ...ext.docs].map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.active !== false).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          const ds = [...snap.docs, ...ext.docs].map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.active !== false && d.id !== S.me.id).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
           box.innerHTML = ds.length ? `<b class="small">Choose the driver</b><div class="st-pick" style="margin-top:6px">${ds.map((d) => `<a class="st-pick-i" data-d="${d.id}">${avatar(d.name || '?', 32)}<div class="grow"><b>${esc(d.name)}</b><div class="small muted">${esc([d.vehicle, d.phone].filter(Boolean).join(' · '))}</div></div></a>`).join('')}</div>`
             : '<div class="st-note">No drivers registered yet. Ask management.</div>';
           box.querySelectorAll('[data-d]').forEach((a) => {

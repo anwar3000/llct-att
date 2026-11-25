@@ -72,57 +72,9 @@ class _TripCardState extends State<TripCard> {
   }
 
   Future<void> _start() async {
-    final vehicle = TextEditingController(text: widget.me.vehicle);
-    final purpose = TextEditingController();
-    const presets = ['Pick up workers', 'Drop workers', 'Material delivery', 'Site visit', 'Office'];
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, set) => AlertDialog(
-          title: const Text('Start trip'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              TextField(
-                controller: vehicle,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(labelText: 'Vehicle / plate no.', prefixIcon: Icon(Icons.directions_car)),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: purpose,
-                decoration: const InputDecoration(labelText: 'Purpose', prefixIcon: Icon(Icons.flag_outlined)),
-              ),
-              const SizedBox(height: 8),
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                for (final p in presets)
-                  ActionChip(label: Text(p), onPressed: () => set(() => purpose.text = p)),
-              ]),
-              const SizedBox(height: 10),
-              const Text('Distance is measured by GPS until you tap Stop trip. Keep location on.',
-                  style: TextStyle(fontSize: 12, color: AppColors.muted)),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(style: kDialogButton, onPressed: () => Navigator.pop(c, true), child: const Text('START')),
-          ],
-        ),
-      ),
-    );
-    if (ok != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      await TripService.instance.start(
-        user: widget.me,
-        vehicle: vehicle.text.trim(),
-        purpose: purpose.text.trim(),
-        sites: widget.sites,
-      );
-      if (mounted) showSnack(context, 'Trip started — drive safe.');
-    } on LocationException catch (e) {
-      if (mounted) showSnack(context, e.message, error: true);
-    } catch (e) {
-      if (mounted) showSnack(context, 'Could not start trip: $e', error: true);
+      await startDriverTrip(context, widget.me, widget.sites);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -379,3 +331,58 @@ Future<void> editTripCost(BuildContext context, Trip t) async {
 
 /// Dialog / inline buttons: the app theme makes filled buttons full-width, which breaks rows and dialogs.
 final ButtonStyle kDialogButton = FilledButton.styleFrom(minimumSize: const Size(96, 44), padding: const EdgeInsets.symmetric(horizontal: 18));
+
+/// Driver starts his own trip: vehicle + purpose, then GPS distance until Stop trip.
+Future<void> startDriverTrip(BuildContext context, AppUser me, List<Site> sites) async {
+  final vehicle = TextEditingController(text: me.vehicle);
+  final purpose = TextEditingController();
+  const presets = ['Pick up workers', 'Drop workers', 'Material delivery', 'Site visit', 'Office'];
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, set) => AlertDialog(
+        title: const Text('Start trip'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            TextField(
+              controller: vehicle,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Vehicle / plate no.', prefixIcon: Icon(Icons.directions_car)),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: purpose,
+              decoration: const InputDecoration(labelText: 'Purpose', prefixIcon: Icon(Icons.flag_outlined)),
+            ),
+            const SizedBox(height: 8),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final p in presets)
+                ActionChip(label: Text(p), onPressed: () => set(() => purpose.text = p)),
+            ]),
+            const SizedBox(height: 10),
+            const Text('Distance is measured by GPS until you tap Stop trip. Keep location on.',
+                style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(style: kDialogButton, onPressed: () => Navigator.pop(c, true), child: const Text('START')),
+        ],
+      ),
+    ),
+  );
+  if (ok != true || !context.mounted) return;
+  try {
+    await TripService.instance.start(
+      user: me,
+      vehicle: vehicle.text.trim(),
+      purpose: purpose.text.trim(),
+      sites: sites,
+    );
+    if (context.mounted) showSnack(context, 'Trip started — drive safe.');
+  } on LocationException catch (e) {
+    if (context.mounted) showSnack(context, e.message, error: true);
+  } catch (e) {
+    if (context.mounted) showSnack(context, 'Could not start trip: $e', error: true);
+  }
+}

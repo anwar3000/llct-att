@@ -12,7 +12,7 @@ import '../services/photo_service.dart';
 import '../services/trip_service.dart';
 import 'common.dart';
 import 'tiles.dart';
-import 'trip_card.dart' show kDialogButton;
+import 'trip_card.dart' show kDialogButton, TripCard, startDriverTrip;
 
 /// Below the check-in card for every employee: start / end a ride by taxi or with a company driver.
 /// Employees see only the ride in progress (no history). Taxi fare is entered when the ride ends.
@@ -48,7 +48,40 @@ class _RideCardState extends State<RideCard> {
     super.dispose();
   }
 
+  /// Staff + driver profile: "Are you the driver?" — yes starts his own driver trip, no goes on to the ride choices.
+  Future<bool?> _askDriver() => showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          icon: const Icon(Icons.local_shipping_outlined, color: _rideColor, size: 34),
+          title: const Text('Are you the driver?'),
+          content: const Text('Yes — you are driving: your own driver trip (km and your charge go to your driver account).\n\n'
+              'No — you are a passenger: taxi, RTA or another company driver.'),
+          actionsAlignment: MainAxisAlignment.spaceBetween,
+          actions: [
+            OutlinedButton(onPressed: () => Navigator.pop(c, false), child: const Text('NO, RIDE')),
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: _rideColor, minimumSize: const Size(120, 44)),
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text("YES, I'M DRIVING")),
+          ],
+        ),
+      );
+
   Future<void> _start() async {
+    if (widget.me.isDriver) {
+      final driving = await _askDriver();
+      if (driving == null || !mounted) return;
+      if (driving) {
+        setState(() => _busy = true);
+        try {
+          await startDriverTrip(context, widget.me, widget.sites);
+        } finally {
+          if (mounted) setState(() => _busy = false);
+        }
+        return;
+      }
+    }
+    if (!mounted) return;
     final choice = await showModalBottomSheet<_RideChoice>(
       context: context,
       showDragHandle: true,
@@ -193,6 +226,8 @@ class _RideCardState extends State<RideCard> {
   @override
   Widget build(BuildContext context) {
     final t = _active;
+    // Staff + driver driving his own trip: the full driver trip card (km, cost, stop).
+    if (t != null && !t.isRide && widget.me.isDriver) return TripCard(me: widget.me, sites: widget.sites);
     if (t == null) {
       return Card(
         child: Padding(
@@ -206,12 +241,13 @@ class _RideCardState extends State<RideCard> {
                 child: const Icon(Icons.local_taxi_outlined, color: _rideColor),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Taxi / RTA / company driver', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  SizedBox(height: 2),
-                  Text('Start when you get in, end when you arrive',
-                      style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                  Text(widget.me.isDriver ? 'Trip — driving or riding' : 'Taxi / RTA / company driver',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  const SizedBox(height: 2),
+                  Text(widget.me.isDriver ? 'Driving yourself, or taxi / RTA / another driver' : 'Start when you get in, end when you arrive',
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                 ]),
               ),
             ]),
@@ -222,7 +258,7 @@ class _RideCardState extends State<RideCard> {
                 style: FilledButton.styleFrom(backgroundColor: _rideColor),
                 onPressed: _busy ? null : _start,
                 icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('START RIDE', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                label: Text(widget.me.isDriver ? 'START TRIP' : 'START RIDE', style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5)),
               ),
             ),
           ]),
@@ -385,7 +421,7 @@ class _RidePickerState extends State<_RidePicker> {
                               child: Text('Could not load drivers: ${s.error}', style: const TextStyle(color: AppColors.danger)));
                         }
                         if (!s.hasData) return const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()));
-                        final list = s.data!;
+                        final list = s.data!.where((d) => d.id != CurrentUser.me?.id).toList();
                         if (list.isEmpty) {
                           return const EmptyState(icon: Icons.no_crash_outlined, title: 'No drivers registered', message: 'Ask management to add drivers.');
                         }
