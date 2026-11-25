@@ -1,4 +1,4 @@
-// Driver trips — live trips in progress, daily list with km and cost, route map, admin corrections.
+// Driver trips // Driver trips —  staff rides — live trips in progress, daily list with km and cost, route map, admin corrections.
 import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel,
   tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
