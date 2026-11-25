@@ -328,35 +328,95 @@ class _TripsTabState extends State<TripsTab> {
     final purposeC = TextEditingController(text: t.purpose);
     final noteC = TextEditingController(text: t.note);
     final user = widget.live.userById(t.employeeId);
-    final rate = t.ratePerKm ?? (t.isWithDriver ? widget.live.userById(t.driverId)?.tripRatePerKm : user?.tripRatePerKm);
+    final cur = t.isTaxi ? (t.isRta ? 'rta' : 'taxi') : t.isWithDriver ? 'wd:${t.driverId}' : 'driver';
+    var type = cur;
+    final drivers = widget.live.users.where((u) => u.isDriver && u.active && u.id != t.employeeId).toList();
+    if (t.isWithDriver && t.driverId.isNotEmpty && !drivers.any((d) => d.id == t.driverId)) {
+      final d = widget.live.userById(t.driverId);
+      if (d != null) drivers.add(d);
+    }
+    // Taxi company: pick from the list, plus an optional taxi number.
+    final known = <String>[...kTaxiCompanies];
+    var company = '';
+    final vnoC = TextEditingController();
+    if (t.isTaxi && !t.isRta && t.vehicle.isNotEmpty) {
+      final parts = t.vehicle.split(' · ');
+      if (known.contains(parts.first)) {
+        company = parts.first;
+        vnoC.text = parts.skip(1).join(' · ');
+      } else {
+        vnoC.text = t.vehicle;
+      }
+    }
+    final vehC = TextEditingController(text: t.isTaxi && !t.isRta ? '' : t.vehicle);
     String siteId = t.siteId;
     final sites = widget.live.sites.where((x) => x.approved || x.id == t.siteId).toList();
     String? err;
+    double? rateFor(String ty) => ty == 'driver' ? (t.ratePerKm ?? user?.tripRatePerKm) : null;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
-        builder: (c, set) => AlertDialog(
-          title: Text('Edit ${t.kindLabel.toLowerCase()}'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text('${t.employeeName} · ${fmtDateShort(t.startLocal)}', style: const TextStyle(color: AppColors.muted)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: kmC,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Distance (km)', prefixIcon: Icon(Icons.straighten)),
-              ),
-              const SizedBox(height: 10),
-              ...[
+        builder: (c, set) {
+          final isTaxiType = type == 'taxi' || type == 'rta';
+          final rate = rateFor(type);
+          return AlertDialog(
+            title: const Text('Edit trip'),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text('${t.employeeName} · ${fmtDateShort(t.startLocal)}', style: const TextStyle(color: AppColors.muted)),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: type,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Type of trip', prefixIcon: Icon(Icons.directions_car_outlined)),
+                  items: [
+                    const DropdownMenuItem(value: 'taxi', child: Text('Taxi (staff petty)')),
+                    const DropdownMenuItem(value: 'rta', child: Text('RTA metro / bus (staff petty)')),
+                    for (final d in drivers)
+                      DropdownMenuItem(value: 'wd:${d.id}', child: Text('With ${d.name}', overflow: TextOverflow.ellipsis)),
+                    if (user?.isDriver == true || cur == 'driver')
+                      DropdownMenuItem(value: 'driver', child: Text('${t.employeeName} driving', overflow: TextOverflow.ellipsis)),
+                  ],
+                  onChanged: (v) => set(() {
+                    type = v ?? type;
+                    if (type != cur) {
+                      if (type.startsWith('wd:')) {
+                        costC.text = '';
+                        vehC.text = widget.live.userById(type.substring(3))?.vehicle ?? '';
+                      } else if (type == 'driver') {
+                        final km = double.tryParse(kmC.text.trim()) ?? 0;
+                        costC.text = (km * (rateFor('driver') ?? 0)).toStringAsFixed(2);
+                        vehC.text = user?.vehicle ?? '';
+                      }
+                    }
+                  }),
+                ),
+                if (type != cur && t.pettyId.isNotEmpty && !isTaxiType)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text("${t.employeeName}'s petty cash claim for this trip will be rejected — the driver is paid instead.",
+                        style: const TextStyle(color: AppColors.warning, fontSize: 12)),
+                  ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: kmC,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Distance (km)', prefixIcon: Icon(Icons.straighten)),
+                ),
+                const SizedBox(height: 10),
                 TextField(
                   controller: costC,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
-                      labelText: t.isTaxi ? 'Taxi fare ($kCurrency)' : 'Cost ($kCurrency)',
+                      labelText: isTaxiType
+                          ? (type == 'rta' ? 'Ticket / fare ($kCurrency)' : 'Taxi fare ($kCurrency)')
+                          : type.startsWith('wd:')
+                              ? "Provider's charge ($kCurrency) — blank if not yet"
+                              : 'Cost ($kCurrency)',
                       prefixIcon: const Icon(Icons.payments_outlined),
                       errorText: err),
                 ),
-                if (!t.isTaxi && rate != null && rate > 0)
+                if (type == 'driver' && rate != null && rate > 0)
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
@@ -367,53 +427,82 @@ class _TripsTabState extends State<TripsTab> {
                       child: Text('Use km × ${fmtMoney(rate)}/km'),
                     ),
                   ),
-                const SizedBox(height: 6),
-              ],
-              DropdownButtonFormField<String>(
-                value: sites.any((x) => x.id == siteId) ? siteId : '',
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Charge to site', prefixIcon: Icon(Icons.location_city_outlined)),
-                items: [
-                  const DropdownMenuItem(value: '', child: Text('— No site —')),
-                  for (final x in sites) DropdownMenuItem(value: x.id, child: Text(x.name, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) => set(() => siteId = v ?? ''),
-              ),
-              const SizedBox(height: 10),
-              TextField(controller: purposeC, decoration: const InputDecoration(labelText: 'Purpose')),
-              const SizedBox(height: 10),
-              TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Note (reason for change)')),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(
-              style: kDialogButton,
-              onPressed: () {
-                final km = double.tryParse(kmC.text.trim());
-                final cost = double.tryParse(costC.text.trim());
-                if (km == null || km < 0 || cost == null || cost < 0) {
-                  set(() => err = 'Enter valid numbers');
-                  return;
-                }
-                Navigator.pop(c, true);
-              },
-              child: const Text('SAVE'),
+                const SizedBox(height: 10),
+                if (type == 'taxi') ...[
+                  DropdownButtonFormField<String>(
+                    value: company,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Taxi company', prefixIcon: Icon(Icons.local_taxi_outlined)),
+                    items: [
+                      const DropdownMenuItem(value: '', child: Text('— Choose —')),
+                      for (final k in known) DropdownMenuItem(value: k, child: Text(k)),
+                    ],
+                    onChanged: (v) => set(() => company = v ?? ''),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(controller: vnoC, decoration: const InputDecoration(labelText: 'Taxi no. (optional)', prefixIcon: Icon(Icons.numbers))),
+                ] else
+                  TextField(
+                    controller: vehC,
+                    decoration: InputDecoration(
+                        labelText: type == 'rta' ? 'Line / card (optional)' : 'Vehicle', prefixIcon: const Icon(Icons.directions_car_filled_outlined)),
+                  ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: sites.any((x) => x.id == siteId) ? siteId : '',
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Charge to site', prefixIcon: Icon(Icons.location_city_outlined)),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('— No site —')),
+                    for (final x in sites) DropdownMenuItem(value: x.id, child: Text(x.name, overflow: TextOverflow.ellipsis)),
+                  ],
+                  onChanged: (v) => set(() => siteId = v ?? ''),
+                ),
+                const SizedBox(height: 10),
+                TextField(controller: purposeC, decoration: const InputDecoration(labelText: 'Purpose')),
+                const SizedBox(height: 10),
+                TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Note (reason for change)')),
+              ]),
             ),
-          ],
-        ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+              FilledButton(
+                style: kDialogButton,
+                onPressed: () {
+                  final km = double.tryParse(kmC.text.trim());
+                  final txt = costC.text.trim();
+                  final cost = txt.isEmpty && type.startsWith('wd:') ? 0.0 : double.tryParse(txt);
+                  if (km == null || km < 0 || cost == null || cost < 0) {
+                    set(() => err = 'Enter valid numbers');
+                    return;
+                  }
+                  Navigator.pop(c, true);
+                },
+                child: const Text('SAVE'),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (ok != true) return;
+    final txt = costC.text.trim();
+    final vehicle = type == 'taxi'
+        ? [company, vnoC.text.trim()].where((x) => x.isNotEmpty).join(' · ')
+        : vehC.text.trim();
     try {
       await Db.adminEditTrip(
         trip: t,
         km: double.parse(kmC.text.trim()),
-        cost: double.parse(costC.text.trim()),
+        cost: txt.isEmpty ? 0 : double.parse(txt),
         site: widget.live.siteById(siteId),
         purpose: purposeC.text.trim(),
         note: noteC.text.trim(),
         by: widget.me,
+        type: type.startsWith('wd:') ? 'wd' : type,
+        driver: type.startsWith('wd:') ? widget.live.userById(type.substring(3)) : null,
+        vehicle: vehicle,
+        ratePerKm: rateFor(type),
       );
       if (mounted) showSnack(context, 'Trip updated');
     } catch (e) {

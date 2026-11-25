@@ -1122,6 +1122,8 @@ class Db {
   }
 
   /// Admin correction of a trip / ride. Keeps the GPS distance it replaced the first time.
+  /// [type] changes what the trip was: 'taxi', 'rta', 'driver' (own driving trip) or 'wd' (ride with [driver]).
+  /// The staff member's taxi petty claim follows: rejected when it is no longer a taxi / RTA, else fare updated.
   static Future<void> adminEditTrip({
     required Trip trip,
     required double km,
@@ -1130,18 +1132,56 @@ class Db {
     required String purpose,
     required String note,
     required AppUser by,
-  }) {
-    return trips.doc(trip.id).update({
+    String? type,
+    AppUser? driver,
+    String? vehicle,
+    double? ratePerKm,
+  }) async {
+    final cur = trip.isTaxi ? (trip.isRta ? 'rta' : 'taxi') : trip.isWithDriver ? 'wd' : 'driver';
+    final ty = type ?? cur;
+    final c2 = (cost * 100).round() / 100;
+    final data = <String, dynamic>{
       'distanceM': (km * 1000).round(),
-      'cost': (cost * 100).round() / 100,
+      'cost': c2,
       'siteId': site?.id ?? '',
       'siteName': site?.name ?? '',
       'purpose': purpose,
       'note': note,
+      if (vehicle != null) 'vehicle': vehicle,
       'editedAt': FieldValue.serverTimestamp(),
       'editedBy': by.name,
       if ((km * 1000).round() != trip.distanceM.round()) 'originalDistanceM': trip.distanceM,
-    });
+    };
+    if (ty == 'taxi' || ty == 'rta') {
+      data.addAll({'kind': 'taxi', 'mode': ty, 'driverId': '', 'driverName': '', 'byOther': false, 'actualDriver': '', 'ratePerKm': null});
+    } else if (ty == 'wd') {
+      data.addAll({
+        'kind': 'withDriver', 'mode': '', 'ratePerKm': null,
+        'driverId': driver?.id ?? trip.driverId, 'driverName': driver?.name ?? trip.driverName,
+        'costEntered': c2 > 0 || (cur == 'wd' && trip.costEntered),
+        if (c2 > 0) 'chargedBy': by.name,
+      });
+    } else {
+      data.addAll({'kind': 'driver', 'mode': '', 'driverId': '', 'driverName': '', if (ratePerKm != null) 'ratePerKm': ratePerKm});
+    }
+    final b = _fs.batch();
+    b.update(trips.doc(trip.id), data);
+    if (trip.pettyId.isNotEmpty) {
+      if (data['kind'] != 'taxi') {
+        b.update(petty.doc(trip.pettyId), {
+          'status': 'rejected',
+          'reviewedBy': by.name,
+          'reviewedAt': FieldValue.serverTimestamp(),
+          'note': 'Trip changed to ${ty == 'wd' ? 'company driver ${data['driverName']}' : 'driver trip'} — not a staff expense',
+        });
+      } else {
+        final p = await petty.doc(trip.pettyId).get();
+        if ((p.data()?['status'] ?? 'pending') == 'pending') {
+          b.update(petty.doc(trip.pettyId), {'amount': c2, 'category': ty == 'rta' ? 'Transport - RTA' : 'Transport - Taxi'});
+        }
+      }
+    }
+    await b.commit();
   }
 
   /// Ends a trip someone forgot to stop, at its last GPS point.

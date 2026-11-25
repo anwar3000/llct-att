@@ -1270,6 +1270,9 @@ class Trip {
 /// Trips from this day on need admin approval; earlier ones count as approved.
 const kTripApprovalFrom = '2026-11-25';
 
+/// Taxi companies offered when editing a taxi trip.
+const kTaxiCompanies = ['Dubai Taxi (RTA)', 'Careem', 'Uber', 'Arabia Taxi', 'Cars Taxi', 'National Taxi', 'City Taxi', 'Hala', 'Sharjah Taxi', 'Abu Dhabi Taxi'];
+
 /// Money paid to a driver by admin. Balance = trip costs − payments.
 class DriverPayment {
   final String id;

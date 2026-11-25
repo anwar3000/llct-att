@@ -299,19 +299,48 @@ export async function tripPoints(id) {
     .sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 /** Admin correction: distance, rate, charged site, purpose. Cost is recalculated. */
-export async function editTrip(t, { km, ratePerKm, fare, siteId, purpose, vehicle, note }) {
+/** Taxi companies offered in the trip editor (plus any typed before). */
+export const TAXI_COMPANIES = ['Dubai Taxi (RTA)', 'Careem', 'Uber', 'Arabia Taxi', 'Cars Taxi', 'National Taxi', 'City Taxi', 'Hala', 'Sharjah Taxi', 'Abu Dhabi Taxi'];
+/**
+ * Admin correction of a trip. `type` changes what it was: 'taxi' | 'rta' | 'driver' (own driving trip) | 'wd:<driverId>' (ride with a
+ * company driver / transport provider). `fare` is the cost typed (taxi fare, or the driver's charge for a ride).
+ */
+export async function editTrip(t, { km, ratePerKm, fare, siteId, purpose, vehicle, note, type }) {
   const site = siteId ? store.site(siteId) : null;
-  const rate = t.kind !== 'taxi' ? (ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.kind === 'withDriver' ? t.driverId : t.employeeId))) : null;
-  // Taxi: fare. Driver trip / ride with driver: the cost typed in the edit box (defaults to km × rate).
-  const cost = fare != null ? Math.round(fare * 100) / 100 : t.kind === 'taxi' ? (t.cost ?? 0) : Math.round(km * rate * 100) / 100;
+  const cur = t.kind === 'taxi' ? (t.mode === 'rta' ? 'rta' : 'taxi') : t.kind === 'withDriver' ? `wd:${t.driverId}` : 'driver';
+  type = type || cur;
+  const r2 = (v) => Math.round(v * 100) / 100;
   const data = {
-    distanceM: Math.round(km * 1000), ratePerKm: rate, cost,
+    distanceM: Math.round(km * 1000),
     siteId: siteId || '', siteName: site?.name || (siteId ? t.siteName : ''),
     purpose: purpose ?? t.purpose, vehicle: vehicle ?? t.vehicle, note: note ?? t.note,
     editedAt: serverTimestamp(), editedBy: store.me?.name || '',
   };
+  if (type === 'taxi' || type === 'rta') {
+    Object.assign(data, { kind: 'taxi', mode: type, driverId: '', driverName: '', byOther: false, actualDriver: '', ratePerKm: null, cost: r2(fare ?? t.cost ?? 0) });
+  } else if (type.startsWith('wd:')) {
+    const d = store.user(type.slice(3));
+    Object.assign(data, { kind: 'withDriver', mode: '', driverId: d?.id || t.driverId, driverName: d?.name || t.driverName, ratePerKm: null });
+    if (fare != null) Object.assign(data, { cost: r2(fare), costEntered: fare > 0 || t.costEntered === true, chargedBy: store.me?.name || '' });
+    else if (cur !== type) Object.assign(data, { cost: 0, costEntered: false });
+  } else {
+    const rate = ratePerKm != null ? ratePerKm : (t.ratePerKm ?? tripRateFor(t.employeeId));
+    Object.assign(data, { kind: 'driver', mode: '', driverId: '', driverName: '', ratePerKm: rate, cost: fare != null ? r2(fare) : r2(km * rate) });
+  }
   if (t.originalDistanceM == null) data.originalDistanceM = t.distanceM;
-  return updateDoc(doc(db, 'trips', t.id), data);
+  const b = writeBatch(db);
+  b.update(doc(db, 'trips', t.id), data);
+  // The staff member's petty cash claim follows the trip: dropped when it is no longer a taxi / RTA, else fare and category updated.
+  if (t.pettyId) {
+    const pt = store.petty.find((x) => x.id === t.pettyId) || store.pendingPetty.find((x) => x.id === t.pettyId);
+    if (data.kind !== 'taxi') {
+      b.update(doc(db, 'petty', t.pettyId), { status: 'rejected', reviewedBy: store.me?.name || '', reviewedAt: serverTimestamp(),
+        note: `${pt?.note ? pt.note + ' · ' : ''}Trip changed to ${data.driverName ? 'company driver ' + data.driverName : 'driver trip'} — not a staff expense` });
+    } else if (!pt || pt.status === 'pending') {
+      b.update(doc(db, 'petty', t.pettyId), { amount: data.cost, category: data.mode === 'rta' ? 'Transport - RTA' : 'Transport - Taxi' });
+    }
+  }
+  return b.commit();
 }
 /** Ends a trip the driver forgot to stop (at the last GPS point). */
 export async function endTripNow(t) {

@@ -1,6 +1,6 @@
 // Driver trips and staff rides — live trips in progress, daily list with km and cost, route map, admin corrections.
 import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel,
-  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap } from '../fb.js';
+  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError, parseKey } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -320,36 +320,78 @@ export async function routeDialog(t) {
 }
 
 function editDialog(t, onDone) {
+  const cur = t.kind === 'taxi' ? (t.mode === 'rta' ? 'rta' : 'taxi') : t.kind === 'withDriver' ? `wd:${t.driverId}` : 'driver';
+  const emp = store.user(t.employeeId);
+  const providers = store.drivers.filter((d) => d.id !== t.employeeId);
+  if (t.kind === 'withDriver' && t.driverId && !providers.some((d) => d.id === t.driverId)) providers.push({ id: t.driverId, name: t.driverName || 'Driver' });
+  const companies = [...new Set([...TAXI_COMPANIES, ...(store.tripsRecent || []).filter((x) => x.kind === 'taxi' && x.vehicle).map((x) => x.vehicle)])];
   modal({
-    title: `Edit ${tripKindLabel(t).toLowerCase()}`,
-    body: `<div class="small muted" style="margin-bottom:10px">${esc(t.employeeName)} · ${esc(t.date)} · GPS measured ${(t.originalDistanceM ?? t.distanceM) / 1000 > 0 ? ((t.originalDistanceM ?? t.distanceM) / 1000).toFixed(2) : '0'} km</div>
-      <div class="grid cols-2" style="gap:10px">
-        <label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${tripKm(t).toFixed(2)}"></label>
-        ${t.kind === 'taxi' ? `<label class="f"><span>Taxi fare (AED)</span><input id="et-fare" type="number" min="0" step="0.01" value="${t.cost ?? 0}"></label>`
-          : `<label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${t.ratePerKm ?? tripRateFor(t.kind === 'withDriver' ? t.driverId : t.employeeId)}"></label>
-             <label class="f"><span>Cost (AED) — km × rate, or type an amount</span><input id="et-costv" type="number" min="0" step="0.01" value="${tripCost(t)}"></label>`}
-        <label class="f"><span>${t.kind === 'taxi' ? 'Taxi no. / company' : 'Vehicle'}</span><input id="et-veh" value="${esc(t.vehicle)}"></label>
-        <label class="f"><span>Purpose</span><input id="et-pur" value="${esc(t.purpose)}"></label>
-      </div>
+    title: 'Edit trip',
+    body: `<div class="small muted" style="margin-bottom:10px">${esc(t.employeeName)} · ${esc(t.date)} · ${esc(`${t.startSiteName || 'GPS'} → ${t.endSiteName || 'GPS'}`)} · GPS measured ${(t.originalDistanceM ?? t.distanceM) / 1000 > 0 ? ((t.originalDistanceM ?? t.distanceM) / 1000).toFixed(2) : '0'} km</div>
+      <label class="f"><span>Type of trip</span><select id="et-type">
+        <optgroup label="Paid by staff (petty cash)"><option value="taxi">Taxi</option><option value="rta">RTA (metro / bus)</option></optgroup>
+        <optgroup label="Company driver / transport provider">${providers.map((d) => `<option value="wd:${d.id}">With ${esc(d.name)}</option>`).join('') || '<option disabled>No drivers set up</option>'}</optgroup>
+        ${emp?.isDriver || t.kind === 'driver' ? `<optgroup label="Own driving"><option value="driver">${esc(t.employeeName)} driving (driver trip)</option></optgroup>` : ''}
+      </select></label>
+      <div class="grid cols-2" style="gap:10px" id="et-fields"></div>
       <label class="f"><span>Charge to site</span><select id="et-site"><option value="">— No site —</option>${store.sites.map((s) => `<option value="${s.id}" ${s.id === t.siteId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
-      <label class="f"><span>Note</span><input id="et-note" value="${esc(t.note)}"></label>
+      <div class="grid cols-2" style="gap:10px">
+        <label class="f"><span>Purpose</span><input id="et-pur" value="${esc(t.purpose)}"></label>
+        <label class="f"><span>Note</span><input id="et-note" value="${esc(t.note)}"></label>
+      </div>
       <div class="small muted" id="et-cost"></div>`,
     foot: '<button class="btn ghost" data-no>Cancel</button><button class="btn" data-yes>Save</button>',
     onMount: (el, close) => {
-      const v = (id) => el.querySelector(id).value;
-      const has = (id) => !!el.querySelector(id);
-      const upd = () => {
-        el.querySelector('#et-cost').textContent = has('#et-costv') ? '' : has('#et-rate') ? `Cost: ${fmtMoney(Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100)}`
-          : has('#et-fare') ? `Cost: ${fmtMoney(Number(v('#et-fare')) || 0)}` : 'Cost: none (paid via the driver)';
+      const q = (id) => el.querySelector(id);
+      const v = (id) => q(id)?.value ?? '';
+      const typeSel = q('#et-type');
+      typeSel.value = cur;
+      let km = tripKm(t).toFixed(2);
+      const fields = () => {
+        const ty = typeSel.value;
+        const same = ty === cur;
+        const veh = same ? t.vehicle : '';
+        if (ty === 'taxi' || ty === 'rta') {
+          q('#et-fields').innerHTML = `<label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${km}"></label>
+            <label class="f"><span>${ty === 'rta' ? 'Ticket / fare' : 'Taxi fare'} (AED)</span><input id="et-fare" type="number" min="0" step="0.01" value="${same || t.kind === 'taxi' ? (t.cost ?? 0) : ''}"></label>
+            ${ty === 'rta' ? `<label class="f" style="grid-column:1/-1"><span>Line / card (optional)</span><input id="et-veh" placeholder="e.g. Red line, Nol card" value="${esc(veh)}"></label>`
+              : `<label class="f"><span>Taxi company</span><select id="et-co">${[...new Set([...companies, ...(veh ? [veh] : [])])].map((c) => `<option ${c === veh ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="">Other — type it…</option></select></label>
+                 <label class="f"><span>Taxi no. / other (optional)</span><input id="et-vno" placeholder="e.g. DXB T 12345"></label>
+                 <input type="hidden" id="et-veh">`}`;
+          if (q('#et-co')) {
+            if (!veh) q('#et-co').value = companies[0];
+            const sync = () => { const co = q('#et-co').value, no = v('#et-vno').trim(); q('#et-veh').value = co && no ? `${co} · ${no}` : co || no; };
+            q('#et-co').onchange = () => { if (!q('#et-co').value) q('#et-vno').focus(); sync(); };
+            q('#et-vno').oninput = sync; sync();
+          }
+        } else if (ty.startsWith('wd:')) {
+          const d = store.user(ty.slice(3));
+          q('#et-fields').innerHTML = `<label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${km}"></label>
+            <label class="f"><span>Provider's charge (AED)</span><input id="et-fare" type="number" min="0" step="0.01" placeholder="blank = not charged yet" value="${same && t.costEntered ? (t.cost ?? 0) : ''}"></label>
+            <label class="f" style="grid-column:1/-1"><span>Vehicle</span><input id="et-veh" value="${esc(same ? t.vehicle : d?.vehicle || '')}"></label>`;
+        } else {
+          const rate = t.ratePerKm ?? tripRateFor(t.employeeId);
+          q('#et-fields').innerHTML = `<label class="f"><span>Distance (km)</span><input id="et-km" type="number" min="0" step="0.01" value="${km}"></label>
+            <label class="f"><span>Rate (AED / km)</span><input id="et-rate" type="number" min="0" step="0.01" value="${rate}"></label>
+            <label class="f"><span>Cost (AED) — km × rate, or type</span><input id="et-fare" type="number" min="0" step="0.01" value="${same ? tripCost(t) : Math.round(Number(km) * rate * 100) / 100}"></label>
+            <label class="f"><span>Vehicle</span><input id="et-veh" value="${esc(same ? t.vehicle : emp?.vehicle || '')}"></label>`;
+          const recalc = () => { q('#et-fare').value = Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100; };
+          q('#et-rate').oninput = recalc; q('#et-km').addEventListener('input', recalc);
+        }
+        q('#et-km').addEventListener('input', () => { km = v('#et-km'); });
+        q('#et-cost').innerHTML = ty === cur ? '' : t.pettyId && !(ty === 'taxi' || ty === 'rta')
+          ? `<span style="color:#a8640f">${esc(t.employeeName)}'s petty cash claim for this trip will be rejected — the company driver is paid instead.</span>`
+          : ty.startsWith('wd:') ? "The trip moves to this driver's account (waits for your approval)." : '';
       };
-      const recalc = () => { if (has('#et-costv')) el.querySelector('#et-costv').value = Math.round(Number(v('#et-km')) * Number(v('#et-rate')) * 100) / 100; upd(); };
-      el.querySelector('#et-km').oninput = has('#et-rate') ? recalc : upd; if (has('#et-rate')) el.querySelector('#et-rate').oninput = recalc; if (has('#et-fare')) el.querySelector('#et-fare').oninput = upd; upd();
-      el.querySelector('[data-no]').onclick = close;
-      el.querySelector('[data-yes]').onclick = async () => {
-        const km = Number(v('#et-km')), rate = has('#et-rate') ? Number(v('#et-rate')) : null, fare = has('#et-fare') ? Number(v('#et-fare')) : has('#et-costv') ? Number(v('#et-costv')) : null;
-        if (!(km >= 0) || (rate != null && !(rate >= 0)) || (fare != null && !(fare >= 0))) { toast('Enter valid numbers', true); return; }
+      typeSel.onchange = fields; fields();
+      q('[data-no]').onclick = close;
+      q('[data-yes]').onclick = async () => {
+        const ty = typeSel.value;
+        const kmV = Number(v('#et-km')), rate = q('#et-rate') ? Number(v('#et-rate')) : null;
+        const fareS = v('#et-fare').trim(), fare = fareS === '' ? (ty.startsWith('wd:') ? null : 0) : Number(fareS);
+        if (!(kmV >= 0) || (rate != null && !(rate >= 0)) || (fare != null && !(fare >= 0))) { toast('Enter valid numbers', true); return; }
         try {
-          await editTrip(t, { km, ratePerKm: rate, fare, siteId: v('#et-site'), vehicle: v('#et-veh').trim(), purpose: v('#et-pur').trim(), note: v('#et-note').trim() });
+          await editTrip(t, { type: ty, km: kmV, ratePerKm: rate, fare, siteId: v('#et-site'), vehicle: v('#et-veh').trim(), purpose: v('#et-pur').trim(), note: v('#et-note').trim() });
           toast('Trip updated'); close(); onDone && onDone();
         } catch (e) { toast(friendlyError(e), true); }
       };
