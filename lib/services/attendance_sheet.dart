@@ -246,6 +246,7 @@ class AttendanceSheet {
   /// Report kinds for the admin app: 'sheet' (day by day per person), 'log' (every check-in), 'summary', 'register' (people × days grid).
   static Future<void> shareReport(String kind, List<SheetPerson> people, {required String from, required String to, required String period}) async {
     if (kind == 'sheet') return share(people, from: from, to: to, period: period);
+    if (kind == 'card') return shareCards(people, from: from, to: to, period: period);
     final cfg = await InvConfig.load();
     final logo = await _logo();
     final rows = await loadRows(people, from, to);
@@ -411,6 +412,126 @@ class AttendanceSheet {
     final bytes = await doc.save();
     final name = '$title - $period.pdf'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-');
     await IdSheet.shareFiles([(name: name, data: bytes, mime: 'application/pdf')], subject: title);
+  }
+
+  /// Report cards for any people (staff or external workers) over any period: one page each with totals and
+  /// every date in the period (site(s), first in, last out, hours, who brought the worker).
+  static Future<void> shareCards(List<SheetPerson> people, {required String from, required String to, required String period}) async {
+    final cfg = await InvConfig.load();
+    final logo = await _logo();
+    final rows = await loadRows(people, from, to);
+    pw.TextStyle t(double size, {PdfColor color = _ink, bool bold = false}) =>
+        pw.TextStyle(fontSize: size, color: color, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
+    pw.Widget cell(String s, {bool bold = false, pw.TextAlign align = pw.TextAlign.left, PdfColor color = _ink, double size = 8}) =>
+        pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2.6), child: pw.Text(_c(s), textAlign: align, style: t(size, bold: bold, color: color)));
+    final tf = DateFormat('hh:mm a');
+    const green = PdfColor.fromInt(0xFF1F7A50), red = PdfColor.fromInt(0xFFB23535), orange = PdfColor.fromInt(0xFFD98A1A);
+    pw.Widget box(String l, String v, PdfColor c) => pw.Expanded(
+          child: pw.Container(
+            margin: const pw.EdgeInsets.only(right: 6),
+            padding: const pw.EdgeInsets.all(8),
+            decoration: pw.BoxDecoration(border: pw.Border(left: pw.BorderSide(color: c, width: 3)), color: const PdfColor.fromInt(0xFFF7F6F3)),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text(l.toUpperCase(), style: t(6.8, color: _muted, bold: true)),
+              pw.SizedBox(height: 2),
+              pw.Text(v, style: t(13, bold: true, color: c)),
+            ]),
+          ),
+        );
+    final f = DateTime.parse(from), l = DateTime.parse(to);
+    final dates = [for (var d = f; !d.isAfter(l); d = DateTime(d.year, d.month, d.day + 1)) d];
+    final doc = pw.Document(title: 'Report cards', author: cfg.s('name'));
+    for (final p in people) {
+      final mine = rows[p.id] ?? const <SheetRow>[];
+      final byDate = <String, List<SheetRow>>{};
+      for (final r in mine) {
+        byDate.putIfAbsent(r.date, () => []).add(r);
+      }
+      final total = mine.fold(Duration.zero, (a, r) => a + r.worked);
+      final days = byDate.length;
+      final sites = mine.map((r) => r.site).where((x) => x.isNotEmpty).toSet();
+      final ext = p.kind == 'external';
+      doc.addPage(pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(28, 24, 28, 24),
+        footer: (c) => pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('${_c(p.name)} - page ${c.pageNumber}', style: t(7.5, color: _muted))),
+        build: (c) => [
+          pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            if (logo != null) pw.Container(width: 64, height: 36, margin: const pw.EdgeInsets.only(right: 10), child: pw.Image(logo, fit: pw.BoxFit.contain)),
+            pw.Expanded(
+              child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                pw.Text(_c(cfg.s('name')).toUpperCase(), style: t(11, bold: true, color: _navy)),
+                pw.Text('Attendance report card', style: t(14, bold: true)),
+                pw.Text(_c('${p.name} - ${ext ? 'External worker' : 'Staff'}${p.sub.isEmpty ? '' : ' - ${p.sub}'}'), style: t(9.5, bold: true)),
+                pw.Text(_c(period), style: t(9, color: _muted)),
+              ]),
+            ),
+            pw.Text('Printed ${DateFormat('dd MMM yyyy').format(DateTime.now())}', style: t(7.5, color: _muted)),
+          ]),
+          pw.SizedBox(height: 12),
+          pw.Row(children: [
+            box('Days worked', '$days', green),
+            box('Total hours', hm(total), _navy),
+            box('Average / day', days == 0 ? '0:00' : hm(Duration(minutes: total.inMinutes ~/ days)), _navy),
+            box('Sites', '${sites.length}', orange),
+            box('No check-out', '${mine.where((r) => r.outT == null).length}', red),
+          ]),
+          pw.SizedBox(height: 12),
+          pw.Table(columnWidths: {
+            0: const pw.FlexColumnWidth(1.3),
+            1: const pw.FlexColumnWidth(0.7),
+            2: const pw.FlexColumnWidth(3),
+            3: const pw.FlexColumnWidth(1.2),
+            4: const pw.FlexColumnWidth(1.2),
+            5: const pw.FlexColumnWidth(0.9),
+            if (ext) 6: const pw.FlexColumnWidth(1.8),
+          }, children: [
+            pw.TableRow(
+              decoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: _navy, width: 1))),
+              children: [
+                for (final h in ['Date', 'Day', 'Site(s)', 'In', 'Out', 'Hours', if (ext) 'With (staff)'])
+                  cell(h.toUpperCase(), bold: true, color: _navy, size: 7, align: h == 'Hours' ? pw.TextAlign.right : pw.TextAlign.left),
+              ],
+            ),
+            for (final d in dates)
+              () {
+                final rs = byDate[_key(d)] ?? const <SheetRow>[];
+                final outs = rs.where((x) => x.outT != null).map((x) => x.outT!).toList()..sort();
+                final hrs = rs.fold(Duration.zero, (a, x) => a + x.worked);
+                return pw.TableRow(
+                  decoration: pw.BoxDecoration(
+                      color: rs.isEmpty ? const PdfColor.fromInt(0xFFFAF9F6) : null,
+                      border: const pw.Border(bottom: pw.BorderSide(color: _line, width: 0.4))),
+                  children: [
+                    cell(DateFormat('dd MMM').format(d), color: rs.isEmpty ? _muted : _ink),
+                    cell(DateFormat('EEE').format(d), color: _muted),
+                    cell(rs.isEmpty ? '-' : rs.map((x) => x.site).where((x) => x.isNotEmpty).toSet().join(', '), color: rs.isEmpty ? _muted : _ink),
+                    cell(rs.isEmpty ? '' : tf.format(rs.first.inT)),
+                    cell(rs.isEmpty ? '' : outs.isEmpty ? 'no out' : tf.format(outs.last), color: rs.isNotEmpty && outs.isEmpty ? red : _ink),
+                    cell(rs.isEmpty ? '' : hm(hrs), align: pw.TextAlign.right, bold: true),
+                    if (ext) cell(rs.map((x) => x.addedBy).where((x) => x.isNotEmpty).toSet().join(', '), size: 7.4, color: _muted),
+                  ],
+                );
+              }(),
+            pw.TableRow(decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: _navy, width: 1))), children: [
+              cell('TOTAL', bold: true),
+              cell(''),
+              cell('$days day${days == 1 ? '' : 's'}', bold: true),
+              cell(''),
+              cell(''),
+              cell(hm(total), align: pw.TextAlign.right, bold: true, size: 9.5),
+              if (ext) cell(''),
+            ]),
+          ]),
+          pw.SizedBox(height: 6),
+          pw.Text('Hours are h:mm. In = first check-in, Out = last check-out of the day.', style: t(7.5, color: _muted)),
+        ],
+      ));
+    }
+    final bytes = await doc.save();
+    final who = people.length == 1 ? people.first.name : '${people.length} people';
+    final name = 'Report card - $who - $period.pdf'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-');
+    await IdSheet.shareFiles([(name: name, data: bytes, mime: 'application/pdf')], subject: 'Report card - $who');
   }
 
   /// Monthly report card of one employee: totals, then every day of the month with status, site(s), in, out and hours.

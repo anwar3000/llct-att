@@ -23,8 +23,9 @@ class AttendanceSheetScreen extends StatefulWidget {
 
 class _AttendanceSheetScreenState extends State<AttendanceSheetScreen> {
   String _period = 'month';
-  String _kind = 'sheet';
+  String _kind = 'card';
   static const _kinds = [
+    ('card', 'Report cards', 'One page per person (staff or external): totals and every date with site, in, out, hours', Icons.badge_outlined),
     ('sheet', 'Day-by-day sheet', 'Per person: date, site(s), first in, last out, daily hours, totals', Icons.view_agenda_outlined),
     ('log', 'Check-in log (detailed)', 'Every check-in / out with site, times, hours, GPS flags, who added the worker', Icons.list_alt),
     ('summary', 'Summary', 'One line per person: days, total and average hours, average start, sites, flags', Icons.summarize_outlined),

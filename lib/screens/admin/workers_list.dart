@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../core/utils.dart';
 import '../../models/models.dart';
+import '../../services/attendance_sheet.dart';
 import '../../services/db.dart';
 import '../../widgets/common.dart';
 import '../../widgets/site_workforce.dart' show kExtColor;
@@ -156,6 +157,13 @@ void showWorkerSheet(BuildContext context, ExtWorker w, AppUser me, AdminLive li
               const SizedBox(width: 8),
               _stat('All records', '${h.length}'),
             ]),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+              onPressed: () => _workerCard(c, w),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('Report card (PDF)'),
+            ),
             if (me.isManagement) ...[
               const SizedBox(height: 10),
               Card(
@@ -233,3 +241,41 @@ Widget _stat(String l, String v) => Expanded(
         ]),
       ),
     );
+
+/// One worker's report card: pick this month, last month or dates.
+Future<void> _workerCard(BuildContext context, ExtWorker w) async {
+  final n = DateTime.now();
+  final choice = await showModalBottomSheet<DateTimeRange>(
+    context: context,
+    showDragHandle: true,
+    builder: (c) => SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        ListTile(
+            leading: const Icon(Icons.calendar_month),
+            title: const Text('This month'),
+            onTap: () => Navigator.pop(c, DateTimeRange(start: DateTime(n.year, n.month, 1), end: n))),
+        ListTile(
+            leading: const Icon(Icons.calendar_month_outlined),
+            title: const Text('Last month'),
+            onTap: () => Navigator.pop(c, DateTimeRange(start: DateTime(n.year, n.month - 1, 1), end: DateTime(n.year, n.month, 0)))),
+        ListTile(
+            leading: const Icon(Icons.date_range),
+            title: const Text('Pick dates…'),
+            onTap: () async {
+              final r = await showDateRangePicker(
+                  context: c, firstDate: DateTime(2023), lastDate: n, initialDateRange: DateTimeRange(start: DateTime(n.year, n.month, 1), end: n));
+              if (c.mounted) Navigator.pop(c, r);
+            }),
+      ]),
+    ),
+  );
+  if (choice == null) return;
+  String k(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String lbl(DateTime d) => '${d.day} ${const ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.month - 1]} ${d.year}';
+  try {
+    await AttendanceSheet.shareCards([SheetPerson(id: w.id, name: w.name, kind: 'external', sub: w.subtitle)],
+        from: k(choice.start), to: k(choice.end), period: '${lbl(choice.start)} - ${lbl(choice.end)}');
+  } catch (e) {
+    if (context.mounted) showSnack(context, 'Could not make the report card: $e', error: true);
+  }
+}
