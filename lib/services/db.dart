@@ -1423,6 +1423,13 @@ class Db {
   }
 
   /// Saves a route point and the running distance.
+  /// GPS km and road-matched km of a finished trip, and which one was used.
+  static Future<void> tripKmDetail(String id, {required double gpsM, double? roadM, required String source}) => trips.doc(id).update({
+        'gpsDistanceM': gpsM.round(),
+        if (roadM != null) 'roadDistanceM': roadM.round(),
+        'kmSource': source,
+      });
+
   static Future<void> addTripPoint(String tripId, double lat, double lng, double distanceM, int points) {
     final ref = trips.doc(tripId);
     final batch = _fs.batch();

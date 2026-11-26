@@ -96,7 +96,8 @@ service cloud.firestore {
                       && request.resource.data.employeeId == request.auth.uid
                       && onlyChanges(['distanceM', 'pointsCount', 'lastLat', 'lastLng', 'lastAt', 'endAt', 'endLat', 'endLng',
                            'endSiteId', 'endSiteName', 'siteId', 'siteName', 'durationMin', 'ratePerKm', 'cost', 'status',
-                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt', 'vehicle', 'pettyId']))
+                           'note', 'endTz', 'endServer', 'costEntered', 'costEditedAt', 'vehicle', 'pettyId',
+                           'gpsDistanceM', 'roadDistanceM', 'kmSource']))
                     // A driver can enter / change the cost of their own trip until admin approves it.
                     || (owns() && resource.data.get('kind', 'driver') == 'driver'
                         && resource.data.get('approval', '') != 'approved'

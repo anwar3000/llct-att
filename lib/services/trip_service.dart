@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
@@ -7,6 +8,7 @@ import '../models/models.dart';
 import 'db.dart';
 import 'location_service.dart';
 import 'position_hub.dart';
+import 'road_distance.dart';
 
 /// Records a driver's car trip: start → stop, GPS route, distance driven.
 ///
@@ -130,13 +132,16 @@ class TripService {
   }
 
   /// Distance this fix adds to the trip, or null if it should be ignored.
+  /// The last counted fix is kept until a step counts, so slow movement still adds up — only drift doesn't.
   double? _step(Position p) {
-    if (p.isMocked || p.accuracy > 50) return null;
+    if (p.isMocked || p.accuracy > 35) return null;
     final last = _last;
     if (last == null) return 0;
     final d = Geolocator.distanceBetween(last.latitude, last.longitude, p.latitude, p.longitude);
     final jitter = (p.accuracy + last.accuracy) / 2;
-    if (d < jitter.clamp(8, 30)) return null;
+    if (d < jitter.clamp(10, 30)) return null;
+    // Standing still (GPS speed under ~3 km/h): a short jump is drift, not driving.
+    if (p.speed < 0.8 && d < math.max(40, p.accuracy * 2)) return null;
     final secs = p.timestamp.difference(last.timestamp).inMilliseconds / 1000;
     if (secs > 0 && d / secs > 70) return null; // > 250 km/h — a GPS jump
     return d;
@@ -221,6 +226,25 @@ class TripService {
       if (d != null && d > 0) distance.value += d;
     } catch (_) {}
     final site = p == null ? null : siteAt(p.latitude, p.longitude, sites);
+    // Road km: the saved route matched to the road map — fixes GPS jitter, parked drift and gaps.
+    final gpsM = distance.value;
+    double? roadM;
+    try {
+      final end = p;
+      final r = await () async {
+        final route = <({double lat, double lng})>[
+          if (trip.startLat != null && trip.startLng != null) (lat: trip.startLat!, lng: trip.startLng!),
+          ...await Db.tripPoints(trip.id),
+          if (end != null) (lat: end.latitude, lng: end.longitude),
+        ];
+        final road = route.length < 3 ? null : await RoadDistance.of(route); // needs a real route, not just pick-up & drop-off
+        final direct = route.length < 2 ? 0.0 : Geolocator.distanceBetween(route.first.lat, route.first.lng, route.last.lat, route.last.lng);
+        return (road: road, direct: direct);
+      }()
+          .timeout(const Duration(seconds: 15)); // no signal: keep the GPS km, don't hold up the stop
+      roadM = r.road;
+      distance.value = RoadDistance.pick(gpsM: gpsM, roadM: roadM, directM: r.direct);
+    } catch (_) {}
     // Ride with a company driver: km × that driver's rate (saved when the ride started).
     final rate = trip.isTaxi ? null : (trip.isWithDriver ? (trip.ratePerKm ?? 0) : await Db.tripRate(user));
     // Taxi / RTA fare paid by the employee → a petty cash expense (approved by admin like any other).
@@ -244,6 +268,12 @@ class TripService {
         tripId: trip.id,
       );
     }
+    // Both measurements, for the office — written while the trip is still open (needs the latest Firestore rules;
+    // skipped quietly if they aren't published yet).
+    try {
+      await Db.tripKmDetail(trip.id, gpsM: gpsM, roadM: roadM, source: distance.value == gpsM ? 'gps' : 'road')
+          .timeout(const Duration(seconds: 6));
+    } catch (_) {}
     await Db.endTrip(
       trip: trip,
       distanceM: distance.value,

@@ -1163,6 +1163,9 @@ class Trip {
   final double? ratePerKm;
   final double? cost;
   final int pointsCount;
+  /// GPS km and road-map km (both kept), and which one counts ('gps' | 'road').
+  final double? gpsDistanceM, roadDistanceM;
+  final String kmSource;
   /// driver = a driver's own trip (paid km × rate) · taxi = employee's taxi ride (fare entered)
   /// · withDriver = employee riding with a company driver (paid through the driver's trip).
   final String kind;
@@ -1224,6 +1227,9 @@ class Trip {
     this.ratePerKm,
     this.cost,
     this.pointsCount = 0,
+    this.gpsDistanceM,
+    this.roadDistanceM,
+    this.kmSource = '',
   });
 
   bool get isActive => status == 'active';
@@ -1273,6 +1279,9 @@ class Trip {
       ratePerKm: _dbl(m['ratePerKm']),
       cost: _dbl(m['cost']),
       pointsCount: _int(m['pointsCount']),
+      gpsDistanceM: _dbl(m['gpsDistanceM']),
+      roadDistanceM: _dbl(m['roadDistanceM']),
+      kmSource: _str(m['kmSource']),
       kind: _str(m['kind'], 'driver'),
       driverId: _str(m['driverId']),
       driverName: _str(m['driverName']),

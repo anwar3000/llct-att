@@ -221,6 +221,7 @@ export function mapTrip(d) {
     pointsCount: num(m.pointsCount), platform: m.platform || '',
     kind: m.kind || 'driver', driverId: m.driverId || '', driverName: m.driverName || '',
     editedAt: toDate(m.editedAt), editedBy: m.editedBy || '', originalDistanceM: n(m.originalDistanceM),
+    gpsDistanceM: n(m.gpsDistanceM), roadDistanceM: n(m.roadDistanceM), kmSource: m.kmSource || '',
     costEntered: m.costEntered === true, costEditedAt: toDate(m.costEditedAt),
     approval: m.approval || '', approvedBy: m.approvedBy || '', approvedAt: toDate(m.approvedAt),
     byOther: m.byOther === true, actualDriver: m.actualDriver || '', mode: m.mode || '', pettyId: m.pettyId || '',
@@ -292,6 +293,57 @@ export async function tripsForSites(siteIds) {
     out.push(...snap.docs.map(mapTrip));
   }
   return out.sort((a, b) => (a.startAt || 0) - (b.startAt || 0));
+}
+/**
+ * Road km of a route: GPS points matched to the road map (OpenStreetMap / OSRM) — removes GPS jitter, parked drift
+ * and fills gaps. null when the map service can't be reached.
+ */
+export async function roadKmOf(points) {
+  const R = 6371000, rad = (x) => (x * Math.PI) / 180;
+  const dist = (a, b) => 2 * R * Math.asin(Math.sqrt(Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2));
+  const pts = [];
+  for (const p of points) if (!pts.length || dist(pts[pts.length - 1], p) >= 40) pts.push(p);
+  if (points.length && pts[pts.length - 1] !== points[points.length - 1]) pts.push(points[points.length - 1]);
+  if (pts.length < 2) return 0;
+  const coords = (c) => c.map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
+  const get = async (url) => {
+    const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 15000);
+    try { const r = await fetch(url, { signal: ctl.signal }); return r.ok ? await r.json() : null; } catch { return null; } finally { clearTimeout(tm); }
+  };
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i += 89) {
+    const chunk = pts.slice(i, i + 90);
+    const m = await get(`https://router.project-osrm.org/match/v1/driving/${coords(chunk)}?overview=false&tidy=true&gaps=ignore&radiuses=${chunk.map(() => 30).join(';')}`);
+    let d = m?.code === 'Ok' && m.matchings?.length ? m.matchings.reduce((a, x) => a + x.distance, 0) : null;
+    if (d == null) {
+      const r = await get(`https://router.project-osrm.org/route/v1/driving/${coords(chunk)}?overview=false`);
+      d = r?.code === 'Ok' && r.routes?.length ? r.routes[0].distance : null;
+    }
+    if (d == null) return null;
+    total += d;
+  }
+  return total;
+}
+/**
+ * Is the road-map km trustworthy for this trip? Needs a real route (3+ points), can't be shorter than the straight
+ * line pick-up → drop-off, and must not be wildly longer than the GPS km.
+ */
+export function roadKmUsable(t, roadM, line) {
+  if (roadM == null || !(roadM > 0) || !line || line.length < 3) return false;
+  const a = line[0], b = line[line.length - 1], rad = (x) => (x * Math.PI) / 180;
+  const direct = 2 * 6371000 * Math.asin(Math.sqrt(Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2));
+  const gps = t.gpsDistanceM ?? t.originalDistanceM ?? t.distanceM;
+  if (roadM < direct * 0.95) return false;
+  if (gps > 1000 && roadM > gps * 2.2) return false;
+  return true;
+}
+/** Admin: use the road-matched km for a trip (driver trip cost follows km × rate unless the driver typed a cost). */
+export function useRoadKm(t, roadM) {
+  const data = { distanceM: Math.round(roadM), roadDistanceM: Math.round(roadM), kmSource: 'road', editedAt: serverTimestamp(), editedBy: store.me?.name || '' };
+  if (t.originalDistanceM == null) data.originalDistanceM = t.distanceM;
+  if (t.gpsDistanceM == null) data.gpsDistanceM = Math.round(t.originalDistanceM ?? t.distanceM);
+  if (t.kind === 'driver' && !t.costEntered && t.ratePerKm != null) data.cost = Math.round((roadM / 1000) * t.ratePerKm * 100) / 100;
+  return updateDoc(doc(db, 'trips', t.id), data);
 }
 export async function tripPoints(id) {
   const snap = await getDocs(collection(db, 'trips', id, 'points'));

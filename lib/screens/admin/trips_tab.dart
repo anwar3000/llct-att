@@ -730,7 +730,11 @@ class _TripsTabState extends State<TripsTab> {
           InfoRow(Icons.trip_origin, 'Pick-up', t.startSiteName.isEmpty ? 'GPS location' : t.startSiteName),
           InfoRow(Icons.flag_outlined, 'Drop-off', t.isActive ? '—' : (t.endSiteName.isEmpty ? 'GPS location' : t.endSiteName)),
           InfoRow(Icons.location_city_outlined, 'Charged to', t.siteName.isEmpty ? '—' : t.siteName),
-          InfoRow(Icons.straighten, 'Distance', '${t.km.toStringAsFixed(2)} km (${t.pointsCount} GPS points)'),
+          InfoRow(Icons.straighten, 'Distance',
+              '${t.km.toStringAsFixed(2)} km${t.kmSource == 'road' ? ' (road map)' : t.kmSource == 'gps' ? ' (GPS)' : ''} · ${t.pointsCount} GPS points'),
+          if (t.gpsDistanceM != null || t.roadDistanceM != null)
+            InfoRow(Icons.alt_route, 'Km check',
+                'GPS ${((t.gpsDistanceM ?? t.distanceM) / 1000).toStringAsFixed(2)} km · road map ${t.roadDistanceM == null ? '—' : '${(t.roadDistanceM! / 1000).toStringAsFixed(2)} km'}'),
           if (t.isWithDriver) InfoRow(Icons.person_pin, 'Driver / provider', '${t.driverName}${t.vehicle.isEmpty ? '' : ' · ${t.vehicle}'}'),
           if (t.byOther) InfoRow(Icons.swap_horiz, 'Driven by', '${t.actualDriver.isEmpty ? 'another driver' : t.actualDriver} (sent by ${t.driverName})'),
           if (t.groupedWith.isNotEmpty) const InfoRow(Icons.group_work_outlined, 'Charged', 'With another trip of the same car journey'),

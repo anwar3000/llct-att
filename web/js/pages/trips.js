@@ -1,6 +1,6 @@
 // Driver trips and staff rides — live trips in progress, daily list with km and cost, route map, admin corrections.
 import { store, isAdmin, addDriverPayment, deleteDriverPayment, finishedTripsFor, tripsInRange, tripKm, tripCost, tripMinutes, tripPoints, editTrip, endTripNow, deleteTrip, saveSettings, tripRateFor, tripKindLabel,
-  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES, reviewDriverPayment, updateDriverPayment } from '../fb.js';
+  tripApproved, tripRejected, tripAwaiting, tripNeedsCharge, tripHead, setTripApproval, chargeRide, tripsOverlap, TAXI_COMPANIES, reviewDriverPayment, updateDriverPayment, roadKmOf, useRoadKm, roadKmUsable } from '../fb.js';
 import { tripsReport, downloadReport } from '../report-lib.js';
 import { esc, icon, pill, avatar, fmtMins, fmtTime, fmtMoney, dateKey, addDays, atTz, tzLabel, timeAgo, modal, toast, confirmBox, friendlyError, parseKey } from '../util.js';
 import { makeMap, siteLayer, fitTo } from '../mapkit.js';
@@ -204,7 +204,7 @@ export function mount(el, _p, { setHeader }) {
       </div>`).join('')}</div>` : ''}
     ${admin ? spendCard(list) : ''}
     <div class="mt">
-      <div class="card"><div class="card-head"><h2>Trips</h2><span class="spacer"></span>${admin && list.some((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t)) ? `<button class="btn sm" id="tr-appall">${icon('check', 14)} Approve all shown (${list.filter((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t)).length})</button>` : ''}<span class="small muted">${loading ? 'Loading…' : `${list.length} trip${list.length === 1 ? '' : 's'}`}</span></div>
+      <div class="card"><div class="card-head"><h2>Trips</h2><span class="spacer"></span>${admin && list.some((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t)) ? `<button class="btn sm" id="tr-appall">${icon('check', 14)} Approve all shown (${list.filter((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t)).length})</button>` : ''}${admin && list.some((t) => t.status === 'done' && t.roadDistanceM == null && !tripApproved(t)) ? `<button class="btn sm ghost" id="tr-roadkm" title="Match each trip's GPS route to the road map and correct the km">${icon('map', 14)} Fix km with road map</button>` : ''}<span class="small muted">${loading ? 'Loading…' : `${list.length} trip${list.length === 1 ? '' : 's'}`}</span></div>
         ${list.length ? `<div class="table-wrap"><table class="t tr-t"><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Route</th><th>Charged to</th><th>Time</th><th class="num">Km</th>${admin ? '<th class="num">Cost</th><th>Approval</th>' : ''}<th></th></tr></thead><tbody>
         ${list.map((t) => `<tr class="click" data-row="${t.id}">
           <td class="tr-d">${(() => { const d = parseKey(t.date); return `<b>${d.getDate()} ${d.toLocaleDateString('en-GB', { month: 'short' })}</b><span>${d.toLocaleDateString('en-GB', { weekday: 'short' })}</span>`; })()}</td>
@@ -260,6 +260,26 @@ export function mount(el, _p, { setHeader }) {
     el.querySelectorAll('[data-rej]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.rej); if (t) setA(t, 'rejected', 'Rejected'); }; });
     el.querySelectorAll('[data-unappr]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.unappr); if (t) setA(t, '', 'Back to unapproved'); }; });
     el.querySelectorAll('[data-charge]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const t = find(b.dataset.charge); if (t) chargeDialog(t, list, load); }; });
+    el.querySelector('#tr-roadkm')?.addEventListener('click', async (e) => {
+      const todo = list.filter((t) => t.status === 'done' && t.roadDistanceM == null && !tripApproved(t));
+      if (!await confirmBox('Fix km with road map', `Check ${todo.length} unapproved trip(s): each GPS route is matched to the road map, and the km (and km × rate cost) is corrected where it differs by more than 3%. Approved trips are not changed.`, { ok: 'Check & fix' })) return;
+      const b = e.currentTarget; b.disabled = true;
+      let fixed = 0, same = 0, failed = 0;
+      for (const [i, t] of todo.entries()) {
+        b.textContent = `Checking ${i + 1} / ${todo.length}…`;
+        try {
+          const pts = await tripPoints(t.id);
+          const line = [...(t.startLat != null ? [{ lat: t.startLat, lng: t.startLng }] : []), ...pts, ...(t.endLat != null ? [{ lat: t.endLat, lng: t.endLng }] : [])];
+          const m = await roadKmOf(line);
+          if (m == null || !roadKmUsable(t, m, line)) { failed++; continue; }
+          const now = tripKm(t);
+          if (Math.abs(m / 1000 - now) > Math.max(0.3, now * 0.03)) { await useRoadKm(t, m); fixed++; } else same++;
+        } catch { failed++; }
+        await new Promise((r) => setTimeout(r, 1100)); // the free map service allows ~1 request a second
+      }
+      toast(`Road map check: ${fixed} corrected · ${same} already right${failed ? ` · ${failed} could not be checked` : ''}`);
+      load();
+    });
     const aa = el.querySelector('#tr-appall');
     if (aa) aa.onclick = async () => {
       const ts = list.filter((t) => t.status === 'done' && tripAwaiting(t) && !tripNeedsCharge(t));
@@ -331,6 +351,7 @@ export async function routeDialog(t) {
         ${t.purpose ? `<div><span class="muted">Purpose</span> <b>${esc(t.purpose)}</b></div>` : ''}
         ${t.note ? `<div><span class="muted">Note</span> ${esc(t.note)}</div>` : ''}
       </div>
+      <div id="rt-km" class="card-pad" style="background:#f7f5f0;border-radius:12px;margin-bottom:10px;font-size:13px"></div>
       <div id="rt-map" class="map" style="height:380px"></div><div id="rt-info" class="small muted" style="margin-top:6px">Loading route…</div>`,
   });
   const map = makeMap(el.querySelector('#rt-map'));
@@ -345,6 +366,26 @@ export async function routeDialog(t) {
   const end = t.endLat != null ? [t.endLat, t.endLng] : (t.status === 'active' && t.lastLat != null ? [t.lastLat, t.lastLng] : null);
   if (start && far(line[0], start)) line.unshift(start);
   if (end && far(line[line.length - 1], end)) line.push(end);
+  // Km check: GPS km vs the route matched to the road map.
+  const kmBox = el.querySelector('#rt-km');
+  const gpsKm = (t.gpsDistanceM ?? t.originalDistanceM ?? t.distanceM) / 1000;
+  const showKm = (roadM, note) => {
+    const roadKm = roadM == null ? null : roadM / 1000, now = tripKm(t);
+    const ok = roadM != null && roadKmUsable(t, roadM, line.map(([lat, lng]) => ({ lat, lng })));
+    const diff = ok && Math.abs(roadKm - now) > Math.max(0.3, now * 0.03);
+    kmBox.innerHTML = `<b>Distance</b> · counted <b>${now.toFixed(2)} km</b>${t.kmSource === 'road' ? ' (road map)' : t.originalDistanceM != null ? ' (edited)' : ' (GPS)'}
+      · GPS ${gpsKm.toFixed(2)} km · road map ${roadKm == null ? `<span class="muted">${note || '—'}</span>` : `<b>${roadKm.toFixed(2)} km</b>`}
+      ${isAdmin() && t.status !== 'active' && diff ? `<button class="btn sm" id="rt-use" style="margin-left:8px">Use road km (${roadKm.toFixed(2)})</button>` : ''}`;
+    kmBox.querySelector('#rt-use')?.addEventListener('click', async () => {
+      try { await useRoadKm(t, roadM); toast(`Distance set to ${roadKm.toFixed(2)} km`); kmBox.querySelector('#rt-use').remove(); } catch (e) { toast(friendlyError(e), true); }
+    });
+  };
+  if (t.status === 'active') showKm(null, 'after the trip ends');
+  else if (t.roadDistanceM != null) showKm(t.roadDistanceM);
+  else {
+    showKm(null, line.length < 3 ? 'too few GPS points' : 'checking…');
+    if (line.length >= 3) roadKmOf(line.map(([lat, lng]) => ({ lat, lng }))).then((m) => showKm(m, m == null ? 'map service not reachable' : '')).catch(() => showKm(null, 'not available'));
+  }
   setTimeout(() => map.invalidateSize(), 50); // the map sits in a popup — make sure it has its size
   if (line.length > 1) L.polyline(line, { color: TRIP_COLOR, weight: 5, opacity: 0.85 }).addTo(map);
   const pin = (ll, text, color) => L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [80, 40], iconAnchor: [40, 38],
