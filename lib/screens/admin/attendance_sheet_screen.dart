@@ -23,6 +23,13 @@ class AttendanceSheetScreen extends StatefulWidget {
 
 class _AttendanceSheetScreenState extends State<AttendanceSheetScreen> {
   String _period = 'month';
+  String _kind = 'sheet';
+  static const _kinds = [
+    ('sheet', 'Day-by-day sheet', 'Per person: date, site(s), first in, last out, daily hours, totals', Icons.view_agenda_outlined),
+    ('log', 'Check-in log (detailed)', 'Every check-in / out with site, times, hours, GPS flags, who added the worker', Icons.list_alt),
+    ('summary', 'Summary', 'One line per person: days, total and average hours, average start, sites, flags', Icons.summarize_outlined),
+    ('register', 'Daily register (grid)', 'People × days with hours each day — payroll / labour supplier style', Icons.grid_on),
+  ];
   DateTimeRange? _custom;
   final _picked = <String>{};
   String _q = '';
@@ -84,7 +91,7 @@ class _AttendanceSheetScreenState extends State<AttendanceSheetScreen> {
     final r = _range();
     setState(() => _busy = true);
     try {
-      await AttendanceSheet.share(people, from: dateKey(r.from), to: dateKey(r.to), period: _label());
+      await AttendanceSheet.shareReport(_kind, people, from: dateKey(r.from), to: dateKey(r.to), period: _label());
     } catch (e) {
       if (mounted) showSnack(context, 'Could not make the sheet: $e', error: true);
     } finally {
@@ -131,7 +138,7 @@ class _AttendanceSheetScreenState extends State<AttendanceSheetScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Attendance sheet')),
+      appBar: AppBar(title: const Text('Attendance reports')),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -140,11 +147,29 @@ class _AttendanceSheetScreenState extends State<AttendanceSheetScreen> {
             icon: _busy
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
                 : const Icon(Icons.picture_as_pdf_outlined),
-            label: Text(_picked.isEmpty ? 'Tick people above' : 'Make sheet · ${_picked.length} ${_picked.length == 1 ? 'person' : 'people'} (PDF)'),
+            label: Text(_picked.isEmpty ? 'Tick people below' : 'Make report · ${_picked.length} ${_picked.length == 1 ? 'person' : 'people'} (PDF)'),
           ),
         ),
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
+        const Text('Report', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        const SizedBox(height: 6),
+        Card(
+          child: Column(children: [
+            for (final k in _kinds)
+              RadioListTile<String>(
+                value: k.$1,
+                groupValue: _kind,
+                onChanged: (v) => setState(() => _kind = v ?? 'sheet'),
+                secondary: Icon(k.$4, color: _kind == k.$1 ? AppColors.accentDark : AppColors.muted),
+                title: Text(k.$2, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(k.$3, style: const TextStyle(fontSize: 12)),
+              ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        const Text('Period', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        const SizedBox(height: 6),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final p in const [('month', 'This month'), ('last', 'Last month'), ('7', 'Last 7 days')])
             ChoiceChip(label: Text(p.$2), selected: _period == p.$1, onSelected: (_) => setState(() => _period = p.$1)),
@@ -176,7 +201,7 @@ class _AttendanceSheetScreenState extends State<AttendanceSheetScreen> {
         const SizedBox(height: 10),
         group('External workers', ext, kExtColor),
         const SizedBox(height: 8),
-        const Text('The PDF has a summary page (days and hours per person) and one page per person: date, site(s), first in, last out and daily hours, with totals.',
+        const Text('Opens as a PDF you can share on WhatsApp / email or print. The daily register works best for one month.',
             style: TextStyle(fontSize: 12, color: AppColors.muted)),
       ]),
     );

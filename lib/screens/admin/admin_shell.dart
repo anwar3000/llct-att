@@ -8,6 +8,7 @@ import '../../widgets/common.dart';
 import '../../widgets/service_alerts.dart';
 import '../reports/reports_screen.dart';
 import 'admin_live.dart';
+import 'attendance_sheet_screen.dart';
 import 'live_map_tab.dart';
 import 'overview_tab.dart';
 import 'petty_admin_tab.dart';
@@ -105,6 +106,7 @@ class _AdminShellState extends State<AdminShell> {
           icon: Avatar(widget.me.name, size: 32),
           onSelected: (v) {
             if (v == 'out') _signOut();
+            if (v == 'att') Navigator.of(context).push(MaterialPageRoute(builder: (_) => AttendanceSheetScreen(me: widget.me, live: _live)));
             if (v == 'reports') Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReportsScreen(me: widget.me)));
           },
           itemBuilder: (_) => [
@@ -114,6 +116,14 @@ class _AdminShellState extends State<AdminShell> {
                   style: const TextStyle(color: AppColors.ink)),
             ),
             const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'att',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.summarize_outlined),
+                title: Text('Attendance reports'),
+              ),
+            ),
             const PopupMenuItem(
               value: 'reports',
               child: ListTile(

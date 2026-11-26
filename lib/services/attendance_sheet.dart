@@ -26,6 +26,15 @@ class SheetDay {
   SheetDay(this.date, this.sites, this.firstIn, this.lastOut, this.worked, this.openNoOut);
 }
 
+/// One check-in (staff) or one site entry (external worker).
+class SheetRow {
+  final String date, site, flags, addedBy;
+  final DateTime inT;
+  final DateTime? outT;
+  final Duration worked;
+  SheetRow(this.date, this.site, this.inT, this.outT, this.worked, this.flags, this.addedBy);
+}
+
 /// Attendance sheet for selected staff and external workers: every day with site(s), in, out and hours; totals.
 class AttendanceSheet {
   static final _fs = FirebaseFirestore.instance;
@@ -40,12 +49,12 @@ class AttendanceSheet {
     return '${m ~/ 60}:${(m % 60).toString().padLeft(2, '0')}';
   }
 
-  /// Loads the days of each person between [from] and [to] (yyyy-MM-dd, inclusive).
-  static Future<Map<String, List<SheetDay>>> load(List<SheetPerson> people, String from, String to) async {
+  /// Every check-in of the selected people between [from] and [to] (yyyy-MM-dd, inclusive), by person id.
+  static Future<Map<String, List<SheetRow>>> loadRows(List<SheetPerson> people, String from, String to) async {
     final staffIds = people.where((p) => p.kind == 'staff').map((p) => p.id).toSet();
     final extIds = people.where((p) => p.kind == 'external').map((p) => p.id).toSet();
     final now = DateTime.now();
-    final rows = <String, List<({String date, String site, DateTime inT, DateTime? outT, Duration worked})>>{};
+    final rows = <String, List<SheetRow>>{};
     if (staffIds.isNotEmpty) {
       final q = await _fs.collection('attendance').where('date', isGreaterThanOrEqualTo: from).where('date', isLessThanOrEqualTo: to).get();
       for (final d in q.docs) {
@@ -53,7 +62,13 @@ class AttendanceSheet {
         if (!staffIds.contains(s.employeeId) || s.invalid) continue;
         final open = s.checkOut == null;
         final w = open ? (s.date == _key(now) ? s.worked(now) : Duration.zero) : s.worked();
-        rows.putIfAbsent(s.employeeId, () => []).add((date: s.date, site: s.siteName, inT: s.inLocal, outT: s.outLocal, worked: w));
+        final flags = [
+          if (s.inOutside) 'in ${(s.inDistance ?? 0).round()} m away',
+          if (s.outOutside) 'out ${(s.outDistance ?? 0).round()} m away',
+          if (s.mocked) 'fake GPS',
+          if (s.missedOut) 'missed sign-out',
+        ].join(', ');
+        rows.putIfAbsent(s.employeeId, () => []).add(SheetRow(s.date, s.siteName, s.inLocal, s.outLocal, w, flags, ''));
       }
     }
     if (extIds.isNotEmpty) {
@@ -63,12 +78,22 @@ class AttendanceSheet {
         if (!extIds.contains(e.workerId)) continue;
         final open = e.checkOut == null;
         final w = open ? (e.date == _key(now) ? e.worked(now) : Duration.zero) : e.worked();
-        rows.putIfAbsent(e.workerId, () => []).add((date: e.date, site: e.siteName, inT: e.inLocal, outT: e.checkOut == null ? null : atZone(e.checkOut!, e.tz), worked: w));
+        rows.putIfAbsent(e.workerId, () => [])
+            .add(SheetRow(e.date, e.siteName, e.inLocal, e.checkOut == null ? null : atZone(e.checkOut!, e.tz), w, '', e.employeeName));
       }
     }
+    for (final l in rows.values) {
+      l.sort((a, b) => a.inT.compareTo(b.inT));
+    }
+    return rows;
+  }
+
+  /// Loads the days of each person between [from] and [to] (yyyy-MM-dd, inclusive).
+  static Future<Map<String, List<SheetDay>>> load(List<SheetPerson> people, String from, String to) async {
+    final rows = await loadRows(people, from, to);
     final out = <String, List<SheetDay>>{};
     for (final p in people) {
-      final byDay = <String, List<({String date, String site, DateTime inT, DateTime? outT, Duration worked})>>{};
+      final byDay = <String, List<SheetRow>>{};
       for (final r in rows[p.id] ?? const []) {
         byDay.putIfAbsent(r.date, () => []).add(r);
       }
@@ -204,6 +229,188 @@ class AttendanceSheet {
       ));
     }
     return doc.save();
+  }
+
+  static Future<pw.MemoryImage?> _logo() async {
+    try {
+      return pw.MemoryImage((await rootBundle.load('assets/doc_logo.png')).buffer.asUint8List());
+    } catch (_) {
+      try {
+        return pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List());
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  /// Report kinds for the admin app: 'sheet' (day by day per person), 'log' (every check-in), 'summary', 'register' (people × days grid).
+  static Future<void> shareReport(String kind, List<SheetPerson> people, {required String from, required String to, required String period}) async {
+    if (kind == 'sheet') return share(people, from: from, to: to, period: period);
+    final cfg = await InvConfig.load();
+    final logo = await _logo();
+    final rows = await loadRows(people, from, to);
+    pw.TextStyle t(double size, {PdfColor color = _ink, bool bold = false}) =>
+        pw.TextStyle(fontSize: size, color: color, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
+    pw.Widget cell(String s, {bool bold = false, pw.TextAlign align = pw.TextAlign.left, PdfColor color = _ink, double size = 7.8}) =>
+        pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 2.6), child: pw.Text(_c(s), textAlign: align, style: t(size, bold: bold, color: color)));
+    final tf = DateFormat('hh:mm a');
+    final title = {'log': 'Attendance log (detailed)', 'summary': 'Attendance summary', 'register': 'Daily attendance register'}[kind] ?? 'Attendance';
+    final landscape = kind == 'register';
+    pw.Widget header() => pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          if (logo != null) pw.Container(width: 60, height: 34, margin: const pw.EdgeInsets.only(right: 10), child: pw.Image(logo, fit: pw.BoxFit.contain)),
+          pw.Expanded(
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text(_c(cfg.s('name')).toUpperCase(), style: t(10.5, bold: true, color: _navy)),
+              pw.Text(title, style: t(13.5, bold: true)),
+              pw.Text(_c('$period - ${people.length} ${people.length == 1 ? 'person' : 'people'}'), style: t(8.5, color: _muted)),
+            ]),
+          ),
+          pw.Text('Printed ${DateFormat('dd MMM yyyy').format(DateTime.now())}', style: t(7.5, color: _muted)),
+        ]);
+    pw.TableRow head(List<String> h, Set<int> right) => pw.TableRow(
+          decoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: _navy, width: 1))),
+          children: [for (var i = 0; i < h.length; i++) cell(h[i].toUpperCase(), bold: true, color: _navy, size: 6.8, align: right.contains(i) ? pw.TextAlign.right : pw.TextAlign.left)],
+        );
+    const zebra = pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: _line, width: 0.4)));
+    final content = <pw.Widget>[header(), pw.SizedBox(height: 10)];
+
+    if (kind == 'log') {
+      final all = [
+        for (final p in people)
+          for (final r in rows[p.id] ?? const <SheetRow>[]) (p: p, r: r)
+      ]..sort((a, b) => a.r.inT.compareTo(b.r.inT));
+      content.add(pw.Table(columnWidths: const {
+        0: pw.FlexColumnWidth(1.3),
+        1: pw.FlexColumnWidth(2.2),
+        2: pw.FlexColumnWidth(2.6),
+        3: pw.FlexColumnWidth(1.2),
+        4: pw.FlexColumnWidth(1.2),
+        5: pw.FlexColumnWidth(0.9),
+        6: pw.FlexColumnWidth(2.2),
+      }, children: [
+        head(['Date', 'Name', 'Site', 'In', 'Out', 'Hours', 'Notes'], {5}),
+        for (final x in all)
+          pw.TableRow(decoration: zebra, children: [
+            cell(DateFormat('dd MMM yy').format(DateTime.parse(x.r.date))),
+            cell(x.p.name, bold: true),
+            cell(x.r.site),
+            cell(tf.format(x.r.inT)),
+            cell(x.r.outT == null ? 'no out' : tf.format(x.r.outT!), color: x.r.outT == null ? const PdfColor.fromInt(0xFFB23535) : _ink),
+            cell(hm(x.r.worked), align: pw.TextAlign.right, bold: true),
+            cell([if (x.p.kind == 'external') 'external${x.r.addedBy.isEmpty ? '' : ', with ${x.r.addedBy}'}', if (x.r.flags.isNotEmpty) x.r.flags].join(' - '),
+                size: 7, color: x.r.flags.isNotEmpty ? const PdfColor.fromInt(0xFFA8640F) : _muted),
+          ]),
+        pw.TableRow(decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: _navy, width: 1))), children: [
+          cell('TOTAL', bold: true),
+          cell('${all.length} check-ins', bold: true),
+          cell(''),
+          cell(''),
+          cell(''),
+          cell(hm(all.fold(Duration.zero, (a, x) => a + x.r.worked)), align: pw.TextAlign.right, bold: true, size: 9),
+          cell(''),
+        ]),
+      ]));
+    } else if (kind == 'summary') {
+      final list = [
+        for (final p in people)
+          () {
+            final l = rows[p.id] ?? const <SheetRow>[];
+            final days = l.map((r) => r.date).toSet().length;
+            final total = l.fold(Duration.zero, (a, r) => a + r.worked);
+            final ins = l.map((r) => r.inT.hour * 60 + r.inT.minute).toList();
+            final avgIn = ins.isEmpty ? null : ins.reduce((a, b) => a + b) ~/ ins.length;
+            final sites = l.map((r) => r.site).where((x) => x.isNotEmpty).toSet();
+            return (p: p, days: days, total: total, avgIn: avgIn, sites: sites.length, flags: l.where((r) => r.flags.isNotEmpty).length, noOut: l.where((r) => r.outT == null).length);
+          }()
+      ];
+      content.add(pw.Table(columnWidths: const {
+        0: pw.FlexColumnWidth(2.6),
+        1: pw.FlexColumnWidth(1.6),
+        2: pw.FlexColumnWidth(0.8),
+        3: pw.FlexColumnWidth(1.1),
+        4: pw.FlexColumnWidth(1.1),
+        5: pw.FlexColumnWidth(1.1),
+        6: pw.FlexColumnWidth(0.8),
+        7: pw.FlexColumnWidth(0.9),
+        8: pw.FlexColumnWidth(0.9),
+      }, children: [
+        head(['Name', 'Type', 'Days', 'Total hrs', 'Avg / day', 'Avg start', 'Sites', 'Flags', 'No out'], {2, 3, 4, 5, 6, 7, 8}),
+        for (final x in list)
+          pw.TableRow(decoration: zebra, children: [
+            cell(x.p.name, bold: true),
+            cell(x.p.kind == 'staff' ? 'Staff' : 'External${x.p.sub.isEmpty ? '' : ' - ${x.p.sub}'}', size: 7),
+            cell('${x.days}', align: pw.TextAlign.right),
+            cell(hm(x.total), align: pw.TextAlign.right, bold: true),
+            cell(x.days == 0 ? '' : hm(Duration(minutes: x.total.inMinutes ~/ x.days)), align: pw.TextAlign.right),
+            cell(x.avgIn == null ? '' : '${(x.avgIn! ~/ 60).toString().padLeft(2, '0')}:${(x.avgIn! % 60).toString().padLeft(2, '0')}', align: pw.TextAlign.right),
+            cell('${x.sites}', align: pw.TextAlign.right),
+            cell(x.flags == 0 ? '' : '${x.flags}', align: pw.TextAlign.right, color: const PdfColor.fromInt(0xFFA8640F)),
+            cell(x.noOut == 0 ? '' : '${x.noOut}', align: pw.TextAlign.right, color: const PdfColor.fromInt(0xFFB23535)),
+          ]),
+        pw.TableRow(decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: _navy, width: 1))), children: [
+          cell('TOTAL', bold: true),
+          cell(''),
+          cell('${list.fold(0, (a, x) => a + x.days)}', align: pw.TextAlign.right, bold: true),
+          cell(hm(list.fold(Duration.zero, (a, x) => a + x.total)), align: pw.TextAlign.right, bold: true),
+          for (var i = 0; i < 5; i++) cell(''),
+        ]),
+      ]));
+    } else {
+      // Register: people down, days across; each cell = hours that day.
+      final f = DateTime.parse(from), l = DateTime.parse(to);
+      final dates = [for (var d = f; !d.isAfter(l); d = DateTime(d.year, d.month, d.day + 1)) d];
+      final cols = <int, pw.TableColumnWidth>{0: const pw.FixedColumnWidth(92)};
+      for (var i = 0; i < dates.length; i++) {
+        cols[i + 1] = const pw.FlexColumnWidth(1);
+      }
+      cols[dates.length + 1] = const pw.FixedColumnWidth(26);
+      cols[dates.length + 2] = const pw.FixedColumnWidth(34);
+      pw.Widget c2(String s, {bool bold = false, PdfColor color = _ink, PdfColor? bg}) => pw.Container(
+          color: bg,
+          padding: const pw.EdgeInsets.symmetric(vertical: 2.2),
+          alignment: pw.Alignment.center,
+          child: pw.Text(s, style: t(dates.length > 20 ? 5.6 : 7, bold: bold, color: color)));
+      content.add(pw.Table(columnWidths: cols, border: pw.TableBorder.all(color: _line, width: 0.4), children: [
+        pw.TableRow(children: [
+          cell('NAME', bold: true, color: _navy, size: 6.5),
+          for (final d in dates) c2('${d.day}\n${DateFormat('E').format(d).substring(0, 2)}', bold: true, color: _navy, bg: d.weekday == DateTime.friday ? const PdfColor.fromInt(0xFFF3F0EA) : null),
+          c2('DAYS', bold: true, color: _navy),
+          c2('HRS', bold: true, color: _navy),
+        ]),
+        for (final p in people)
+          () {
+            final byDate = <String, Duration>{};
+            for (final r in rows[p.id] ?? const <SheetRow>[]) {
+              byDate[r.date] = (byDate[r.date] ?? Duration.zero) + r.worked;
+            }
+            final total = byDate.values.fold(Duration.zero, (a, x) => a + x);
+            return pw.TableRow(children: [
+              cell(p.name, bold: true, size: 7),
+              for (final d in dates)
+                () {
+                  final h = byDate[_key(d)];
+                  return c2(h == null ? '' : (h.inMinutes / 60).toStringAsFixed(1),
+                      bg: h != null ? const PdfColor.fromInt(0xFFE8F5EE) : (d.weekday == DateTime.friday ? const PdfColor.fromInt(0xFFF3F0EA) : null));
+                }(),
+              c2('${byDate.length}', bold: true),
+              c2(hm(total), bold: true),
+            ]);
+          }(),
+      ]));
+      content.add(pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 4),
+          child: pw.Text('Cells show hours worked that day (decimal). Green = present. Shaded columns = Friday.', style: t(7, color: _muted))));
+    }
+    final doc = pw.Document(title: title, author: cfg.s('name'));
+    doc.addPage(pw.MultiPage(
+      pageFormat: landscape ? PdfPageFormat.a4.landscape : PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(24, 22, 24, 22),
+      footer: (c) => pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Page ${c.pageNumber} of ${c.pagesCount}', style: t(7.5, color: _muted))),
+      build: (c) => content,
+    ));
+    final bytes = await doc.save();
+    final name = '$title - $period.pdf'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-');
+    await IdSheet.shareFiles([(name: name, data: bytes, mime: 'application/pdf')], subject: title);
   }
 
   /// Monthly report card of one employee: totals, then every day of the month with status, site(s), in, out and hours.
